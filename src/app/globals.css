@@ -1,0 +1,166 @@
+@import "tailwindcss";
+
+/* ───────────────────────────────────────────
+   Sumaj — Design tokens
+   Cálido, editorial, de viaje. Crema + tinta + terracota.
+   ─────────────────────────────────────────── */
+@theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-serif: var(--font-cormorant), Georgia, serif;
+}
+
+@theme {
+  /* superficie */
+  --color-cream: #faf8f4;
+  --color-paper: #ffffff;
+  --color-sand-soft: #f3efe7;
+
+  /* tinta */
+  --color-ink: #211d18;
+  --color-ink-soft: #575046;
+  --color-ink-faint: #8a8177;
+
+  /* bordes */
+  --color-line: #e8e2d8;
+  --color-line-strong: #d8d0c2;
+
+  /* marca: terracota andina */
+  --color-brand-50: #fdf5ef;
+  --color-brand-100: #fae8da;
+  --color-brand-200: #f4cdb0;
+  --color-brand-300: #ecab7d;
+  --color-brand-400: #e28449;
+  --color-brand-500: #d96c2e;
+  --color-brand-600: #c1521c;
+  --color-brand-700: #a03f18;
+  --color-brand-800: #81341a;
+  --color-brand-900: #692d18;
+
+  /* verde plata (dinero, éxito) */
+  --color-money-50: #f0fdf9;
+  --color-money-100: #cbfbee;
+  --color-money-600: #0d9482;
+  --color-money-700: #0f766e;
+  --color-money-800: #115e59;
+
+  /* animaciones */
+  --animate-fade-in: fade-in 0.25s ease both;
+  --animate-slide-up: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-slide-up-slow: slide-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-scale-in: scale-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-pop: pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  --animate-pulse-dot: pulse-dot 1.6s ease-in-out infinite;
+  --animate-shimmer: shimmer 1.8s linear infinite;
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes scale-in {
+    from { opacity: 0; transform: scale(0.96); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  @keyframes pop {
+    0% { transform: scale(0.9); opacity: 0; }
+    60% { transform: scale(1.03); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.55; transform: scale(0.85); }
+  }
+  @keyframes shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+  }
+}
+
+/* base */
+html {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+}
+
+::selection {
+  background: var(--color-brand-200);
+  color: var(--color-brand-900);
+}
+
+/* scrollbars discretas */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* focus accesible y consistente */
+:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* inputs numéricos sin spinners */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+/* utilidades del sistema */
+@utility card {
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-2xl);
+  box-shadow: 0 1px 2px rgb(33 29 24 / 0.04);
+}
+
+@utility skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-sand-soft) 25%,
+    #ece7dd 50%,
+    var(--color-sand-soft) 75%
+  );
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+  border-radius: var(--radius-lg);
+}
+
+@utility tap-highlight-none {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}
+
+/* patrón de fondo del chat (estilo WhatsApp, sutil) */
+@utility chat-bg {
+  background-color: #f5f1e8;
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    rgb(33 29 24 / 0.045) 1px,
+    transparent 0
+  );
+  background-size: 22px 22px;
+}

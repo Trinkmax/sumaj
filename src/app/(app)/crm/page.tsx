@@ -1,0 +1,105 @@
+import { requireMember } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
+import { CrmBoard, type CrmView } from "@/components/crm/crm-board";
+import type { BoardLead, LeadConversation, MemberOption } from "@/components/crm/types";
+import { CONVERSATION_SELECT, type ConversationRow } from "@/components/chats/types";
+import type { AgencySettings } from "@/lib/types";
+
+export const metadata = { title: "CRM" };
+
+export default async function CrmPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ vista?: string; c?: string }>;
+}) {
+  const { vista, c } = await searchParams;
+  const { member, agency, isAdmin, isStaff } = await requireMember();
+  const supabase = await createClient();
+
+  const [leadsRes, membersRes, convsRes] = await Promise.all([
+    supabase
+      .from("leads")
+      .select(
+        `id, stage, position, destination, origin_channel, origin_campaign,
+         next_action_at, created_at, pax_adults, pax_children, assigned_to, won_file_id,
+         contact:contacts(id, full_name, phone),
+         assignee:members!leads_assigned_to_fkey(id, display_name)`,
+      )
+      .order("position", { ascending: true }),
+    supabase
+      .from("members")
+      .select("id, display_name, role")
+      .eq("is_active", true)
+      .order("display_name"),
+    // bandeja completa (misma query que usaba /chats): alimenta la vista Chats,
+    // el badge de no leídos y las tarjetas del kanban
+    supabase
+      .from("conversations")
+      .select(CONVERSATION_SELECT)
+      .order("last_message_at", { ascending: false, nullsFirst: false }),
+  ]);
+
+  const conversations = (convsRes.data ?? []) as unknown as ConversationRow[];
+
+  // conversación whatsapp por contacto (1 por contacto+canal)
+  const convByContact = new Map<string, LeadConversation>();
+  for (const conv of conversations) {
+    if (conv.channel !== "whatsapp") continue;
+    convByContact.set(conv.contact_id, {
+      id: conv.id,
+      last_message_preview: conv.last_message_preview,
+      last_message_at: conv.last_message_at,
+      last_inbound_at: conv.last_inbound_at,
+      unread_count: conv.unread_count,
+    });
+  }
+
+  const leads: BoardLead[] = (leadsRes.data ?? [])
+    .filter((l) => l.contact != null)
+    .map((l) => ({
+      id: l.id,
+      stage: l.stage,
+      position: Number(l.position),
+      destination: l.destination,
+      origin_channel: l.origin_channel,
+      origin_campaign: l.origin_campaign,
+      next_action_at: l.next_action_at,
+      created_at: l.created_at,
+      pax_adults: l.pax_adults,
+      pax_children: l.pax_children,
+      assigned_to: l.assigned_to,
+      won_file_id: l.won_file_id,
+      contact: l.contact!,
+      assignee: l.assignee,
+      conversation: convByContact.get(l.contact!.id) ?? null,
+    }));
+
+  const members: MemberOption[] = membersRes.data ?? [];
+
+  const settings = (agency.settings ?? {}) as Partial<AgencySettings>;
+  const waConnected = settings.whatsapp?.connected === true;
+
+  // ?vista= manda; un deep link con ?c= solo también abre Chats.
+  // null = sin preferencia en la URL → el board usa la última vista guardada.
+  const initialView: CrmView | null =
+    vista === "pipeline" || vista === "chats" || vista === "embudo"
+      ? vista
+      : c
+        ? "chats"
+        : null;
+
+  return (
+    <CrmBoard
+      initialLeads={leads}
+      initialConversations={conversations}
+      members={members}
+      meId={member.id}
+      isAdmin={isAdmin}
+      isStaff={isStaff}
+      agencyId={agency.id}
+      waConnected={waConnected}
+      initialView={initialView}
+      initialConversationId={c ?? null}
+    />
+  );
+}
