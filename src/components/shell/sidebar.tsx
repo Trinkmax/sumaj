@@ -9,7 +9,7 @@ import { NAV_MAIN, NAV_CONFIG } from "./nav";
 import { Avatar } from "@/components/ui/avatar";
 import { createClient } from "@/lib/supabase/client";
 import { Tooltip } from "@/components/ui/misc";
-import { openCommandPalette } from "./command-palette";
+import { openCommandPalette, useSearchShortcutLabel } from "./command-palette";
 
 /** Botón de lupa para el header mobile (mismo estilo que la campana). */
 export function MobileSearchButton() {
@@ -60,6 +60,7 @@ export function Sidebar({
   }
 
   const configActive = pathname.startsWith(NAV_CONFIG.href);
+  const shortcutLabel = useSearchShortcutLabel();
 
   return (
     <aside
@@ -124,7 +125,7 @@ export function Sidebar({
       {/* ── buscador ── */}
       <div className={cn("mt-4", collapsed ? "flex justify-center px-2" : "px-3")}>
         {collapsed ? (
-          <Tooltip content="Buscar (⌘K)" side="right">
+          <Tooltip content={`Buscar (${shortcutLabel})`} side="right">
             <button
               onClick={openCommandPalette}
               aria-label="Buscar"
@@ -141,7 +142,7 @@ export function Sidebar({
             <Search className="size-4 shrink-0" />
             <span className="flex-1 text-left">Buscar…</span>
             <kbd className="rounded-md border border-line bg-cream px-1.5 py-0.5 font-sans text-[10px] font-medium text-ink-faint">
-              ⌘K
+              {shortcutLabel}
             </kbd>
           </button>
         )}

@@ -85,7 +85,23 @@ function Chip({ className, children }: { className: string; children: React.Reac
 }
 
 /**
- * Buscador global ⌘K. Se monta UNA vez en el layout y escucha
+ * Etiqueta del atajo según plataforma: "⌘K" en Mac/iOS, "Ctrl K" en el resto.
+ * Arranca en "⌘K" también en el server y se corrige al montar (sin mismatch
+ * de hidratación porque el cambio ocurre en un efecto).
+ */
+export function useSearchShortcutLabel(): string {
+  const [label, setLabel] = React.useState("⌘K");
+  React.useEffect(() => {
+    const isMac = /Mac|iPhone|iPad|iPod/i.test(
+      navigator.platform || navigator.userAgent,
+    );
+    if (!isMac) setLabel("Ctrl K");
+  }, []);
+  return label;
+}
+
+/**
+ * Buscador global ⌘K / Ctrl+K. Se monta UNA vez en el layout y escucha
  * cmd+K / ctrl+K y el CustomEvent "viajeros:open-search".
  */
 export function CommandPalette(): React.JSX.Element {
