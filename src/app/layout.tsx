@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Fraunces, Cormorant_Garamond } from "next/font/google";
 import { Toaster } from "sonner";
+import { ThemeScript } from "@/components/shell/theme";
 import "./globals.css";
 
 const inter = Inter({
@@ -30,10 +31,12 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#faf8f4",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#faf8f4" },
+    { media: "(prefers-color-scheme: dark)", color: "#131110" },
+  ],
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
   viewportFit: "cover",
 };
 
@@ -46,15 +49,19 @@ export default function RootLayout({
     <html
       lang="es-AR"
       className={`${inter.variable} ${fraunces.variable} ${cormorant.variable} h-full`}
+      suppressHydrationWarning
     >
+      <head>
+        <ThemeScript />
+      </head>
       <body className="min-h-dvh">
         {children}
         <Toaster
           position="top-center"
           toastOptions={{
             style: {
-              background: "#211d18",
-              color: "#faf8f4",
+              background: "var(--t-ink)",
+              color: "var(--t-cream)",
               border: "none",
               borderRadius: "12px",
             },

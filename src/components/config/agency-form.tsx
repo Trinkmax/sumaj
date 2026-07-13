@@ -2,13 +2,23 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { ImagePlus, Trash2, Check } from "lucide-react";
+import { Check, ImagePlus, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { updateAgency } from "@/lib/actions/settings";
 import { QUOTE_COLORS, QUOTE_FONTS } from "@/lib/domain";
 import { cn } from "@/lib/utils";
+
+type Snapshot = {
+  name: string;
+  phone: string;
+  email: string;
+  address: string;
+  usdRate: string;
+  themeColor: string;
+  themeFont: string;
+};
 
 export function AgencyForm({
   agencyId,
@@ -36,6 +46,26 @@ export function AgencyForm({
   const [uploading, setUploading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement>(null);
+
+  // snapshot de lo último guardado: alimenta el indicador de cambios sin guardar
+  const [savedSnap, setSavedSnap] = React.useState<Snapshot>({
+    name: initial.name,
+    phone: initial.phone ?? "",
+    email: initial.email ?? "",
+    address: initial.address ?? "",
+    usdRate: initial.usd_rate != null ? String(initial.usd_rate) : "",
+    themeColor: initial.quote_theme.color,
+    themeFont: initial.quote_theme.font,
+  });
+
+  const dirty =
+    name !== savedSnap.name ||
+    phone !== savedSnap.phone ||
+    email !== savedSnap.email ||
+    address !== savedSnap.address ||
+    usdRate !== savedSnap.usdRate ||
+    themeColor !== savedSnap.themeColor ||
+    themeFont !== savedSnap.themeFont;
 
   async function handleLogo(file: File) {
     if (!file.type.startsWith("image/")) {
@@ -108,11 +138,12 @@ export function AgencyForm({
       toast.error(res.error);
       return;
     }
+    setSavedSnap({ name, phone, email, address, usdRate, themeColor, themeFont });
     toast.success("Datos de la agencia guardados.");
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-2">
       {/* Datos básicos */}
       <section className="card p-5 animate-slide-up">
         <h2 className="font-display text-lg font-semibold text-ink">Datos de la agencia</h2>
@@ -186,18 +217,30 @@ export function AgencyForm({
         <p className="mt-0.5 text-sm text-ink-faint">Se muestra arriba de tus presupuestos compartidos.</p>
 
         <div className="mt-4 flex items-center gap-4">
-          {logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={logoUrl}
-              alt="Logo de la agencia"
-              className="size-20 shrink-0 rounded-2xl border border-line bg-paper object-contain p-2"
-            />
-          ) : (
-            <div className="flex size-20 shrink-0 items-center justify-center rounded-2xl border border-dashed border-line-strong text-ink-faint">
-              <ImagePlus className="size-6" />
-            </div>
-          )}
+          <div className="relative size-20 shrink-0">
+            {logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoUrl}
+                alt="Logo de la agencia"
+                className="size-20 rounded-2xl border border-line bg-paper object-contain p-2"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                aria-label="Subir logo"
+                className="flex size-20 items-center justify-center rounded-2xl border border-dashed border-line-strong text-ink-faint transition-colors hover:border-brand-400 hover:text-brand-600 tap-highlight-none"
+              >
+                <ImagePlus className="size-6" strokeWidth={1.75} />
+              </button>
+            )}
+            {uploading && (
+              <span className="absolute inset-0 grid place-items-center rounded-2xl bg-overlay animate-fade-in">
+                <Loader2 className="size-5 animate-spin text-white" />
+              </span>
+            )}
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <input
               ref={fileRef}
@@ -215,7 +258,7 @@ export function AgencyForm({
               {logoUrl ? "Cambiar logo" : "Subir logo"}
             </Button>
             {logoUrl && (
-              <Button variant="ghost" onClick={removeLogo}>
+              <Button variant="ghost" onClick={removeLogo} disabled={uploading}>
                 <Trash2 />
                 Quitar
               </Button>
@@ -251,7 +294,7 @@ export function AgencyForm({
                 style={{ backgroundColor: c.swatch }}
               >
                 {themeColor === c.key && (
-                  <Check className="size-4 animate-pop" style={{ color: c.accent }} strokeWidth={3} />
+                  <Check className="size-4 animate-check-pop" style={{ color: c.accent }} strokeWidth={3} />
                 )}
               </button>
             ))}
@@ -285,8 +328,20 @@ export function AgencyForm({
         </div>
       </section>
 
-      <div className="flex justify-end">
-        <Button onClick={save} loading={saving} size="lg" className="w-full sm:w-auto">
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
+        {dirty && (
+          <span className="flex items-center justify-center gap-1.5 text-[13px] text-ink-faint animate-fade-in sm:justify-end">
+            <span className="size-1.5 rounded-full bg-amber-500 animate-pulse-dot" aria-hidden />
+            Tenés cambios sin guardar
+          </span>
+        )}
+        <Button
+          onClick={save}
+          loading={saving}
+          disabled={!dirty && !saving}
+          size="lg"
+          className="w-full sm:w-auto"
+        >
           Guardar cambios
         </Button>
       </div>

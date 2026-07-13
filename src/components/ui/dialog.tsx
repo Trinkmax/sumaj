@@ -27,14 +27,14 @@ export function DialogContent({
 }) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-ink/40 backdrop-blur-[2px] data-[state=open]:animate-fade-in" />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-overlay backdrop-blur-[2px] data-[state=open]:animate-fade-in data-[state=closed]:animate-fade-out" />
       <DialogPrimitive.Content
         className={cn(
           "fixed z-50 flex flex-col bg-cream shadow-2xl focus:outline-none",
           // mobile: bottom sheet
-          "inset-x-0 bottom-0 max-h-[92dvh] rounded-t-3xl data-[state=open]:animate-slide-up",
+          "inset-x-0 bottom-0 max-h-[92dvh] rounded-t-3xl data-[state=open]:animate-slide-up data-[state=closed]:animate-slide-down-out",
           // desktop: modal centrado
-          "sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:max-h-[88dvh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-3xl sm:data-[state=open]:animate-scale-in",
+          "sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:max-h-[88dvh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-3xl sm:data-[state=open]:animate-scale-in sm:data-[state=closed]:animate-scale-out",
           size === "md" && "sm:w-full sm:max-w-md",
           size === "lg" && "sm:w-full sm:max-w-2xl",
           size === "xl" && "sm:w-full sm:max-w-5xl",
@@ -42,7 +42,9 @@ export function DialogContent({
         )}
         {...props}
       >
-        <div className="flex items-start justify-between gap-4 px-5 pb-1 pt-5 sm:px-6">
+        {/* asa de arrastre del bottom sheet (solo mobile) */}
+        <div className="mx-auto mt-2.5 h-1 w-9 shrink-0 rounded-full bg-line-strong sm:hidden" aria-hidden />
+        <div className="flex items-start justify-between gap-4 px-5 pb-1 pt-2.5 sm:px-6 sm:pt-5">
           <div>
             <DialogPrimitive.Title className="font-display text-xl font-semibold tracking-tight text-ink">
               {title}
@@ -55,7 +57,7 @@ export function DialogContent({
               <DialogPrimitive.Description className="sr-only">{title}</DialogPrimitive.Description>
             )}
           </div>
-          <DialogPrimitive.Close className="rounded-full p-1.5 text-ink-faint transition-colors hover:bg-sand-soft hover:text-ink">
+          <DialogPrimitive.Close className="rounded-full p-2.5 text-ink-faint transition-colors hover:bg-sand-soft hover:text-ink sm:p-1.5">
             <X className="size-4.5" />
             <span className="sr-only">Cerrar</span>
           </DialogPrimitive.Close>

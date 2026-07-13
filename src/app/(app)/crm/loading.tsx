@@ -26,19 +26,27 @@ export default function CrmLoading() {
             key={i}
             className="flex w-[85vw] shrink-0 flex-col overflow-hidden rounded-2xl border border-line bg-sand-soft/50 md:w-[270px]"
           >
-            <Skeleton className="h-1.5 w-full rounded-none" />
+            {/* barra superior fina de la etapa */}
+            <Skeleton className="h-1 w-full rounded-none" />
             <div className="flex items-center justify-between px-3 py-2.5">
-              <Skeleton className="h-4 w-24" />
+              <div className="flex items-center gap-2">
+                <Skeleton className="size-5 rounded-md" />
+                <Skeleton className="h-4 w-20" />
+              </div>
               <Skeleton className="h-5 w-7 rounded-full" />
             </div>
             <div className="space-y-2 px-2 pb-2">
               {Array.from({ length: cards }).map((_, j) => (
-                <div key={j} className="card space-y-2 p-3">
-                  <Skeleton className="h-4 w-3/4" />
+                <div key={j} className="card relative space-y-2 overflow-hidden p-3 pt-3.5">
+                  <Skeleton className="absolute inset-x-0 top-0 h-0.5 rounded-none" />
+                  <div className="flex items-start justify-between gap-2">
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="size-5 rounded-full" />
+                  </div>
                   <Skeleton className="h-3.5 w-1/2" />
                   <div className="flex items-center justify-between pt-1">
                     <Skeleton className="h-5 w-20 rounded-full" />
-                    <Skeleton className="size-5 rounded-full" />
+                    <Skeleton className="h-4 w-10" />
                   </div>
                 </div>
               ))}

@@ -1,11 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, Search } from "lucide-react";
+import { ChartNoAxesColumn, Kanban, MessageCircle, Plus, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/misc";
@@ -118,6 +117,23 @@ export function CrmBoard({
     else params.delete("c");
     window.history.replaceState(null, "", `${window.location.pathname}?${params}`);
   }, [view, chatConvId]);
+
+  /* navegaciones del router estando YA en /crm (⌘K, redirects de /chats):
+     el componente no se remonta, así que la URL nueva se aplica acá.
+     El replaceState de arriba NO cambia useSearchParams → sin loop. */
+  const searchParams = useSearchParams();
+  React.useEffect(() => {
+    const vista = searchParams.get("vista");
+    const c = searchParams.get("c");
+    if (isView(vista)) {
+      setView(vista);
+      if (vista === "chats" && c) setChatConvId(c);
+    } else if (c) {
+      setView("chats");
+      setChatConvId(c);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const changeView = React.useCallback((v: CrmView) => {
     setView(v);
@@ -240,7 +256,7 @@ export function CrmBoard({
           setLeads((prev) =>
             prev.some((l) => l.id === row.id) ? prev : [newLead, ...prev],
           );
-          toast(`✨ Nuevo lead: ${contact.full_name}`);
+          toast.success(`Nuevo lead: ${contact.full_name}`);
         },
       )
       .on(
@@ -301,10 +317,6 @@ export function CrmBoard({
     });
   }, [leads, scope, query, meId]);
 
-  const activeCount = leads.filter(
-    (l) => l.stage !== "ganado" && l.stage !== "perdido",
-  ).length;
-
   const totalUnread = React.useMemo(
     () => conversations.reduce((sum, c) => sum + c.unread_count, 0),
     [conversations],
@@ -312,46 +324,49 @@ export function CrmBoard({
 
   const openLead = openLeadId ? (leads.find((l) => l.id === openLeadId) ?? null) : null;
 
+  /* switcher de vistas: versión completa (toolbar crema) y compacta (header del panel WA) */
+  const viewOptions: { value: CrmView; label: React.ReactNode }[] = [
+    {
+      value: "pipeline",
+      label: (
+        <span className="flex items-center gap-1.5">
+          <Kanban className="size-4" strokeWidth={1.9} />
+          Pipeline
+        </span>
+      ),
+    },
+    {
+      value: "chats",
+      label: (
+        <span className="flex items-center gap-1.5">
+          <MessageCircle className="size-4" strokeWidth={1.9} />
+          Chats
+          {totalUnread > 0 && (
+            <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-wa-accent px-1 text-[10px] font-bold leading-none text-white animate-pop">
+              {totalUnread > 99 ? "99+" : totalUnread}
+            </span>
+          )}
+        </span>
+      ),
+    },
+    {
+      value: "embudo",
+      label: (
+        <span className="flex items-center gap-1.5">
+          <ChartNoAxesColumn className="size-4" strokeWidth={1.9} />
+          Embudo
+        </span>
+      ),
+    },
+  ];
+
   return (
     <>
-      <PageHeader
-        title="CRM"
-        subtitle={
-          activeCount === 1
-            ? "1 lead activo en el pipeline"
-            : `${activeCount} leads activos en el pipeline`
-        }
-        actions={
-          <Button className="hidden md:inline-flex" onClick={() => setNewOpen(true)}>
-            <Plus />
-            Nuevo lead
-          </Button>
-        }
-      />
-
-      {/* toolbar (en Chats la lista trae su propia búsqueda: solo el segmented) */}
-      <div className="mb-3 flex flex-wrap items-center gap-2 px-4 md:px-6">
-        <Segmented<CrmView>
-          value={view}
-          onChange={changeView}
-          options={[
-            { value: "pipeline", label: "Pipeline" },
-            {
-              value: "chats",
-              label: (
-                <span className="flex items-center gap-1.5">
-                  Chats
-                  {totalUnread > 0 && (
-                    <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-brand-600 px-1 text-[10px] font-bold leading-none text-white animate-pop">
-                      {totalUnread > 99 ? "99+" : totalUnread}
-                    </span>
-                  )}
-                </span>
-              ),
-            },
-            { value: "embudo", label: "Embudo" },
-          ]}
-        />
+      {/* ── barra única del CRM: idéntica en las tres vistas ──
+          El título, el switcher y "Nuevo lead" NUNCA cambian de lugar. */}
+      <div className="flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-2 md:px-6">
+        <h1 className="font-display text-xl font-semibold tracking-tight text-ink">CRM</h1>
+        <Segmented<CrmView> value={view} onChange={changeView} options={viewOptions} />
         {view !== "chats" && (
           <>
             <Segmented<Scope>
@@ -362,7 +377,7 @@ export function CrmBoard({
                 { value: "todos", label: "Todos" },
               ]}
             />
-            <div className="relative min-w-[160px] flex-1 sm:max-w-xs">
+            <div className="relative hidden min-w-[160px] flex-1 sm:block sm:max-w-xs">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-faint" />
               <Input
                 value={query}
@@ -374,15 +389,26 @@ export function CrmBoard({
             </div>
           </>
         )}
+        <Button
+          size="sm"
+          className="ml-auto hidden md:inline-flex"
+          onClick={() => setNewOpen(true)}
+        >
+          <Plus />
+          Nuevo lead
+        </Button>
       </div>
 
       {view === "pipeline" ? (
-        <KanbanBoard
-          leads={filtered}
-          onPatch={patchLead}
-          onOpenLead={(lead) => setOpenLeadId(lead.id)}
-        />
+        <div className="pt-3">
+          <KanbanBoard
+            leads={filtered}
+            onPatch={patchLead}
+            onOpenLead={(lead) => setOpenLeadId(lead.id)}
+          />
+        </div>
       ) : view === "chats" ? (
+        /* debajo de la barra, el clon de WhatsApp ocupa TODO el resto de la pantalla */
         <ChatView
           initialConversations={conversations}
           agencyId={agencyId}
@@ -394,7 +420,9 @@ export function CrmBoard({
           onOpenLead={openLeadFromChat}
         />
       ) : (
-        <FunnelView leads={filtered} />
+        <div className="pt-3">
+          <FunnelView leads={filtered} />
+        </div>
       )}
 
       {/* FAB mobile: nuevo lead al alcance del pulgar */}

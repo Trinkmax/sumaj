@@ -1,9 +1,11 @@
 "use client";
 
+import * as React from "react";
+import { ChevronDown, Filter, Trophy, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STAGES, CHANNELS } from "@/lib/domain";
 import { fmtNumber } from "@/lib/format";
-import { EmptyState } from "@/components/ui/misc";
+import { AnimatedNumber, EmptyState } from "@/components/ui/misc";
 import type { LeadStage } from "@/lib/types";
 import type { BoardLead } from "./types";
 
@@ -14,20 +16,28 @@ const FUNNEL_ORDER: LeadStage[] = STAGES.filter((s) => s.active)
 
 const RANK: Record<string, number> = Object.fromEntries(FUNNEL_ORDER.map((k, i) => [k, i]));
 
-const BAR_COLORS: Record<string, string> = {
-  nuevo: "bg-sky-400",
-  contactado: "bg-amber-400",
-  presupuestado: "bg-violet-400",
-  negociacion: "bg-brand-500",
-  ganado: "bg-emerald-500",
+/** gradiente sutil del tono vivo de cada etapa (400→500 funciona en ambos temas) */
+const BAR_GRADIENTS: Record<string, string> = {
+  nuevo: "bg-gradient-to-r from-sky-400 to-sky-500",
+  contactado: "bg-gradient-to-r from-amber-400 to-amber-500",
+  presupuestado: "bg-gradient-to-r from-violet-400 to-violet-500",
+  negociacion: "bg-gradient-to-r from-brand-400 to-brand-500",
+  ganado: "bg-gradient-to-r from-emerald-400 to-emerald-500",
 };
 
 export function FunnelView({ leads }: { leads: BoardLead[] }) {
+  // las barras entran animando el width (0 → pct) con stagger
+  const [entered, setEntered] = React.useState(false);
+  React.useEffect(() => {
+    const raf = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   if (leads.length === 0) {
     return (
       <div className="px-4 md:px-6">
         <EmptyState
-          emoji="📊"
+          icon={Filter}
           title="Todavía no hay datos para el embudo"
           description="Cargá leads y movelos por el pipeline para ver la conversión."
         />
@@ -40,6 +50,7 @@ export function FunnelView({ leads }: { leads: BoardLead[] }) {
   const reached = FUNNEL_ORDER.map((_, i) => leads.filter((l) => rankOf(l) >= i).length);
   const total = reached[0] || 1;
   const won = reached[reached.length - 1];
+  const lost = leads.filter((l) => l.stage === "perdido").length;
   const totalConversion = Math.round((won / total) * 100);
 
   // rendimiento por campaña (origin_campaign, o el canal si no hay campaña)
@@ -57,24 +68,39 @@ export function FunnelView({ leads }: { leads: BoardLead[] }) {
     <div className="space-y-4 px-4 md:px-6 animate-slide-up">
       {/* embudo de conversión */}
       <div className="card p-4 md:p-6">
-        <div className="mb-5 flex items-end justify-between gap-3">
+        <div className="mb-4 flex items-end justify-between gap-3">
           <div>
             <h2 className="font-display text-lg font-semibold text-ink">Embudo de conversión</h2>
-            <p className="text-[13px] text-ink-soft">
-              {fmtNumber(leads.length)} leads en total
-            </p>
+            <p className="text-[13px] text-ink-soft">{fmtNumber(leads.length)} leads en total</p>
           </div>
           <div className="text-right">
-            <p className="font-display text-2xl font-semibold tabular-nums text-emerald-700">
-              {totalConversion}%
+            <p className="font-display text-3xl font-semibold tabular-nums text-tone-emerald-text">
+              <AnimatedNumber
+                value={totalConversion}
+                from={0}
+                format={(n) => `${Math.round(n)}%`}
+              />
             </p>
             <p className="text-[11px] text-ink-faint">conversión total</p>
           </div>
         </div>
 
+        {/* cierres: ganados / perdidos */}
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-tone-emerald-line bg-tone-emerald-soft px-2.5 py-1 text-[12px] font-semibold tabular-nums text-tone-emerald-text">
+            <Trophy className="size-3.5" strokeWidth={2} />
+            {won} {won === 1 ? "ganado" : "ganados"}
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-tone-stone-line bg-tone-stone-soft px-2.5 py-1 text-[12px] font-semibold tabular-nums text-tone-stone-text">
+            <XCircle className="size-3.5" strokeWidth={2} />
+            {lost} {lost === 1 ? "perdido" : "perdidos"}
+          </span>
+        </div>
+
         <div className="space-y-1">
           {FUNNEL_ORDER.map((stage, i) => {
             const meta = STAGES.find((s) => s.key === stage)!;
+            const StageIcon = meta.icon;
             const count = reached[i];
             const pctOfNew = Math.round((count / total) * 100);
             const next = reached[i + 1];
@@ -86,17 +112,21 @@ export function FunnelView({ leads }: { leads: BoardLead[] }) {
                 <div className="flex items-center gap-3">
                   <div className="w-[110px] shrink-0 md:w-[150px]">
                     <p className="flex items-center gap-1.5 text-[13px] font-medium text-ink">
-                      <span className={cn("size-2 shrink-0 rounded-full", meta.dot)} />
+                      <StageIcon className="size-3.5 shrink-0 text-ink-faint" strokeWidth={2} />
                       <span className="truncate">{meta.label}</span>
                     </p>
                   </div>
-                  <div className="relative h-9 min-w-0 flex-1 overflow-hidden rounded-lg bg-sand-soft">
+                  <div className="relative h-10 min-w-0 flex-1 overflow-hidden rounded-lg bg-sand-soft">
                     <div
                       className={cn(
-                        "flex h-full items-center rounded-lg pl-2.5 transition-all duration-500",
-                        BAR_COLORS[stage],
+                        "flex h-full items-center rounded-lg pl-3 shadow-sm",
+                        "transition-[width] duration-700 ease-out",
+                        BAR_GRADIENTS[stage],
                       )}
-                      style={{ width: `${Math.max(pctOfNew, 7)}%` }}
+                      style={{
+                        width: entered ? `${Math.max(pctOfNew, 7)}%` : "0%",
+                        transitionDelay: `${i * 90}ms`,
+                      }}
                     >
                       <span className="text-[13px] font-semibold tabular-nums text-white drop-shadow-sm">
                         {count}
@@ -109,8 +139,9 @@ export function FunnelView({ leads }: { leads: BoardLead[] }) {
                 </div>
 
                 {stepConversion != null && (
-                  <p className="my-0.5 pl-[122px] text-[11px] text-ink-faint md:pl-[162px]">
-                    ↓ {stepConversion}% pasa a{" "}
+                  <p className="my-1 flex items-center gap-1 pl-[122px] text-[11px] text-ink-faint md:pl-[162px]">
+                    <ChevronDown className="size-3 shrink-0" strokeWidth={2} />
+                    {stepConversion}% pasa a{" "}
                     {STAGES.find((s) => s.key === FUNNEL_ORDER[i + 1])!.label.toLowerCase()}
                   </p>
                 )}
@@ -147,17 +178,24 @@ export function FunnelView({ leads }: { leads: BoardLead[] }) {
                       {row.leads}
                     </td>
                     <td className="py-2.5 pr-3 text-right tabular-nums text-ink-soft">
-                      {row.won > 0 ? `🏆 ${row.won}` : "—"}
+                      {row.won > 0 ? (
+                        <span className="inline-flex items-center gap-1 font-medium text-tone-emerald-text">
+                          <Trophy className="size-3.5" strokeWidth={2} />
+                          {row.won}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="py-2.5 text-right">
                       <span
                         className={cn(
-                          "inline-block rounded-full px-2 py-0.5 text-[12px] font-semibold tabular-nums",
+                          "inline-block rounded-full border px-2 py-0.5 text-[12px] font-semibold tabular-nums",
                           conv >= 25
-                            ? "bg-emerald-50 text-emerald-700"
+                            ? "border-tone-emerald-line bg-tone-emerald-soft text-tone-emerald-text"
                             : conv > 0
-                              ? "bg-amber-50 text-amber-700"
-                              : "bg-stone-100 text-stone-500",
+                              ? "border-tone-amber-line bg-tone-amber-soft text-tone-amber-text"
+                              : "border-tone-stone-line bg-tone-stone-soft text-tone-stone-text",
                         )}
                       >
                         {conv}%

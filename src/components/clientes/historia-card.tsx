@@ -2,8 +2,8 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
-import { Segmented, EmptyState } from "@/components/ui/misc";
+import { ChevronRight, Luggage, ReceiptText, Sparkles, type LucideIcon } from "lucide-react";
+import { Segmented, EmptyState, AnimatedNumber } from "@/components/ui/misc";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { STAGE_BY_KEY, FILE_STATUSES, QUOTE_STATUSES } from "@/lib/domain";
 import { cn } from "@/lib/utils";
@@ -20,9 +20,7 @@ export function HistoriaCard({
   files: FileSummary[];
   quotes: QuoteSummary[];
 }) {
-  const [tab, setTab] = React.useState<Tab>(
-    files.length > 0 ? "ventas" : leads.length > 0 ? "consultas" : "consultas",
-  );
+  const [tab, setTab] = React.useState<Tab>(files.length > 0 ? "ventas" : "consultas");
 
   const spentFiles = files.filter((f) => f.status !== "cancelado");
   const totalSpent = sumByCurrency(
@@ -35,10 +33,16 @@ export function HistoriaCard({
 
       {/* resumen */}
       <div className="mt-3 grid grid-cols-3 gap-2">
-        <SummaryStat value={String(leads.length)} label={leads.length === 1 ? "consulta" : "consultas"} />
-        <SummaryStat value={String(spentFiles.length)} label={spentFiles.length === 1 ? "venta" : "ventas"} />
         <SummaryStat
-          value={
+          count={leads.length}
+          label={leads.length === 1 ? "consulta" : "consultas"}
+        />
+        <SummaryStat
+          count={spentFiles.length}
+          label={spentFiles.length === 1 ? "venta" : "ventas"}
+        />
+        <SummaryStat
+          text={
             totalSpent.length > 0
               ? totalSpent.map(([cur, amt]) => fmtMoney(amt, cur)).join(" · ")
               : fmtMoney(0)
@@ -63,9 +67,13 @@ export function HistoriaCard({
       <div className="mt-3">
         {tab === "consultas" &&
           (leads.length === 0 ? (
-            <Empty emoji="✨" title="Sin consultas todavía" />
+            <Empty
+              icon={Sparkles}
+              title="Sin consultas todavía"
+              description="Creá una desde el botón de arriba y aparece en el CRM."
+            />
           ) : (
-            <ul className="divide-y divide-line">
+            <ul className="stagger-children divide-y divide-line">
               {leads.map((l) => {
                 const stage = STAGE_BY_KEY[l.stage];
                 return (
@@ -76,14 +84,7 @@ export function HistoriaCard({
                       </p>
                       <p className="text-xs text-ink-faint">{fmtDate(l.created_at)}</p>
                     </div>
-                    <span
-                      className={cn(
-                        "shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                        stage.chip,
-                      )}
-                    >
-                      {stage.label}
-                    </span>
+                    <StatusChip chip={stage.chip} icon={stage.icon} label={stage.label} />
                   </HistoryRow>
                 );
               })}
@@ -92,9 +93,13 @@ export function HistoriaCard({
 
         {tab === "ventas" &&
           (files.length === 0 ? (
-            <Empty emoji="🧳" title="Sin ventas todavía" />
+            <Empty
+              icon={Luggage}
+              title="Sin ventas todavía"
+              description="Cuando se gane una consulta, el file aparece acá."
+            />
           ) : (
-            <ul className="divide-y divide-line">
+            <ul className="stagger-children divide-y divide-line">
               {files.map((f) => {
                 const status = FILE_STATUSES[f.status];
                 return (
@@ -109,14 +114,7 @@ export function HistoriaCard({
                       <span className="text-sm font-semibold tabular-nums text-ink">
                         {fmtMoney(f.total_sale, f.currency)}
                       </span>
-                      <span
-                        className={cn(
-                          "rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                          status.chip,
-                        )}
-                      >
-                        {status.label}
-                      </span>
+                      <StatusChip chip={status.chip} icon={status.icon} label={status.label} />
                     </div>
                   </HistoryRow>
                 );
@@ -126,9 +124,13 @@ export function HistoriaCard({
 
         {tab === "presupuestos" &&
           (quotes.length === 0 ? (
-            <Empty emoji="🧾" title="Sin presupuestos todavía" />
+            <Empty
+              icon={ReceiptText}
+              title="Sin presupuestos todavía"
+              description="Armá el primero con «Nuevo presupuesto»."
+            />
           ) : (
-            <ul className="divide-y divide-line">
+            <ul className="stagger-children divide-y divide-line">
               {quotes.map((q) => {
                 const status = QUOTE_STATUSES[q.status];
                 return (
@@ -143,14 +145,7 @@ export function HistoriaCard({
                       <span className="text-sm font-semibold tabular-nums text-ink">
                         {fmtMoney(q.total_price, q.currency)}
                       </span>
-                      <span
-                        className={cn(
-                          "rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                          status.chip,
-                        )}
-                      >
-                        {status.label}
-                      </span>
+                      <StatusChip chip={status.chip} icon={status.icon} label={status.label} />
                     </div>
                   </HistoryRow>
                 );
@@ -163,11 +158,13 @@ export function HistoriaCard({
 }
 
 function SummaryStat({
-  value,
+  count,
+  text,
   label,
   money,
 }: {
-  value: string;
+  count?: number;
+  text?: string;
   label: string;
   money?: boolean;
 }) {
@@ -176,14 +173,28 @@ function SummaryStat({
       <p
         className={cn(
           "truncate text-base font-semibold tabular-nums md:text-lg",
-          money ? "text-money-700" : "text-ink",
+          money ? "text-money-text" : "text-ink",
         )}
-        title={value}
+        title={text}
       >
-        {value}
+        {count !== undefined ? <AnimatedNumber value={count} from={0} /> : text}
       </p>
       <p className="text-[11px] text-ink-faint">{label}</p>
     </div>
+  );
+}
+
+function StatusChip({ chip, icon: Icon, label }: { chip: string; icon: LucideIcon; label: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+        chip,
+      )}
+    >
+      <Icon className="size-3" strokeWidth={2} />
+      {label}
+    </span>
   );
 }
 
@@ -201,12 +212,14 @@ function HistoryRow({ href, children }: { href: string; children: React.ReactNod
   );
 }
 
-function Empty({ emoji, title }: { emoji: string; title: string }) {
-  return (
-    <EmptyState
-      emoji={emoji}
-      title={title}
-      className="py-8"
-    />
-  );
+function Empty({
+  icon,
+  title,
+  description,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description?: string;
+}) {
+  return <EmptyState icon={icon} title={title} description={description} className="py-8" />;
 }

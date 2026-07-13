@@ -7,8 +7,10 @@ export default function AgenciaLoading() {
         <Skeleton className="h-8 w-32" />
         <Skeleton className="mt-2 h-4 w-56" />
       </div>
-      <div className="flex gap-1.5 overflow-hidden px-4 py-2 md:px-6">
-        {Array.from({ length: 6 }).map((_, i) => (
+      {/* ConfigNav: volver + 7 pills */}
+      <div className="flex items-center gap-1.5 overflow-hidden px-4 py-2 md:px-6">
+        <Skeleton className="size-8 shrink-0 rounded-full" />
+        {Array.from({ length: 7 }).map((_, i) => (
           <Skeleton key={i} className="h-8 w-24 shrink-0 rounded-full" />
         ))}
       </div>
@@ -33,6 +35,9 @@ export default function AgenciaLoading() {
               <Skeleton key={i} className="size-11 rounded-full" />
             ))}
           </div>
+        </div>
+        <div className="flex justify-end">
+          <Skeleton className="h-12 w-full rounded-xl sm:w-44" />
         </div>
       </div>
     </>

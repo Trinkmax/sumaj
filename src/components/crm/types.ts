@@ -26,6 +26,9 @@ export type BoardLead = {
   contact: { id: string; full_name: string; phone: string | null };
   assignee: { id: string; display_name: string } | null;
   conversation: LeadConversation | null;
+  /** opcionales (aditivo): suma de presupuesto por columna en el kanban */
+  budget_estimate?: number | null;
+  budget_currency?: string | null;
   /** true si llegó por realtime (para animate-pop) */
   _new?: boolean;
 };

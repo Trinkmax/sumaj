@@ -4,23 +4,30 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  MessageCircle,
-  Sparkles,
-  ReceiptText,
-  Phone,
-  Mail,
   AtSign,
+  BadgeCheck,
+  FolderOpen,
+  KanbanSquare,
+  Loader2,
+  Mail,
   MapPin,
+  MessageCircle,
+  Phone,
+  ReceiptText,
+  Sparkles,
+  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
 import { Tooltip } from "@/components/ui/misc";
+import { QuoteDialog } from "@/components/quotes/quote-dialog";
 import { fmtPhone } from "@/lib/format";
 import { createLeadForContact, openContactChat } from "@/lib/actions/contacts";
+import { cn } from "@/lib/utils";
 import { TagPicker } from "./tag-picker";
 import type { ContactRow } from "./types";
 import type { Tables } from "@/lib/types";
@@ -29,18 +36,33 @@ export function ContactHeader({
   contact,
   allTags,
   activeLeadId,
+  latestLeadId,
+  conversationId,
+  latestQuoteId,
+  latestFileId,
+  counts,
 }: {
   contact: ContactRow;
   allTags: Tables<"tags">[];
   activeLeadId: string | null;
+  latestLeadId: string | null;
+  conversationId: string | null;
+  latestQuoteId: string | null;
+  latestFileId: string | null;
+  counts: { leads: number; quotes: number; files: number };
 }) {
   const router = useRouter();
   const [openingChat, setOpeningChat] = React.useState(false);
   const [consultaOpen, setConsultaOpen] = React.useState(false);
+  const [quoteOpen, setQuoteOpen] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [destination, setDestination] = React.useState("");
 
   const openChat = async () => {
+    if (conversationId) {
+      router.push(`/crm?vista=chats&c=${conversationId}`);
+      return;
+    }
     setOpeningChat(true);
     const res = await openContactChat({ contactId: contact.id });
     if (!res.ok) {
@@ -65,7 +87,7 @@ export function ContactHeader({
     }
     setConsultaOpen(false);
     setDestination("");
-    toast.success("Consulta creada ✨ Ya está en el CRM.");
+    toast.success("Consulta creada. Ya está en el CRM.");
     router.refresh();
   };
 
@@ -86,6 +108,12 @@ export function ContactHeader({
     contact.city ? { icon: MapPin, label: contact.city, href: null } : null,
   ].filter((i): i is NonNullable<typeof i> => i != null);
 
+  const leadHref = activeLeadId
+    ? `/crm/${activeLeadId}`
+    : latestLeadId
+      ? `/crm/${latestLeadId}`
+      : null;
+
   return (
     <div className="animate-slide-up px-4 pt-3 md:px-6">
       <div className="flex items-start gap-4">
@@ -97,7 +125,9 @@ export function ContactHeader({
               {contact.full_name}
             </h1>
             {contact.is_client && (
-              <Badge className="border-money-100 bg-money-50 text-money-700">Cliente</Badge>
+              <Badge className="border-tone-emerald-line bg-tone-emerald-soft text-tone-emerald-text">
+                <BadgeCheck className="size-3" /> Cliente
+              </Badge>
             )}
           </div>
 
@@ -135,32 +165,65 @@ export function ContactHeader({
         </div>
       </div>
 
-      {/* acciones */}
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button variant="whatsapp" size="sm" loading={openingChat} onClick={openChat}>
-          <MessageCircle /> Chat
-        </Button>
+      {/* navegación cruzada: todo lo de esta persona, a un toque */}
+      <div className="stagger-children mt-4 flex flex-wrap items-center gap-2">
+        <NavChip
+          icon={openingChat ? Loader2 : MessageCircle}
+          label="Chat"
+          onClick={openChat}
+          iconClassName={openingChat ? "animate-spin" : undefined}
+        />
+
+        {leadHref ? (
+          <NavChip icon={KanbanSquare} label="Consultas" count={counts.leads} href={leadHref} />
+        ) : (
+          <NavChip
+            icon={KanbanSquare}
+            label="Consultas"
+            count={0}
+            onClick={() => setConsultaOpen(true)}
+          />
+        )}
+
+        {latestQuoteId ? (
+          <NavChip
+            icon={ReceiptText}
+            label="Presupuestos"
+            count={counts.quotes}
+            href={`/presupuestos/${latestQuoteId}`}
+          />
+        ) : (
+          <NavChip
+            icon={ReceiptText}
+            label="Presupuestos"
+            count={0}
+            onClick={() => setQuoteOpen(true)}
+          />
+        )}
+
+        {latestFileId ? (
+          <NavChip
+            icon={FolderOpen}
+            label="Files"
+            count={counts.files}
+            href={`/files/${latestFileId}`}
+          />
+        ) : (
+          <Tooltip content="Cuando se gane una consulta, el file va a aparecer acá">
+            <span tabIndex={0} className="inline-flex">
+              <NavChip icon={FolderOpen} label="Files" count={0} muted />
+            </span>
+          </Tooltip>
+        )}
+
+        <span className="hidden h-5 w-px bg-line sm:block" aria-hidden />
 
         <Button variant="brand" size="sm" onClick={() => setConsultaOpen(true)}>
           <Sparkles /> Nueva consulta
         </Button>
-
-        {activeLeadId ? (
-          <Link
-            href={`/presupuestos/nuevo?lead=${activeLeadId}`}
-            className={buttonVariants({ variant: "secondary", size: "sm" })}
-          >
-            <ReceiptText /> Presupuestar
-          </Link>
-        ) : (
-          <Tooltip content="Primero creá una consulta para poder presupuestar">
-            <span tabIndex={0} className="inline-flex">
-              <Button variant="secondary" size="sm" disabled>
-                <ReceiptText /> Presupuestar
-              </Button>
-            </span>
-          </Tooltip>
-        )}
+        <Button variant="secondary" size="sm" onClick={() => setQuoteOpen(true)}>
+          <ReceiptText /> Nuevo presupuesto
+        </Button>
       </div>
 
       {/* mini-dialog nueva consulta */}
@@ -191,6 +254,68 @@ export function ContactHeader({
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* cotizador embebido: presupuestar sin salir de la ficha */}
+      <QuoteDialog
+        open={quoteOpen}
+        onOpenChange={setQuoteOpen}
+        leadId={activeLeadId}
+        contactId={contact.id}
+        conversationId={conversationId}
+        onDone={() => router.refresh()}
+      />
     </div>
+  );
+}
+
+/** Chip-botón de navegación cruzada: icono + label + contador. */
+function NavChip({
+  icon: Icon,
+  label,
+  count,
+  href,
+  onClick,
+  muted,
+  iconClassName,
+}: {
+  icon: LucideIcon;
+  label: string;
+  count?: number;
+  href?: string;
+  onClick?: () => void;
+  muted?: boolean;
+  iconClassName?: string;
+}) {
+  const inner = (
+    <>
+      <Icon className={cn("size-4 text-ink-faint", iconClassName)} strokeWidth={1.9} />
+      <span>{label}</span>
+      {count !== undefined && count > 0 && (
+        <span className="rounded-full bg-sand-soft px-1.5 text-[11px] font-semibold leading-4 tabular-nums text-ink-soft">
+          {count}
+        </span>
+      )}
+    </>
+  );
+
+  const className = cn(
+    "inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-paper px-3 text-[13px] font-medium text-ink-soft",
+    "transition-all duration-150 tap-highlight-none",
+    muted
+      ? "opacity-50"
+      : "hover:border-line-strong hover:bg-sand-soft/60 hover:text-ink active:scale-[0.97]",
+  );
+
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <button type="button" onClick={onClick} disabled={muted} className={className}>
+      {inner}
+    </button>
   );
 }

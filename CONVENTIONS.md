@@ -10,8 +10,9 @@ Multi-tenant: TODA fila tiene `agency_id`; RLS lo garantiza — nunca filtrar po
 - **TypeScript estricto**. Tipos de DB en `src/lib/database.types.ts`; helpers `Tables<"leads">`, `Enums<"lead_stage">` en `src/lib/types.ts`.
 - Server Components para data fetching; Client Components solo donde hay interacción.
 - **Server Actions** en `src/lib/actions/<modulo>.ts` con `"use server"` arriba del archivo. Validar entrada con **zod**. Retornar `ActionResult<T>` de `src/lib/actions/core.ts` — NUNCA lanzar excepciones hacia el cliente.
-- Toasts con `sonner` (`toast.success("...")` / `toast.error(...)`). Textos SIEMPRE en español rioplatense (vos), cortos y humanos.
-- Iconos: `lucide-react`. Fechas: helpers de `src/lib/format.ts` (NO date-fns directo en UI).
+- Toasts con `sonner` (`toast.success("...")` / `toast.error(...)`). Textos SIEMPRE en español rioplatense (vos), cortos y humanos. SIN emojis.
+- Iconos: `lucide-react` SIEMPRE — **PROHIBIDO usar emojis en la UI** (solo se permiten en textos que van al cliente por WhatsApp). Fechas: helpers de `src/lib/format.ts` (NO date-fns directo en UI).
+- **Modo oscuro**: la app tiene tema claro/oscuro por tokens (`data-theme` en html, ver DESIGN.md). Nunca clases de paleta cruda (bg-white, text-stone-600, bg-amber-50…) para superficies/texto/bordes — usar tokens (`cream/paper/sand-soft/ink*/line*`, tintes `brand-tint`/`money-tint`, tonos `tone-{hue}-{soft|text|line}`).
 - NO ejecutar `npm run build` ni `npm run dev` (la integración se verifica después). NO tocar archivos fuera de los que te asignaron.
 
 ## Supabase
@@ -123,13 +124,17 @@ INMEDIATAMENTE, disparar la action, revertir + toast.error si falla. El vendedor
 ## UI compartida (usar SIEMPRE estos, no inventar duplicados)
 
 - `Button` (variants: primary | brand | secondary | ghost | danger | success | whatsapp; prop `loading`)
-- `Input, Textarea, Label, Select` de `@/components/ui/input`
-- `Dialog + DialogContent` (`title`, `description`, `size`: md/lg/xl — en mobile es bottom-sheet automático)
-- `Dropdown*` de ui/dropdown · `Popover, Tooltip, Switch, Checkbox, Segmented, Skeleton, EmptyState` de ui/misc
+- `Input, Textarea, Label, Select` de `@/components/ui/input` (Select solo para listas largas/dinámicas)
+- `Dialog + DialogContent` (`title`, `description`, `size`: md/lg/xl — en mobile es bottom-sheet automático con asa)
+- `Dropdown*` de ui/dropdown · de ui/misc: `Popover, Tooltip, Switch, Checkbox, Segmented, Skeleton`,
+  `EmptyState` (**prop `icon: LucideIcon`**, ya no `emoji`), `ChoiceGrid` (selector visual de opciones con icono — usarlo para tipo de servicio/pago/viaje/canal), `AnimatedNumber` (KPIs que cuentan), `ProgressRing`.
+- Tema: `ThemeToggle / ThemeToggleCompact / useThemePref` de `@/components/shell/theme` (ya montado en shell; no reimplementar).
 - `Badge` (prop `color` = key de TAG_COLORS para etiquetas) · `Avatar` (prop `name`, genera iniciales+color)
 - `PageHeader` de `@/components/shell/page-header` en el tope de CADA página
 - Dinero: `fmtMoney(n, "USD")` → "USD 1.386". Fechas: `fmtDate/fmtDateFull/fmtDateLong/fmtRelative/fmtDue`. Teléfono: `fmtPhone`.
-- Dominio: `STAGES, STAGE_BY_KEY, CHANNELS, SERVICE_TYPES, SERVICE_ORDER, FILE_STATUSES, QUOTE_STATUSES, PAYMENT_METHODS, TRIP_TYPES, TAG_COLORS, TAG_CATEGORIES, computeQuoteTotals, QUOTE_COLORS, QUOTE_FONTS, quoteColor, quoteFont, fillTemplate, waLink` — todo en `src/lib/domain.ts`.
+- Dominio: `STAGES, STAGE_BY_KEY, CHANNELS, SERVICE_TYPES, SERVICE_ORDER, FILE_STATUSES, QUOTE_STATUSES, PAYMENT_METHODS, TRIP_TYPES, TAG_COLORS, TAG_DOTS, TAG_CATEGORIES, computeQuoteTotals, QUOTE_COLORS, QUOTE_FONTS, quoteColor, quoteFont, fillTemplate, waLink` — todo en `src/lib/domain.ts`.
+  **Shapes v2 (con icono lucide, sin emoji)**: `STAGES[].icon` · `CHANNELS[c] = {label, short, icon}` · `TRIP_TYPES[t] = {label, icon}` · `SERVICE_TYPES[t] = {label, plural, icon}` (ya NO existe `.emoji`) · `PAYMENT_METHODS[m] = {label, icon}` · `ACTIVITY_TYPES[a] = {label, icon}` · `FILE_STATUSES[s] / QUOTE_STATUSES[s] = {label, chip, icon}`.
+- Personas relacionadas: `travelers.linked_contact_id` (nullable → ficha propia del pasajero). Grupo de un contacto = `travelers where contact_id = X`; "viaja con" inverso = `travelers where linked_contact_id = X` → dueño. Promover pasajero a contacto: action en `lib/actions/contacts.ts`.
 
 ## Estructura de un módulo
 

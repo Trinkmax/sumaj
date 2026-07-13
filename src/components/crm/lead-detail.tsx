@@ -4,10 +4,20 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, ChevronRight, MessageCircle, ReceiptText, Trophy, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  Megaphone,
+  MessageCircle,
+  ReceiptText,
+  Trophy,
+  X,
+  XCircle,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CHANNELS, QUOTE_STATUSES, STAGES, STAGE_BY_KEY } from "@/lib/domain";
 import { fmtDate, fmtMoney, fmtPhone, fmtRelative } from "@/lib/format";
+import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
@@ -96,6 +106,10 @@ export function LeadDetail({
   }
 
   const currentIdx = ACTIVE_STAGES.findIndex((s) => s.key === stage);
+  const stageMeta = STAGE_BY_KEY[stage];
+  const StageIcon = stageMeta.icon;
+  const channel = CHANNELS[lead.origin_channel];
+  const ChannelIcon = channel.icon;
 
   return (
     <div className="mx-auto max-w-5xl px-4 pt-4 md:px-6 md:pt-6 animate-slide-up">
@@ -108,28 +122,47 @@ export function LeadDetail({
       </Link>
 
       {/* header */}
-      <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="font-display text-[26px] font-semibold leading-tight tracking-tight text-ink md:text-[32px]">
-            <Link
-              href={`/clientes/${lead.contact.id}`}
-              className="decoration-line-strong underline-offset-4 transition-colors hover:underline tap-highlight-none"
-              title="Ver cliente"
-            >
-              {lead.contact.full_name}
-            </Link>
-          </h1>
-          <p className="mt-1 text-sm text-ink-soft">
-            {fmtPhone(lead.contact.phone)} · consulta de {fmtRelative(lead.created_at)}
-          </p>
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <Badge className={STAGE_BY_KEY[stage].chip}>{STAGE_BY_KEY[stage].label}</Badge>
-            <ContactTags
-              contactId={lead.contact.id}
-              leadId={lead.id}
-              initialTags={lead.tags}
-              allTags={allTags}
-            />
+      <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3.5">
+          <Avatar
+            name={lead.contact.full_name}
+            className="mt-0.5 size-12 text-base md:size-14 md:text-lg"
+          />
+          <div className="min-w-0">
+            <h1 className="font-display text-[26px] font-semibold leading-tight tracking-tight text-ink md:text-[32px]">
+              <Link
+                href={`/clientes/${lead.contact.id}`}
+                className="decoration-line-strong underline-offset-4 transition-colors hover:underline tap-highlight-none"
+                title="Ver cliente"
+              >
+                {lead.contact.full_name}
+              </Link>
+            </h1>
+            <p className="mt-0.5 text-sm text-ink-soft">
+              {fmtPhone(lead.contact.phone)} · consulta de {fmtRelative(lead.created_at)}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <Badge className={stageMeta.chip}>
+                <StageIcon className="size-3" strokeWidth={2} />
+                {stageMeta.label}
+              </Badge>
+              <Badge>
+                <ChannelIcon className="size-3" strokeWidth={2} />
+                {channel.label}
+              </Badge>
+              {lead.origin_campaign && (
+                <Badge>
+                  <Megaphone className="size-3" strokeWidth={2} />
+                  {lead.origin_campaign}
+                </Badge>
+              )}
+              <ContactTags
+                contactId={lead.contact.id}
+                leadId={lead.id}
+                initialTags={lead.tags}
+                allTags={allTags}
+              />
+            </div>
           </div>
         </div>
 
@@ -155,9 +188,12 @@ export function LeadDetail({
 
       {/* banners de cierre */}
       {stage === "ganado" && (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 animate-pop">
-          <p className="text-sm font-medium text-emerald-800">
-            🎉 Lead ganado
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-tone-emerald-line bg-tone-emerald-soft p-4 animate-pop">
+          <p className="flex items-center gap-2.5 text-sm font-medium text-tone-emerald-text">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-paper/60">
+              <Trophy className="size-4" strokeWidth={2} />
+            </span>
+            Lead ganado
             {lead.wonFile ? ` — se creó el file ${lead.wonFile.code}` : ""}
           </p>
           {lead.wonFile && (
@@ -172,8 +208,9 @@ export function LeadDetail({
         </div>
       )}
       {stage === "perdido" && (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-stone-100 p-4 animate-fade-in">
-          <p className="text-sm text-stone-600">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-tone-stone-line bg-tone-stone-soft p-4 animate-fade-in">
+          <p className="flex items-center gap-2.5 text-sm text-tone-stone-text">
+            <XCircle className="size-4 shrink-0" strokeWidth={2} />
             Lead perdido{lead.lost_reason ? ` — ${lead.lost_reason}` : ""}
           </p>
           <Button variant="secondary" size="sm" onClick={() => changeStage("nuevo")}>
@@ -182,21 +219,23 @@ export function LeadDetail({
         </div>
       )}
 
-      {/* stepper de etapas */}
+      {/* stepper de etapas (clickeable, optimista) */}
       {!isClosed && (
         <div className="mt-4 grid grid-cols-4 gap-1.5">
           {ACTIVE_STAGES.map((s, i) => {
             const done = i < currentIdx;
             const current = i === currentIdx;
+            const Icon = s.icon;
             return (
               <button
                 key={s.key}
                 onClick={() => changeStage(s.key)}
                 className={cn(
-                  "group rounded-xl px-1 py-2 text-center transition-all tap-highlight-none",
+                  "group rounded-xl px-1 py-2 text-center transition-all tap-highlight-none active:scale-[0.98]",
                   current ? "bg-paper shadow-sm ring-1 ring-line" : "hover:bg-sand-soft/70",
                 )}
                 aria-current={current ? "step" : undefined}
+                title={`Mover a ${s.label}`}
               >
                 <span
                   className={cn(
@@ -206,7 +245,7 @@ export function LeadDetail({
                 />
                 <span
                   className={cn(
-                    "block truncate text-[11px] leading-tight md:text-[12px]",
+                    "flex items-center justify-center gap-1 truncate text-[11px] leading-tight md:text-[12px]",
                     current
                       ? "font-semibold text-ink"
                       : done
@@ -214,7 +253,14 @@ export function LeadDetail({
                         : "text-ink-faint",
                   )}
                 >
-                  {s.label}
+                  <Icon
+                    className={cn(
+                      "hidden size-3.5 shrink-0 sm:block",
+                      current ? "text-ink" : done ? "text-ink-soft" : "text-ink-faint/70",
+                    )}
+                    strokeWidth={2}
+                  />
+                  <span className="truncate">{s.label}</span>
                 </span>
               </button>
             );
@@ -224,9 +270,9 @@ export function LeadDetail({
 
       {/* acciones grandes */}
       <div className={cn("mt-4 grid grid-cols-2 gap-2", !isClosed && "md:grid-cols-4")}>
-        <Button variant="secondary" size="lg" onClick={goChat} loading={chatLoading}>
+        <Button variant="whatsapp" size="lg" onClick={goChat} loading={chatLoading}>
           <MessageCircle />
-          Chat
+          WhatsApp
         </Button>
         <Link
           href={`/presupuestos/nuevo?lead=${lead.id}`}
@@ -244,7 +290,7 @@ export function LeadDetail({
             <Button
               variant="secondary"
               size="lg"
-              className="text-red-600 hover:border-red-200 hover:bg-red-50"
+              className="text-tone-red-text hover:border-tone-red-line hover:bg-tone-red-soft"
               onClick={() => setLoseOpen(true)}
             >
               <X />
@@ -270,8 +316,9 @@ export function LeadDetail({
             <dl className="space-y-2.5 text-sm">
               <div className="flex items-baseline justify-between gap-3">
                 <dt className="text-[13px] text-ink-faint">Canal</dt>
-                <dd className="font-medium text-ink">
-                  {CHANNELS[lead.origin_channel].label}
+                <dd className="flex items-center gap-1.5 font-medium text-ink">
+                  <ChannelIcon className="size-3.5 text-ink-faint" strokeWidth={2} />
+                  {channel.label}
                 </dd>
               </div>
               <div className="flex items-baseline justify-between gap-3">
@@ -294,14 +341,14 @@ export function LeadDetail({
               <h2 className="text-[15px] font-semibold text-ink">Presupuestos</h2>
               <Link
                 href={`/presupuestos/nuevo?lead=${lead.id}`}
-                className="text-[13px] font-medium text-brand-700 transition-colors hover:text-brand-800"
+                className="text-[13px] font-medium text-brand-text transition-colors hover:opacity-80 tap-highlight-none"
               >
                 + Nuevo
               </Link>
             </div>
             {quotes.length === 0 ? (
               <EmptyState
-                emoji="🧾"
+                icon={ReceiptText}
                 title="Sin presupuestos todavía"
                 description="Armale uno en un minuto desde el cotizador."
                 className="py-8"
@@ -316,28 +363,32 @@ export function LeadDetail({
               />
             ) : (
               <ul className="divide-y divide-line/60">
-                {quotes.map((q) => (
-                  <li key={q.id}>
-                    <Link
-                      href={`/presupuestos/${q.id}`}
-                      className="flex min-h-14 items-center justify-between gap-3 py-2.5 transition-colors hover:bg-sand-soft/50 tap-highlight-none"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-ink">{q.code}</p>
-                        <p className="text-[12px] text-ink-faint">{fmtDate(q.created_at)}</p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2.5">
-                        <span className="text-sm font-semibold tabular-nums text-ink">
-                          {fmtMoney(q.total_price, q.currency)}
-                        </span>
-                        <Badge className={QUOTE_STATUSES[q.status].chip}>
-                          {QUOTE_STATUSES[q.status].label}
-                        </Badge>
-                        <ChevronRight className="size-4 text-ink-faint" />
-                      </div>
-                    </Link>
-                  </li>
-                ))}
+                {quotes.map((q) => {
+                  const qMeta = QUOTE_STATUSES[q.status];
+                  return (
+                    <li key={q.id}>
+                      <Link
+                        href={`/presupuestos/${q.id}`}
+                        className="flex min-h-14 items-center justify-between gap-3 py-2.5 transition-colors hover:bg-sand-soft/50 tap-highlight-none"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-ink">{q.code}</p>
+                          <p className="text-[12px] text-ink-faint">{fmtDate(q.created_at)}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2.5">
+                          <span className="text-sm font-semibold tabular-nums text-ink">
+                            {fmtMoney(q.total_price, q.currency)}
+                          </span>
+                          <Badge className={qMeta.chip}>
+                            <qMeta.icon className="size-3" strokeWidth={2} />
+                            {qMeta.label}
+                          </Badge>
+                          <ChevronRight className="size-4 text-ink-faint" />
+                        </div>
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>

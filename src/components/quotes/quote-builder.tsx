@@ -4,22 +4,39 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
+  Bus,
+  Check,
   ChevronDown,
+  ChevronUp,
+  MapPin,
+  Palette,
+  Plane,
   Plus,
   Search,
   Send,
+  StickyNote,
   Trash2,
+  UserRound,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { Segmented } from "@/components/ui/misc";
+import {
+  AnimatedNumber,
+  ChoiceGrid,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Segmented,
+} from "@/components/ui/misc";
 import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import {
   computeQuoteTotals,
   QUOTE_COLORS,
   QUOTE_FONTS,
+  round2,
   SERVICE_ORDER,
   SERVICE_TYPES,
   type QuoteTotals,
@@ -100,12 +117,14 @@ type ItemRow = {
   cost: string;
   gross: string;
   commissionPct: string;
+  /** filas agregadas por el usuario entran con slide-up */
+  fresh: boolean;
 };
 
 /* ───────────────────────── helpers ───────────────────────── */
 
 let rowSeq = 0;
-function newRow(type: ServiceType): ItemRow {
+function newRow(type: ServiceType, fresh = false): ItemRow {
   return {
     key: `row-${++rowSeq}-${Date.now()}`,
     type,
@@ -114,6 +133,7 @@ function newRow(type: ServiceType): ItemRow {
     cost: "",
     gross: "",
     commissionPct: type === "aereo" ? "0" : "",
+    fresh,
   };
 }
 
@@ -125,10 +145,36 @@ function parseNum(s: string): number {
 function isoPlusDays(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  // fecha local (no UTC): cerca de medianoche AR no corre un día
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 const TERRESTRE_TYPES = SERVICE_ORDER.filter((t) => t !== "aereo");
+
+const TERRESTRE_OPTIONS = TERRESTRE_TYPES.map((t) => ({
+  value: t,
+  label: SERVICE_TYPES[t].label,
+  icon: SERVICE_TYPES[t].icon,
+}));
+
+/** placeholders por tipo: el ejemplo enseña el formato sin manual */
+const ROW_PLACEHOLDERS: Record<ServiceType, string> = {
+  aereo: "Ej: AEP → CUN por Copa, con valija",
+  hotel: "Ej: Hotel Riu 5★ all inclusive",
+  paquete: "Ej: 7 noches con desayuno + traslados",
+  excursion: "Ej: Chichén Itzá día completo",
+  traslado: "Ej: Aeropuerto ↔ hotel, privado",
+  asistencia: "Ej: Asistencia 30 días con cobertura COVID",
+  circuito: "Ej: Europa clásica, 12 días",
+  crucero: "Ej: Caribe 7 noches, cabina con balcón",
+  otro: "Ej: Visado, seguro, upgrade…",
+};
+
+/* grillas tipo planilla (container queries del card de ítems) */
+const GRID_WITH_TYPE =
+  "@2xl:grid-cols-[118px_minmax(0,1fr)_132px_88px_88px_56px_28px]";
+const GRID_NO_TYPE = "@2xl:grid-cols-[minmax(0,1fr)_132px_88px_88px_56px_28px]";
 
 /* ───────────────────────── componente ───────────────────────── */
 
@@ -200,10 +246,13 @@ export function QuoteBuilder({
           cost: i.cost ? String(i.cost) : "",
           gross: i.gross != null ? String(i.gross) : "",
           commissionPct: String(i.commission_pct ?? 0),
+          fresh: false,
         }));
     }
     return [newRow("aereo"), newRow("hotel")];
   });
+  const [removingKeys, setRemovingKeys] = React.useState<ReadonlySet<string>>(new Set());
+  const pendingFocusRef = React.useRef<string | null>(null);
 
   /* markup, descuento, notas */
   const [markupType, setMarkupType] = React.useState<"monto" | "porcentaje">(
@@ -219,11 +268,14 @@ export function QuoteBuilder({
   const [internalNotes, setInternalNotes] = React.useState(initial?.internal_notes ?? "");
   const [savedNotes, setSavedNotes] = React.useState(savedNotesInitial);
 
-  /* tema */
+  /* tema — vive con ESTE presupuesto; el default de la agencia se guarda aparte */
   const [theme, setTheme] = React.useState<{ color: string; font: string }>({
     color: initial?.theme?.color ?? defaultTheme.color,
     font: initial?.theme?.font ?? defaultTheme.font,
   });
+  const [agencyTheme, setAgencyTheme] = React.useState(defaultTheme);
+  const [savingThemeDefault, setSavingThemeDefault] = React.useState(false);
+  const isAgencyTheme = theme.color === agencyTheme.color && theme.font === agencyTheme.font;
 
   /* ui */
   const [mobileTab, setMobileTab] = React.useState<"editor" | "preview">("editor");
@@ -289,7 +341,8 @@ export function QuoteBuilder({
     if (!q) return [];
     return contacts.filter(
       (c) =>
-        c.full_name.toLowerCase().includes(q) || (c.phone ?? "").includes(q.replace(/\D/g, "") || "~"),
+        c.full_name.toLowerCase().includes(q) ||
+        (c.phone ?? "").includes(q.replace(/\D/g, "") || "~"),
     );
   }, [contactSearch, contacts]);
 
@@ -309,14 +362,39 @@ export function QuoteBuilder({
     };
   }, [contactSearch]);
 
-  const filteredContacts = (serverMatches ?? localMatches).slice(0, 6);
+  // los resultados del server SUMAN a los locales (sin salto visual del dropdown)
+  const filteredContacts = React.useMemo(() => {
+    const seen = new Set(localMatches.map((c) => c.id));
+    return [...localMatches, ...(serverMatches ?? []).filter((c) => !seen.has(c.id))].slice(0, 6);
+  }, [localMatches, serverMatches]);
 
   /* ── mutadores de filas ── */
   function updateRow(key: string, patch: Partial<ItemRow>) {
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   }
+  /** eliminar con fade-out: primero anima, después saca la fila */
   function removeRow(key: string) {
-    setRows((rs) => rs.filter((r) => r.key !== key));
+    if (removingKeys.has(key)) return;
+    setRemovingKeys((prev) => new Set(prev).add(key));
+    window.setTimeout(() => {
+      setRows((rs) => rs.filter((r) => r.key !== key));
+      setRemovingKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }, 160);
+  }
+  /** agregar con slide-up + autofocus en la descripción */
+  function addRow(type: ServiceType) {
+    const row = newRow(type, true);
+    pendingFocusRef.current = row.key;
+    setRows((rs) => [...rs, row]);
+  }
+  function addTerrestre() {
+    // default inteligente: repite el tipo del último servicio terrestre cargado
+    const last = [...rows].reverse().find((r) => r.type !== "aereo");
+    addRow(last?.type ?? "hotel");
   }
   function pickSupplier(row: ItemRow, supplierId: string) {
     const sup = suppliers.find((s) => s.id === supplierId);
@@ -330,14 +408,27 @@ export function QuoteBuilder({
             : row.commissionPct,
     });
   }
+  const focusDescription = (row: ItemRow) => (el: HTMLInputElement | null) => {
+    if (el && pendingFocusRef.current === row.key) {
+      pendingFocusRef.current = null;
+      el.focus();
+    }
+  };
 
-  /* ── tema: persiste default de la agencia ── */
+  /* ── tema ── */
   function changeTheme(patch: Partial<{ color: string; font: string }>) {
-    const next = { ...theme, ...patch };
-    setTheme(next);
-    updateDefaultTheme(next).then((res) => {
-      if (!res.ok) toast.error(res.error);
-    });
+    setTheme((prev) => ({ ...prev, ...patch }));
+  }
+  async function makeThemeDefault() {
+    setSavingThemeDefault(true);
+    const res = await updateDefaultTheme(theme);
+    setSavingThemeDefault(false);
+    if (res.ok) {
+      setAgencyTheme(theme);
+      toast.success("Listo: es el estilo predeterminado de la agencia");
+    } else {
+      toast.error(res.error);
+    }
   }
 
   /* ── notas guardadas ── */
@@ -430,7 +521,7 @@ export function QuoteBuilder({
       return;
     }
     if (send) {
-      toast.success(`Presupuesto ${res.data.code} listo para compartir ✨`);
+      toast.success(`¡Presupuesto ${res.data.code} listo para compartir!`);
       setShare({ token: res.data.publicToken, code: res.data.code, id: res.data.quoteId });
       setShareOpen(true);
     } else {
@@ -441,6 +532,55 @@ export function QuoteBuilder({
 
   const aereos = rows.filter((r) => r.type === "aereo");
   const terrestres = rows.filter((r) => r.type !== "aereo");
+
+  /* controles de markup/descuento — viven dentro del panel de totales */
+  const markupSlot = (
+    <div className="mt-3 space-y-2.5 rounded-xl bg-sand-soft/60 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[13px] font-medium text-ink-soft">Markup</span>
+        <div className="flex items-center gap-1.5">
+          <Segmented
+            value={markupType}
+            onChange={setMarkupType}
+            options={[
+              { value: "monto", label: currency },
+              { value: "porcentaje", label: "%" },
+            ]}
+          />
+          <Input
+            type="number"
+            min={0}
+            step="any"
+            inputMode="decimal"
+            value={markupValue}
+            onChange={(e) => setMarkupValue(e.target.value)}
+            placeholder="0"
+            aria-label="Markup"
+            className="h-8 w-20 rounded-lg px-2 text-right text-[13px] tabular-nums"
+          />
+        </div>
+      </div>
+      {markupType === "porcentaje" && parseNum(markupValue) > 0 && (
+        <p className="text-right text-[11px] tabular-nums text-ink-faint">
+          = {fmtMoney(totals.markupAmount, currency)}
+        </p>
+      )}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[13px] font-medium text-ink-soft">Descuento</span>
+        <Input
+          type="number"
+          min={0}
+          step="any"
+          inputMode="decimal"
+          value={discount}
+          onChange={(e) => setDiscount(e.target.value)}
+          placeholder="0"
+          aria-label="Descuento"
+          className="h-8 w-20 rounded-lg px-2 text-right text-[13px] tabular-nums"
+        />
+      </div>
+    </div>
+  );
 
   /* ═══════════════════════ render ═══════════════════════ */
 
@@ -471,12 +611,13 @@ export function QuoteBuilder({
         <div
           className={cn(
             "min-w-0 space-y-4 animate-slide-up",
+            !isDialog && "pb-24 xl:pb-0",
             mobileTab === "preview" && (isDialog ? "hidden lg:block" : "hidden xl:block"),
           )}
         >
           {/* cliente */}
           <section className={sectionCard}>
-            <h2 className="mb-3 font-display text-lg font-semibold text-ink">Cliente</h2>
+            <SectionTitle icon={UserRound}>Cliente</SectionTitle>
             {lead ? (
               <ContactChip contact={contact} />
             ) : (
@@ -552,7 +693,7 @@ export function QuoteBuilder({
 
           {/* datos del viaje */}
           <section className={sectionCard}>
-            <h2 className="mb-3 font-display text-lg font-semibold text-ink">Datos del viaje</h2>
+            <SectionTitle icon={MapPin}>Datos del viaje</SectionTitle>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="col-span-2">
                 <Label htmlFor="dest">Destino *</Label>
@@ -634,7 +775,7 @@ export function QuoteBuilder({
           {/* ítems: aéreos */}
           <section className={cn(sectionCard, "@container")}>
             <ItemGroupHeader
-              emoji="✈️"
+              icon={Plane}
               label="Aéreos"
               subtotal={totals.byGroup.aereos}
               currency={currency}
@@ -646,16 +787,19 @@ export function QuoteBuilder({
                   Sin aéreos por ahora.
                 </p>
               )}
-              {aereos.map((row) => (
+              {aereos.map((row, idx) => (
                 <ItemRowEditor
                   key={row.key}
                   row={row}
                   suppliers={suppliers}
                   currency={currency}
                   withType={false}
+                  removing={removingKeys.has(row.key)}
                   onChange={(patch) => updateRow(row.key, patch)}
                   onPickSupplier={(id) => pickSupplier(row, id)}
                   onRemove={() => removeRow(row.key)}
+                  onEnter={idx === aereos.length - 1 ? () => addRow("aereo") : undefined}
+                  descRef={focusDescription(row)}
                 />
               ))}
             </div>
@@ -663,7 +807,7 @@ export function QuoteBuilder({
               variant="ghost"
               size="sm"
               className="mt-2.5 text-brand-700"
-              onClick={() => setRows((rs) => [...rs, newRow("aereo")])}
+              onClick={() => addRow("aereo")}
             >
               <Plus /> Agregar aéreo
             </Button>
@@ -672,7 +816,7 @@ export function QuoteBuilder({
           {/* ítems: terrestres */}
           <section className={cn(sectionCard, "@container")}>
             <ItemGroupHeader
-              emoji="🌎"
+              icon={Bus}
               label="Terrestres"
               subtotal={totals.byGroup.terrestres}
               currency={currency}
@@ -684,16 +828,19 @@ export function QuoteBuilder({
                   Sin servicios terrestres por ahora.
                 </p>
               )}
-              {terrestres.map((row) => (
+              {terrestres.map((row, idx) => (
                 <ItemRowEditor
                   key={row.key}
                   row={row}
                   suppliers={suppliers}
                   currency={currency}
                   withType
+                  removing={removingKeys.has(row.key)}
                   onChange={(patch) => updateRow(row.key, patch)}
                   onPickSupplier={(id) => pickSupplier(row, id)}
                   onRemove={() => removeRow(row.key)}
+                  onEnter={idx === terrestres.length - 1 ? addTerrestre : undefined}
+                  descRef={focusDescription(row)}
                 />
               ))}
             </div>
@@ -701,63 +848,15 @@ export function QuoteBuilder({
               variant="ghost"
               size="sm"
               className="mt-2.5 text-brand-700"
-              onClick={() => setRows((rs) => [...rs, newRow("hotel")])}
+              onClick={addTerrestre}
             >
               <Plus /> Agregar servicio
             </Button>
           </section>
 
-          {/* markup y descuento */}
-          <section className={sectionCard}>
-            <h2 className="mb-3 font-display text-lg font-semibold text-ink">
-              Markup y descuento
-            </h2>
-            <div className="flex flex-wrap items-end gap-3">
-              <div>
-                <Label>Markup</Label>
-                <div className="flex items-center gap-2">
-                  <Segmented
-                    value={markupType}
-                    onChange={setMarkupType}
-                    options={[
-                      { value: "monto", label: currency },
-                      { value: "porcentaje", label: "%" },
-                    ]}
-                  />
-                  <Input
-                    type="number"
-                    min={0}
-                    step="any"
-                    inputMode="decimal"
-                    value={markupValue}
-                    onChange={(e) => setMarkupValue(e.target.value)}
-                    placeholder="0"
-                    className="w-28 text-right tabular-nums"
-                  />
-                </div>
-              </div>
-              <div>
-                <Label htmlFor="disc">Descuento (opcional)</Label>
-                <Input
-                  id="disc"
-                  type="number"
-                  min={0}
-                  step="any"
-                  inputMode="decimal"
-                  value={discount}
-                  onChange={(e) => setDiscount(e.target.value)}
-                  placeholder="0"
-                  className="w-32 text-right tabular-nums"
-                />
-              </div>
-            </div>
-          </section>
-
           {/* notas */}
           <section className={sectionCard}>
-            <h2 className="mb-3 font-display text-lg font-semibold text-ink">
-              Notas para el cliente
-            </h2>
+            <SectionTitle icon={StickyNote}>Notas para el cliente</SectionTitle>
             <Textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
@@ -778,7 +877,12 @@ export function QuoteBuilder({
                 ))}
               </div>
             )}
-            <Button variant="ghost" size="sm" className="mt-2 text-brand-700" onClick={persistCurrentNote}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-2 text-brand-700"
+              onClick={persistCurrentNote}
+            >
               Guardar esta nota
             </Button>
 
@@ -794,87 +898,87 @@ export function QuoteBuilder({
             </div>
           </section>
 
-          {/* tema */}
+          {/* tema del presupuesto */}
           <section className={sectionCard}>
-            <h2 className="mb-3 font-display text-lg font-semibold text-ink">
-              Estilo del presupuesto
-            </h2>
+            <SectionTitle icon={Palette}>Estilo del presupuesto</SectionTitle>
             <div className="flex flex-wrap items-center gap-2.5">
-              {QUOTE_COLORS.map((c) => (
-                <button
-                  key={c.key}
-                  type="button"
-                  onClick={() => changeTheme({ color: c.key })}
-                  aria-label={`Tema ${c.label}`}
-                  title={c.label}
-                  className={cn(
-                    "size-9 rounded-full border transition-all tap-highlight-none active:scale-95",
-                    theme.color === c.key
-                      ? "scale-110 border-ink ring-2 ring-ink ring-offset-2 ring-offset-paper"
-                      : "border-line-strong/60 hover:scale-105",
-                  )}
-                  style={{ backgroundColor: c.swatch }}
-                />
-              ))}
+              {QUOTE_COLORS.map((c) => {
+                const selected = theme.color === c.key;
+                return (
+                  <button
+                    key={c.key}
+                    type="button"
+                    onClick={() => changeTheme({ color: c.key })}
+                    aria-label={`Tema ${c.label}`}
+                    aria-pressed={selected}
+                    title={c.label}
+                    className={cn(
+                      "relative size-9 rounded-full border transition-all tap-highlight-none active:scale-95",
+                      selected
+                        ? "scale-110 border-ink ring-2 ring-ink ring-offset-2 ring-offset-paper"
+                        : "border-line-strong/60 hover:scale-105",
+                    )}
+                    style={{ backgroundColor: c.swatch }}
+                  >
+                    {selected && (
+                      <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-ink text-cream shadow-sm animate-check-pop">
+                        <Check className="size-2.5" strokeWidth={3} />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
             <div className="mt-4 grid grid-cols-3 gap-2">
-              {QUOTE_FONTS.map((f) => (
-                <button
-                  key={f.key}
-                  type="button"
-                  onClick={() => changeTheme({ font: f.key })}
-                  className={cn(
-                    "flex flex-col items-center gap-0.5 rounded-xl border px-2 py-2.5 transition-all tap-highlight-none active:scale-[0.98]",
-                    theme.font === f.key
-                      ? "border-ink bg-sand-soft/80 shadow-sm"
-                      : "border-line hover:border-line-strong",
-                  )}
+              {QUOTE_FONTS.map((f) => {
+                const selected = theme.font === f.key;
+                return (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => changeTheme({ font: f.key })}
+                    aria-pressed={selected}
+                    className={cn(
+                      "relative flex flex-col items-center gap-0.5 rounded-xl border px-2 py-2.5 transition-all tap-highlight-none active:scale-[0.98]",
+                      selected
+                        ? "border-brand-500 bg-brand-tint shadow-sm"
+                        : "border-line hover:border-line-strong",
+                    )}
+                  >
+                    {selected && (
+                      <span className="absolute -right-1.5 -top-1.5 flex size-4.5 items-center justify-center rounded-full bg-brand-600 text-white shadow-sm animate-check-pop">
+                        <Check className="size-3" strokeWidth={3} />
+                      </span>
+                    )}
+                    <span
+                      className="text-xl leading-none text-ink"
+                      style={{ fontFamily: f.css }}
+                    >
+                      Aa
+                    </span>
+                    <span className="text-[11px] text-ink-faint">{f.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+              <p className="text-xs text-ink-faint">El estilo se guarda con este presupuesto.</p>
+              {isAgencyTheme ? (
+                <span className="flex items-center gap-1 text-xs font-medium text-ink-faint">
+                  <Check className="size-3.5" /> Es el predeterminado
+                </span>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  loading={savingThemeDefault}
+                  onClick={makeThemeDefault}
                 >
-                  <span className="text-xl leading-none text-ink" style={{ fontFamily: f.css }}>
-                    Aa
-                  </span>
-                  <span className="text-[11px] text-ink-faint">{f.label}</span>
-                </button>
-              ))}
+                  Usar como predeterminado
+                </Button>
+              )}
             </div>
           </section>
-
-          {/* resumen colapsable (solo mobile) */}
-          <div className={isDialog ? "lg:hidden" : "xl:hidden"}>
-            <button
-              type="button"
-              onClick={() => setSummaryOpen((o) => !o)}
-              className="card flex w-full items-center justify-between px-4 py-3.5 text-left transition-all tap-highlight-none active:scale-[0.99]"
-            >
-              <div>
-                <p className="text-[11px] font-medium uppercase tracking-wide text-ink-faint">
-                  Precio cliente
-                </p>
-                <p className="text-xl font-semibold tabular-nums text-ink">
-                  {fmtMoney(totals.totalPrice, currency)}
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="text-right">
-                  <p className="text-[11px] text-ink-faint">Comisión</p>
-                  <p className="text-sm font-semibold tabular-nums text-money-700">
-                    {fmtMoney(totals.commissionTotal, currency)}
-                  </p>
-                </div>
-                <ChevronDown
-                  className={cn(
-                    "size-4 text-ink-faint transition-transform",
-                    summaryOpen && "rotate-180",
-                  )}
-                />
-              </div>
-            </button>
-            {summaryOpen && (
-              <div className="mt-3 animate-slide-up">
-                <TotalsPanel totals={totals} currency={currency} />
-              </div>
-            )}
-          </div>
 
           {/* guardar */}
           <div className="flex flex-col-reverse gap-2 pb-2 sm:flex-row sm:justify-end">
@@ -899,6 +1003,23 @@ export function QuoteBuilder({
               <Send /> {isDialog ? "Guardar y enviar" : "Guardar y compartir"}
             </Button>
           </div>
+
+          {/* barra de totales del popup: sticky al pie del scroll del diálogo */}
+          {isDialog && (
+            <div className="sticky bottom-0 z-10 lg:hidden">
+              {summaryOpen && (
+                <div className="mb-2 max-h-[45dvh] overflow-y-auto animate-slide-up">
+                  <TotalsPanel totals={totals} currency={currency} markupSlot={markupSlot} />
+                </div>
+              )}
+              <SummaryBar
+                totals={totals}
+                currency={currency}
+                open={summaryOpen}
+                onToggle={() => setSummaryOpen((o) => !o)}
+              />
+            </div>
+          )}
         </div>
 
         {/* ─────────── columna derecha: totales + preview ─────────── */}
@@ -912,7 +1033,7 @@ export function QuoteBuilder({
           )}
         >
           <div className={cn("hidden", isDialog ? "lg:block" : "xl:block")}>
-            <TotalsPanel totals={totals} currency={currency} />
+            <TotalsPanel totals={totals} currency={currency} markupSlot={markupSlot} />
           </div>
           <div>
             <p
@@ -927,6 +1048,30 @@ export function QuoteBuilder({
           </div>
         </div>
       </div>
+
+      {/* barra de totales fija (página, mobile): arriba de las tabs del shell */}
+      {!isDialog && (
+        <div
+          className={cn(
+            "fixed inset-x-0 bottom-[calc(64px+env(safe-area-inset-bottom))] z-30 px-4 pb-2 md:bottom-0 md:pb-3 xl:hidden",
+            mobileTab !== "editor" && "hidden",
+          )}
+        >
+          <div className="mx-auto max-w-xl">
+            {summaryOpen && (
+              <div className="mb-2 max-h-[55dvh] overflow-y-auto animate-slide-up">
+                <TotalsPanel totals={totals} currency={currency} markupSlot={markupSlot} />
+              </div>
+            )}
+            <SummaryBar
+              totals={totals}
+              currency={currency}
+              open={summaryOpen}
+              onToggle={() => setSummaryOpen((o) => !o)}
+            />
+          </div>
+        </div>
+      )}
 
       {!isDialog && share && (
         <ShareDialog
@@ -946,6 +1091,21 @@ export function QuoteBuilder({
 }
 
 /* ───────────────────────── subcomponentes ───────────────────────── */
+
+function SectionTitle({
+  icon: Icon,
+  children,
+}: {
+  icon: LucideIcon;
+  children: React.ReactNode;
+}) {
+  return (
+    <h2 className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-ink">
+      <Icon className="size-[18px] text-ink-faint" strokeWidth={1.75} />
+      {children}
+    </h2>
+  );
+}
 
 function ContactChip({
   contact,
@@ -977,20 +1137,21 @@ function ContactChip({
 }
 
 function ItemGroupHeader({
-  emoji,
+  icon: Icon,
   label,
   subtotal,
   currency,
 }: {
-  emoji: string;
+  icon: LucideIcon;
   label: string;
   subtotal: number;
   currency: string;
 }) {
   return (
     <div className="mb-3 flex items-baseline justify-between">
-      <h2 className="font-display text-lg font-semibold text-ink">
-        {emoji} {label}
+      <h2 className="flex items-center gap-2 font-display text-lg font-semibold text-ink">
+        <Icon className="size-[18px] self-center text-ink-faint" strokeWidth={1.75} />
+        {label}
       </h2>
       <p className="text-sm tabular-nums text-ink-soft">{fmtMoney(subtotal, currency)}</p>
     </div>
@@ -1002,19 +1163,67 @@ function ItemHeaderRow({ withType }: { withType: boolean }) {
     <div
       className={cn(
         "mb-1.5 hidden gap-2 px-1 text-[11px] font-medium uppercase tracking-wide text-ink-faint @2xl:grid",
-        withType
-          ? "@2xl:grid-cols-[110px_minmax(0,1fr)_140px_88px_88px_64px_32px]"
-          : "@2xl:grid-cols-[minmax(0,1fr)_140px_88px_88px_64px_32px]",
+        withType ? GRID_WITH_TYPE : GRID_NO_TYPE,
       )}
     >
       {withType && <span>Tipo</span>}
       <span>Descripción</span>
       <span>Proveedor</span>
       <span className="text-right">Final</span>
-      <span className="text-right">Bruto</span>
+      <span
+        className="text-right"
+        title="Tarifa comisionable del mayorista. Vacío = igual al Final."
+      >
+        Bruto
+      </span>
       <span className="text-right">% com</span>
       <span />
     </div>
+  );
+}
+
+/** Selector de tipo de servicio: chip con icono → popover con ChoiceGrid */
+function TypePicker({
+  value,
+  onChange,
+  className,
+}: {
+  value: ServiceType;
+  onChange: (t: ServiceType) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const meta = SERVICE_TYPES[value];
+  const Icon = meta.icon;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Tipo de servicio: ${meta.label}. Tocá para cambiarlo`}
+          className={cn(
+            "flex h-9 min-w-0 items-center gap-1.5 rounded-xl border border-line bg-paper px-2.5 text-[13px] font-medium text-ink transition-colors tap-highlight-none hover:border-line-strong hover:bg-sand-soft/50",
+            className,
+          )}
+        >
+          <Icon className="size-4 shrink-0 text-ink-soft" strokeWidth={1.9} />
+          <span className="truncate">{meta.label}</span>
+          <ChevronDown className="ml-auto size-3.5 shrink-0 text-ink-faint" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 p-2">
+        <ChoiceGrid
+          options={TERRESTRE_OPTIONS}
+          value={value}
+          onChange={(t) => {
+            onChange(t);
+            setOpen(false);
+          }}
+          columns={4}
+          size="sm"
+        />
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -1023,55 +1232,65 @@ function ItemRowEditor({
   suppliers,
   currency,
   withType,
+  removing,
   onChange,
   onPickSupplier,
   onRemove,
+  onEnter,
+  descRef,
 }: {
   row: ItemRow;
   suppliers: BuilderSupplier[];
   currency: string;
   withType: boolean;
+  removing: boolean;
   onChange: (patch: Partial<ItemRow>) => void;
   onPickSupplier: (supplierId: string) => void;
   onRemove: () => void;
+  /** Enter en los números agrega otra fila del mismo grupo (solo última fila) */
+  onEnter?: () => void;
+  descRef?: (el: HTMLInputElement | null) => void;
 }) {
   const commission =
     ((row.gross.trim() === "" ? parseNum(row.cost) : parseNum(row.gross)) *
       parseNum(row.commissionPct)) /
     100;
 
+  function handleEnter(e: React.KeyboardEvent) {
+    if (e.key === "Enter" && onEnter) {
+      e.preventDefault();
+      onEnter();
+    }
+  }
+
   return (
     <div
       className={cn(
         "rounded-xl border border-line bg-sand-soft/30 p-3",
         "@2xl:grid @2xl:items-center @2xl:gap-2 @2xl:border-0 @2xl:bg-transparent @2xl:p-0",
-        withType
-          ? "@2xl:grid-cols-[110px_minmax(0,1fr)_140px_88px_88px_64px_32px]"
-          : "@2xl:grid-cols-[minmax(0,1fr)_140px_88px_88px_64px_32px]",
+        withType ? GRID_WITH_TYPE : GRID_NO_TYPE,
+        row.fresh && "animate-slide-up",
+        removing && "pointer-events-none animate-fade-out",
       )}
     >
       {/* mobile: header de la mini-card */}
-      <div className="mb-2 flex items-center justify-between @2xl:hidden">
+      <div className="mb-2 flex items-center justify-between gap-2 @2xl:hidden">
         {withType ? (
-          <Select
+          <TypePicker
             value={row.type}
-            onChange={(e) => onChange({ type: e.target.value as ServiceType })}
-            className="h-8 w-40 text-[13px]"
-          >
-            {TERRESTRE_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {SERVICE_TYPES[t].emoji} {SERVICE_TYPES[t].label}
-              </option>
-            ))}
-          </Select>
+            onChange={(t) => onChange({ type: t })}
+            className="w-44"
+          />
         ) : (
-          <span className="text-[13px] font-medium text-ink-soft">✈️ Aéreo</span>
+          <span className="flex items-center gap-1.5 text-[13px] font-medium text-ink-soft">
+            <Plane className="size-4 text-ink-faint" strokeWidth={1.9} /> Aéreo
+          </span>
         )}
         <button
           type="button"
           onClick={onRemove}
           aria-label="Eliminar ítem"
-          className="rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-red-50 hover:text-red-600"
+          className="rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-tone-red-soft hover:text-tone-red-text"
         >
           <Trash2 className="size-4" />
         </button>
@@ -1079,24 +1298,19 @@ function ItemRowEditor({
 
       {/* tipo (desktop) */}
       {withType && (
-        <Select
+        <TypePicker
           value={row.type}
-          onChange={(e) => onChange({ type: e.target.value as ServiceType })}
-          className="hidden h-9 text-[13px] @2xl:flex"
-        >
-          {TERRESTRE_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {SERVICE_TYPES[t].emoji} {SERVICE_TYPES[t].label}
-            </option>
-          ))}
-        </Select>
+          onChange={(t) => onChange({ type: t })}
+          className="hidden w-full @2xl:flex"
+        />
       )}
 
       {/* descripción */}
       <Input
+        ref={descRef}
         value={row.description}
         onChange={(e) => onChange({ description: e.target.value })}
-        placeholder={withType ? "Ej: Hotel Riu 5★ all inclusive" : "Ej: AEP → CUN por Copa, con valija"}
+        placeholder={ROW_PLACEHOLDERS[row.type]}
         className="h-10 @2xl:h-9 @2xl:text-[13px]"
       />
 
@@ -1132,12 +1346,16 @@ function ItemRowEditor({
             inputMode="decimal"
             value={row.cost}
             onChange={(e) => onChange({ cost: e.target.value })}
+            onKeyDown={handleEnter}
             placeholder="0"
             className="h-9 text-right text-[13px] tabular-nums"
           />
         </div>
         <div>
-          <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-ink-faint @2xl:hidden">
+          <span
+            className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-ink-faint @2xl:hidden"
+            title="Tarifa comisionable del mayorista. Vacío = igual al Final."
+          >
             Bruto
           </span>
           <Input
@@ -1147,6 +1365,7 @@ function ItemRowEditor({
             inputMode="decimal"
             value={row.gross}
             onChange={(e) => onChange({ gross: e.target.value })}
+            onKeyDown={handleEnter}
             placeholder="= final"
             className="h-9 text-right text-[13px] tabular-nums"
           />
@@ -1163,6 +1382,7 @@ function ItemRowEditor({
             inputMode="decimal"
             value={row.commissionPct}
             onChange={(e) => onChange({ commissionPct: e.target.value })}
+            onKeyDown={handleEnter}
             placeholder="0"
             className="h-9 text-right text-[13px] tabular-nums"
           />
@@ -1174,7 +1394,7 @@ function ItemRowEditor({
         type="button"
         onClick={onRemove}
         aria-label="Eliminar ítem"
-        className="hidden rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-red-50 hover:text-red-600 @2xl:block"
+        className="hidden rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-tone-red-soft hover:text-tone-red-text @2xl:block"
       >
         <Trash2 className="size-4" />
       </button>
@@ -1187,12 +1407,91 @@ function ItemRowEditor({
   );
 }
 
-export function TotalsPanel({
+/* ── número de plata que cuenta al cambiar (enteros animan, centavos exactos) ── */
+function MoneyTicker({
+  value,
+  currency,
+  className,
+}: {
+  value: number;
+  currency: string;
+  className?: string;
+}) {
+  const rounded = round2(value);
+  if (!Number.isInteger(rounded)) {
+    return <span className={cn("tabular-nums", className)}>{fmtMoney(rounded, currency)}</span>;
+  }
+  return (
+    <AnimatedNumber
+      value={rounded}
+      duration={450}
+      format={(n) => fmtMoney(Math.round(n), currency)}
+      className={className}
+    />
+  );
+}
+
+/* ── barra colapsable de totales (mobile) ── */
+function SummaryBar({
   totals,
   currency,
+  open,
+  onToggle,
 }: {
   totals: QuoteTotals;
   currency: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      className="card flex w-full items-center justify-between px-4 py-3 text-left shadow-lg shadow-ink/10 transition-all tap-highlight-none active:scale-[0.99]"
+    >
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
+          Precio cliente
+        </p>
+        <MoneyTicker
+          value={totals.totalPrice}
+          currency={currency}
+          className="text-lg font-semibold leading-tight text-ink"
+        />
+      </div>
+      <div className="flex items-center gap-3">
+        <div className="text-right">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
+            Comisión
+          </p>
+          <MoneyTicker
+            value={totals.commissionTotal}
+            currency={currency}
+            className="text-sm font-semibold leading-tight text-money-700"
+          />
+        </div>
+        <ChevronUp
+          className={cn(
+            "size-4 text-ink-faint transition-transform duration-200",
+            open && "rotate-180",
+          )}
+        />
+      </div>
+    </button>
+  );
+}
+
+/* ── panel de totales (también lo usa el detalle del presupuesto) ── */
+export function TotalsPanel({
+  totals,
+  currency,
+  markupSlot,
+}: {
+  totals: QuoteTotals;
+  currency: string;
+  /** en el builder, los controles de markup/descuento viven acá adentro */
+  markupSlot?: React.ReactNode;
 }) {
   return (
     <div className="space-y-3">
@@ -1203,32 +1502,39 @@ export function TotalsPanel({
             <dt className="text-ink-soft">Total paquete</dt>
             <dd className="tabular-nums text-ink">{fmtMoney(totals.totalCost, currency)}</dd>
           </div>
-          <div className="flex items-baseline justify-between">
-            <dt className="text-ink-soft">Markup</dt>
-            <dd className="tabular-nums text-ink">
-              {fmtMoney(totals.markupAmount, currency)}
-              <span className="ml-1.5 text-xs text-ink-faint">
-                ({fmtNumber(totals.markupPct, totals.markupPct % 1 ? 1 : 0)}%)
-              </span>
-            </dd>
-          </div>
-          {totals.discount > 0 && (
-            <div className="flex items-baseline justify-between">
-              <dt className="text-ink-soft">Descuento</dt>
-              <dd className="tabular-nums text-red-600">
-                −{fmtMoney(totals.discount, currency)}
-              </dd>
-            </div>
+          {!markupSlot && (
+            <>
+              <div className="flex items-baseline justify-between">
+                <dt className="text-ink-soft">Markup</dt>
+                <dd className="tabular-nums text-ink">
+                  {fmtMoney(totals.markupAmount, currency)}
+                  <span className="ml-1.5 text-xs text-ink-faint">
+                    ({fmtNumber(totals.markupPct, totals.markupPct % 1 ? 1 : 0)}%)
+                  </span>
+                </dd>
+              </div>
+              {totals.discount > 0 && (
+                <div className="flex items-baseline justify-between">
+                  <dt className="text-ink-soft">Descuento</dt>
+                  <dd className="tabular-nums text-tone-red-text">
+                    −{fmtMoney(totals.discount, currency)}
+                  </dd>
+                </div>
+              )}
+            </>
           )}
         </dl>
+        {markupSlot}
         <div className="mt-3 border-t border-line pt-3">
           <div className="flex items-baseline justify-between">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-soft">
               Precio cliente
             </p>
-            <p className="text-[26px] font-semibold leading-none tabular-nums text-ink">
-              {fmtMoney(totals.totalPrice, currency)}
-            </p>
+            <MoneyTicker
+              value={totals.totalPrice}
+              currency={currency}
+              className="text-[26px] font-semibold leading-none text-ink"
+            />
           </div>
           <p className="mt-1 text-right text-xs tabular-nums text-ink-faint">
             por persona {fmtMoney(totals.perPerson, currency)}
@@ -1243,13 +1549,19 @@ export function TotalsPanel({
         </p>
         <dl className="space-y-1.5 text-sm">
           <div className="flex items-baseline justify-between">
-            <dt className="text-ink-soft">✈️ Aéreos</dt>
+            <dt className="flex items-center gap-1.5 text-ink-soft">
+              <Plane className="size-4 self-center text-ink-faint" strokeWidth={1.75} />
+              Aéreos
+            </dt>
             <dd className="tabular-nums text-ink">
               {fmtMoney(totals.commissionByGroup.aereos, currency)}
             </dd>
           </div>
           <div className="flex items-baseline justify-between">
-            <dt className="text-ink-soft">🌎 Terrestres</dt>
+            <dt className="flex items-center gap-1.5 text-ink-soft">
+              <Bus className="size-4 self-center text-ink-faint" strokeWidth={1.75} />
+              Terrestres
+            </dt>
             <dd className="tabular-nums text-ink">
               {fmtMoney(totals.commissionByGroup.terrestres, currency)}
             </dd>
@@ -1261,7 +1573,7 @@ export function TotalsPanel({
           {totals.discount > 0 && (
             <div className="flex items-baseline justify-between">
               <dt className="text-ink-soft">Descuento</dt>
-              <dd className="tabular-nums text-red-600">
+              <dd className="tabular-nums text-tone-red-text">
                 −{fmtMoney(totals.discount, currency)}
               </dd>
             </div>
@@ -1271,9 +1583,11 @@ export function TotalsPanel({
           <p className="text-[11px] font-semibold uppercase tracking-wide text-money-700">
             Total comisión
           </p>
-          <p className="text-xl font-semibold tabular-nums text-money-700">
-            {fmtMoney(totals.commissionTotal, currency)}
-          </p>
+          <MoneyTicker
+            value={totals.commissionTotal}
+            currency={currency}
+            className="text-xl font-semibold text-money-700"
+          />
         </div>
       </div>
     </div>

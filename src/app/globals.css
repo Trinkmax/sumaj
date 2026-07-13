@@ -1,30 +1,257 @@
 @import "tailwindcss";
 
-/* ───────────────────────────────────────────
-   Sumaj — Design tokens
+/* ═══════════════════════════════════════════════════════════
+   viajerOS — Design tokens v2
    Cálido, editorial, de viaje. Crema + tinta + terracota.
-   ─────────────────────────────────────────── */
+   Dos temas: claro (default) y oscuro ([data-theme="dark"]).
+   Los componentes usan SOLO tokens semánticos → el tema flipea solo.
+   ═══════════════════════════════════════════════════════════ */
+
+/* variante dark manual (data-theme en <html>): permite `dark:` puntual */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ── fuentes ── */
 @theme inline {
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-fraunces), Georgia, serif;
   --font-serif: var(--font-cormorant), Georgia, serif;
 }
 
-@theme {
+/* ── variables crudas por tema ── */
+:root {
   /* superficie */
-  --color-cream: #faf8f4;
-  --color-paper: #ffffff;
-  --color-sand-soft: #f3efe7;
+  --t-cream: #faf8f4;
+  --t-paper: #ffffff;
+  --t-sand-soft: #f3efe7;
+  --t-sand-deep: #ece7dd;
 
   /* tinta */
-  --color-ink: #211d18;
-  --color-ink-soft: #575046;
-  --color-ink-faint: #8a8177;
+  --t-ink: #211d18;
+  --t-ink-soft: #575046;
+  --t-ink-faint: #7c7369;
 
   /* bordes */
-  --color-line: #e8e2d8;
-  --color-line-strong: #d8d0c2;
+  --t-line: #e8e2d8;
+  --t-line-strong: #d8d0c2;
 
+  /* tintes de marca (bg suaves que flipean) */
+  --t-brand-tint: #fdf5ef;
+  --t-brand-tint-strong: #fae8da;
+  --t-brand-tint-line: #f4cdb0;
+  --t-brand-text: #a03f18;
+
+  /* tintes de dinero */
+  --t-money-tint: #f0fdf9;
+  --t-money-tint-line: #99f6e4;
+  --t-money-text: #0f766e;
+
+  /* sombras */
+  --t-shadow-card: 0 1px 2px rgb(33 29 24 / 0.04);
+  --t-shadow-pop: 0 12px 32px -8px rgb(33 29 24 / 0.14);
+  --t-overlay: rgb(33 29 24 / 0.4);
+
+  /* ── tonos (chips, etiquetas, estados) — {soft, text, line} ── */
+  --t-tone-red-soft: #fef2f2;      --t-tone-red-text: #b91c1c;      --t-tone-red-line: #fecaca;
+  --t-tone-orange-soft: #fff7ed;   --t-tone-orange-text: #c2410c;   --t-tone-orange-line: #fed7aa;
+  --t-tone-amber-soft: #fffbeb;    --t-tone-amber-text: #b45309;    --t-tone-amber-line: #fde68a;
+  --t-tone-yellow-soft: #fefce8;   --t-tone-yellow-text: #a16207;   --t-tone-yellow-line: #fef08a;
+  --t-tone-green-soft: #f0fdf4;    --t-tone-green-text: #15803d;    --t-tone-green-line: #bbf7d0;
+  --t-tone-emerald-soft: #ecfdf5;  --t-tone-emerald-text: #047857;  --t-tone-emerald-line: #a7f3d0;
+  --t-tone-teal-soft: #f0fdfa;     --t-tone-teal-text: #0f766e;     --t-tone-teal-line: #99f6e4;
+  --t-tone-cyan-soft: #ecfeff;     --t-tone-cyan-text: #0e7490;     --t-tone-cyan-line: #a5f3fc;
+  --t-tone-sky-soft: #f0f9ff;      --t-tone-sky-text: #0369a1;      --t-tone-sky-line: #bae6fd;
+  --t-tone-blue-soft: #eff6ff;     --t-tone-blue-text: #1d4ed8;     --t-tone-blue-line: #bfdbfe;
+  --t-tone-indigo-soft: #eef2ff;   --t-tone-indigo-text: #4338ca;   --t-tone-indigo-line: #c7d2fe;
+  --t-tone-violet-soft: #f5f3ff;   --t-tone-violet-text: #6d28d9;   --t-tone-violet-line: #ddd6fe;
+  --t-tone-fuchsia-soft: #fdf4ff;  --t-tone-fuchsia-text: #a21caf;  --t-tone-fuchsia-line: #f5d0fe;
+  --t-tone-pink-soft: #fdf2f8;     --t-tone-pink-text: #be185d;     --t-tone-pink-line: #fbcfe8;
+  --t-tone-rose-soft: #fff1f2;     --t-tone-rose-text: #be123c;     --t-tone-rose-line: #fecdd3;
+  --t-tone-stone-soft: #f5f5f4;    --t-tone-stone-text: #57534e;    --t-tone-stone-line: #e7e5e4;
+
+  /* ── WhatsApp Web (clon del CRM) — valores reales de wa.web ── */
+  --wa-panel: #ffffff;          /* lista de chats */
+  --wa-panel-alt: #f0f2f5;      /* headers, barra de búsqueda, footer del hilo */
+  --wa-hover: #f5f6f6;
+  --wa-active: #f0f2f5;
+  --wa-ink: #111b21;
+  --wa-ink-soft: #54656f;
+  --wa-ink-faint: #667781;
+  --wa-line: #e9edef;
+  --wa-accent: #25d366;
+  --wa-accent-deep: #008069;
+  --wa-bubble-in: #ffffff;
+  --wa-bubble-out: #d9fdd3;
+  --wa-bubble-ink: #111b21;
+  --wa-bubble-meta: #667781;
+  --wa-tick: #53bdeb;
+  --wa-chat-bg: #efeae2;
+  --wa-wallpaper: url("/fondo_whatsapp_light.webp");
+}
+
+[data-theme="dark"] {
+  /* superficie — carbón cálido, nunca negro puro */
+  --t-cream: #131110;
+  --t-paper: #1c1917;
+  --t-sand-soft: #26221d;
+  --t-sand-deep: #2e2923;
+
+  /* tinta */
+  --t-ink: #ede8e0;
+  --t-ink-soft: #b3aa9d;
+  --t-ink-faint: #857d71;
+
+  /* bordes */
+  --t-line: #2b2722;
+  --t-line-strong: #3b352d;
+
+  /* tintes de marca */
+  --t-brand-tint: #2b1c12;
+  --t-brand-tint-strong: #3a2515;
+  --t-brand-tint-line: #56361f;
+  --t-brand-text: #eb9a68;
+
+  /* tintes de dinero */
+  --t-money-tint: #0a2420;
+  --t-money-tint-line: #134e46;
+  --t-money-text: #3ed9b3;
+
+  /* sombras */
+  --t-shadow-card: 0 1px 2px rgb(0 0 0 / 0.3);
+  --t-shadow-pop: 0 12px 32px -8px rgb(0 0 0 / 0.55);
+  --t-overlay: rgb(10 8 6 / 0.6);
+
+  /* tonos */
+  --t-tone-red-soft: #3b1212;      --t-tone-red-text: #fca5a5;      --t-tone-red-line: #7f2b2b;
+  --t-tone-orange-soft: #3b1d0a;   --t-tone-orange-text: #fdba74;   --t-tone-orange-line: #8a3d12;
+  --t-tone-amber-soft: #3a2206;    --t-tone-amber-text: #fcd34d;    --t-tone-amber-line: #85480e;
+  --t-tone-yellow-soft: #362a08;   --t-tone-yellow-text: #fde047;   --t-tone-yellow-line: #7a5310;
+  --t-tone-green-soft: #0c2b16;    --t-tone-green-text: #86efac;    --t-tone-green-line: #1c5c33;
+  --t-tone-emerald-soft: #072e26;  --t-tone-emerald-text: #6ee7b7;  --t-tone-emerald-line: #0c5c48;
+  --t-tone-teal-soft: #0a2e2c;     --t-tone-teal-text: #5eead4;     --t-tone-teal-line: #135e56;
+  --t-tone-cyan-soft: #0a3340;     --t-tone-cyan-text: #67e8f9;     --t-tone-cyan-line: #14607a;
+  --t-tone-sky-soft: #0b2e42;      --t-tone-sky-text: #7dd3fc;      --t-tone-sky-line: #0d5578;
+  --t-tone-blue-soft: #17244d;     --t-tone-blue-text: #93c5fd;     --t-tone-blue-line: #22429e;
+  --t-tone-indigo-soft: #201d4d;   --t-tone-indigo-text: #a5b4fc;   --t-tone-indigo-line: #3b34a0;
+  --t-tone-violet-soft: #2b1360;   --t-tone-violet-text: #c4b5fd;   --t-tone-violet-line: #5626ae;
+  --t-tone-fuchsia-soft: #3d0a41;  --t-tone-fuchsia-text: #f0abfc;  --t-tone-fuchsia-line: #7e1c85;
+  --t-tone-pink-soft: #410a24;     --t-tone-pink-text: #f9a8d4;     --t-tone-pink-line: #8e1a4b;
+  --t-tone-rose-soft: #3f0a18;     --t-tone-rose-text: #fda4af;     --t-tone-rose-line: #8c1c39;
+  --t-tone-stone-soft: #292622;    --t-tone-stone-text: #c7c0b6;    --t-tone-stone-line: #45403a;
+
+  /* WhatsApp Web dark */
+  --wa-panel: #111b21;
+  --wa-panel-alt: #202c33;
+  --wa-hover: #1d2a32;
+  --wa-active: #2a3942;
+  --wa-ink: #e9edef;
+  --wa-ink-soft: #8696a0;
+  --wa-ink-faint: #8696a0;
+  --wa-line: #222d34;
+  --wa-accent: #00a884;
+  --wa-accent-deep: #00a884;
+  --wa-bubble-in: #202c33;
+  --wa-bubble-out: #005c4b;
+  --wa-bubble-ink: #e9edef;
+  --wa-bubble-meta: #8696a0;
+  --wa-tick: #53bdeb;
+  --wa-chat-bg: #0b141a;
+  --wa-wallpaper: url("/fondo_whatsapp_dark.webp");
+}
+
+/* ── tokens tailwind (referencian las variables del tema) ── */
+@theme inline {
+  /* superficie / tinta / bordes */
+  --color-cream: var(--t-cream);
+  --color-paper: var(--t-paper);
+  --color-sand-soft: var(--t-sand-soft);
+  --color-sand-deep: var(--t-sand-deep);
+  --color-ink: var(--t-ink);
+  --color-ink-soft: var(--t-ink-soft);
+  --color-ink-faint: var(--t-ink-faint);
+  --color-line: var(--t-line);
+  --color-line-strong: var(--t-line-strong);
+  --color-overlay: var(--t-overlay);
+
+  /* tintes semánticos */
+  --color-brand-tint: var(--t-brand-tint);
+  --color-brand-tint-strong: var(--t-brand-tint-strong);
+  --color-brand-tint-line: var(--t-brand-tint-line);
+  --color-brand-text: var(--t-brand-text);
+  --color-money-tint: var(--t-money-tint);
+  --color-money-tint-line: var(--t-money-tint-line);
+  --color-money-text: var(--t-money-text);
+
+  /* tonos */
+  --color-tone-red-soft: var(--t-tone-red-soft);
+  --color-tone-red-text: var(--t-tone-red-text);
+  --color-tone-red-line: var(--t-tone-red-line);
+  --color-tone-orange-soft: var(--t-tone-orange-soft);
+  --color-tone-orange-text: var(--t-tone-orange-text);
+  --color-tone-orange-line: var(--t-tone-orange-line);
+  --color-tone-amber-soft: var(--t-tone-amber-soft);
+  --color-tone-amber-text: var(--t-tone-amber-text);
+  --color-tone-amber-line: var(--t-tone-amber-line);
+  --color-tone-yellow-soft: var(--t-tone-yellow-soft);
+  --color-tone-yellow-text: var(--t-tone-yellow-text);
+  --color-tone-yellow-line: var(--t-tone-yellow-line);
+  --color-tone-green-soft: var(--t-tone-green-soft);
+  --color-tone-green-text: var(--t-tone-green-text);
+  --color-tone-green-line: var(--t-tone-green-line);
+  --color-tone-emerald-soft: var(--t-tone-emerald-soft);
+  --color-tone-emerald-text: var(--t-tone-emerald-text);
+  --color-tone-emerald-line: var(--t-tone-emerald-line);
+  --color-tone-teal-soft: var(--t-tone-teal-soft);
+  --color-tone-teal-text: var(--t-tone-teal-text);
+  --color-tone-teal-line: var(--t-tone-teal-line);
+  --color-tone-cyan-soft: var(--t-tone-cyan-soft);
+  --color-tone-cyan-text: var(--t-tone-cyan-text);
+  --color-tone-cyan-line: var(--t-tone-cyan-line);
+  --color-tone-sky-soft: var(--t-tone-sky-soft);
+  --color-tone-sky-text: var(--t-tone-sky-text);
+  --color-tone-sky-line: var(--t-tone-sky-line);
+  --color-tone-blue-soft: var(--t-tone-blue-soft);
+  --color-tone-blue-text: var(--t-tone-blue-text);
+  --color-tone-blue-line: var(--t-tone-blue-line);
+  --color-tone-indigo-soft: var(--t-tone-indigo-soft);
+  --color-tone-indigo-text: var(--t-tone-indigo-text);
+  --color-tone-indigo-line: var(--t-tone-indigo-line);
+  --color-tone-violet-soft: var(--t-tone-violet-soft);
+  --color-tone-violet-text: var(--t-tone-violet-text);
+  --color-tone-violet-line: var(--t-tone-violet-line);
+  --color-tone-fuchsia-soft: var(--t-tone-fuchsia-soft);
+  --color-tone-fuchsia-text: var(--t-tone-fuchsia-text);
+  --color-tone-fuchsia-line: var(--t-tone-fuchsia-line);
+  --color-tone-pink-soft: var(--t-tone-pink-soft);
+  --color-tone-pink-text: var(--t-tone-pink-text);
+  --color-tone-pink-line: var(--t-tone-pink-line);
+  --color-tone-rose-soft: var(--t-tone-rose-soft);
+  --color-tone-rose-text: var(--t-tone-rose-text);
+  --color-tone-rose-line: var(--t-tone-rose-line);
+  --color-tone-stone-soft: var(--t-tone-stone-soft);
+  --color-tone-stone-text: var(--t-tone-stone-text);
+  --color-tone-stone-line: var(--t-tone-stone-line);
+
+  /* WhatsApp */
+  --color-wa-panel: var(--wa-panel);
+  --color-wa-panel-alt: var(--wa-panel-alt);
+  --color-wa-hover: var(--wa-hover);
+  --color-wa-active: var(--wa-active);
+  --color-wa-ink: var(--wa-ink);
+  --color-wa-ink-soft: var(--wa-ink-soft);
+  --color-wa-ink-faint: var(--wa-ink-faint);
+  --color-wa-line: var(--wa-line);
+  --color-wa-accent: var(--wa-accent);
+  --color-wa-accent-deep: var(--wa-accent-deep);
+  --color-wa-bubble-in: var(--wa-bubble-in);
+  --color-wa-bubble-out: var(--wa-bubble-out);
+  --color-wa-bubble-ink: var(--wa-bubble-ink);
+  --color-wa-bubble-meta: var(--wa-bubble-meta);
+  --color-wa-tick: var(--wa-tick);
+  --color-wa-chat: var(--wa-chat-bg);
+}
+
+/* ── rampas estáticas (iguales en ambos temas: botones, acentos vivos) ── */
+@theme {
   /* marca: terracota andina */
   --color-brand-50: #fdf5ef;
   --color-brand-100: #fae8da;
@@ -46,28 +273,59 @@
 
   /* animaciones */
   --animate-fade-in: fade-in 0.25s ease both;
+  --animate-fade-out: fade-out 0.18s ease both;
   --animate-slide-up: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-slide-up-slow: slide-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-slide-down-out: slide-down-out 0.2s ease both;
+  --animate-slide-in-right: slide-in-right 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-scale-in: scale-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-scale-out: scale-out 0.15s ease both;
   --animate-pop: pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  --animate-msg-in: msg-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-pulse-dot: pulse-dot 1.6s ease-in-out infinite;
   --animate-shimmer: shimmer 1.8s linear infinite;
+  --animate-check-pop: check-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 
   @keyframes fade-in {
     from { opacity: 0; }
     to { opacity: 1; }
   }
+  @keyframes fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
   @keyframes slide-up {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes slide-down-out {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(10px); }
+  }
+  @keyframes slide-in-right {
+    from { opacity: 0; transform: translateX(16px); }
+    to { opacity: 1; transform: translateX(0); }
   }
   @keyframes scale-in {
     from { opacity: 0; transform: scale(0.96); }
     to { opacity: 1; transform: scale(1); }
   }
+  @keyframes scale-out {
+    from { opacity: 1; transform: scale(1); }
+    to { opacity: 0; transform: scale(0.97); }
+  }
   @keyframes pop {
     0% { transform: scale(0.9); opacity: 0; }
     60% { transform: scale(1.03); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  @keyframes msg-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes check-pop {
+    0% { transform: scale(0); opacity: 0; }
+    70% { transform: scale(1.15); opacity: 1; }
     100% { transform: scale(1); opacity: 1; }
   }
   @keyframes pulse-dot {
@@ -91,6 +349,13 @@ body {
   color: var(--color-ink);
   font-family: var(--font-sans);
   font-feature-settings: "cv11", "ss01";
+}
+
+/* el cambio de tema cross-fadea las superficies grandes */
+html[data-theme] body,
+html[data-theme] aside,
+html[data-theme] header {
+  transition: background-color 0.25s ease, border-color 0.25s ease;
 }
 
 ::selection {
@@ -125,20 +390,30 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 
-/* utilidades del sistema */
+/* ── utilidades del sistema ── */
 @utility card {
   background: var(--color-paper);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-2xl);
-  box-shadow: 0 1px 2px rgb(33 29 24 / 0.04);
+  box-shadow: var(--t-shadow-card);
+}
+
+/* tarjeta clickeable: levanta apenas al hover */
+@utility card-hover {
+  transition: border-color 0.15s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  &:hover {
+    border-color: var(--color-line-strong);
+    box-shadow: var(--t-shadow-pop);
+    transform: translateY(-1px);
+  }
 }
 
 @utility skeleton {
   background: linear-gradient(
     90deg,
-    var(--color-sand-soft) 25%,
-    #ece7dd 50%,
-    var(--color-sand-soft) 75%
+    var(--t-sand-soft) 25%,
+    var(--t-sand-deep) 50%,
+    var(--t-sand-soft) 75%
   );
   background-size: 200% 100%;
   animation: var(--animate-shimmer);
@@ -154,13 +429,77 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
   &::-webkit-scrollbar { display: none; }
 }
 
-/* patrón de fondo del chat (estilo WhatsApp, sutil) */
+/* fondo del hilo de chat: wallpaper oficial (claro/oscuro según tema) */
+@utility wa-wallpaper {
+  background-color: var(--wa-chat-bg);
+  background-image: var(--wa-wallpaper);
+  background-size: 480px auto;
+  background-repeat: repeat;
+}
+
+/* alias legacy — mismo wallpaper */
 @utility chat-bg {
-  background-color: #f5f1e8;
-  background-image: radial-gradient(
-    circle at 1px 1px,
-    rgb(33 29 24 / 0.045) 1px,
-    transparent 0
-  );
-  background-size: 22px 22px;
+  background-color: var(--wa-chat-bg);
+  background-image: var(--wa-wallpaper);
+  background-size: 480px auto;
+  background-repeat: repeat;
+}
+
+/* colita de la burbuja de chat (in = izquierda, out = derecha) */
+@utility bubble-tail-in {
+  &::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -8px;
+    width: 8px;
+    height: 13px;
+    background: var(--wa-bubble-in);
+    clip-path: path("M8 0 L8 13 C8 6 4 1.5 0 0 Z");
+  }
+}
+@utility bubble-tail-out {
+  &::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: -8px;
+    width: 8px;
+    height: 13px;
+    background: var(--wa-bubble-out);
+    clip-path: path("M0 0 L0 13 C0 6 4 1.5 8 0 Z");
+  }
+}
+
+/* entrada escalonada de listas (hasta 14 hijos, 35ms entre cada uno)
+   fill-mode backwards: al terminar, la animación suelta el transform
+   (así card-hover puede levantar la fila sin pelearse con el keyframe) */
+.stagger-children > * {
+  animation: slide-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 35ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 70ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 105ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 140ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 175ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 210ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 245ms; }
+.stagger-children > *:nth-child(9) { animation-delay: 280ms; }
+.stagger-children > *:nth-child(10) { animation-delay: 315ms; }
+.stagger-children > *:nth-child(11) { animation-delay: 350ms; }
+.stagger-children > *:nth-child(12) { animation-delay: 385ms; }
+.stagger-children > *:nth-child(13) { animation-delay: 420ms; }
+.stagger-children > *:nth-child(14) { animation-delay: 455ms; }
+
+/* reduced motion: todo instantáneo, nada se rompe */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

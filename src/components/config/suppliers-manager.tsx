@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Globe } from "lucide-react";
+import { Plus, Pencil, Trash2, Globe, Handshake } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -35,7 +35,7 @@ export function SuppliersManager({ suppliers }: { suppliers: Supplier[] }) {
 
       {suppliers.length === 0 ? (
         <EmptyState
-          emoji="🤝"
+          icon={Handshake}
           title="Todavía no hay proveedores"
           description="Cargá tus mayoristas para autocompletar comisiones al cotizar."
           action={
@@ -46,7 +46,7 @@ export function SuppliersManager({ suppliers }: { suppliers: Supplier[] }) {
           }
         />
       ) : (
-        <ul className="card divide-y divide-line overflow-hidden animate-slide-up">
+        <ul className="card divide-y divide-line overflow-hidden stagger-children">
           {suppliers.map((s) => (
             <SupplierRow
               key={s.id}
@@ -155,7 +155,7 @@ function SupplierRow({
             variant="ghost"
             onClick={onDelete}
             aria-label={`Eliminar ${supplier.name}`}
-            className="text-red-500 hover:bg-red-50 hover:text-red-600"
+            className="text-tone-red-text hover:bg-tone-red-soft hover:text-tone-red-text"
           >
             <Trash2 />
           </Button>
@@ -203,7 +203,7 @@ function SupplierDialog({
       toast.error(res.error);
       return;
     }
-    toast.success(supplier ? "Proveedor guardado." : `${name.trim()} cargado 🤝`);
+    toast.success(supplier ? "Proveedor guardado." : `${name.trim()} cargado al equipo de mayoristas.`);
     onOpenChange(false);
   }
 

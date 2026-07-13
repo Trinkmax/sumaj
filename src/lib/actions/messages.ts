@@ -165,8 +165,6 @@ export async function markConversationRead(input: {
     .update({ unread_count: 0 })
     .eq("id", parsed.data.conversationId);
   if (error) return fail("No se pudo marcar como leída.");
-
-  revalidatePath("/crm");
   return succeed(null);
 }
 

@@ -3,14 +3,16 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, TriangleAlert } from "lucide-react";
+import { ChevronDown, Plus, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label } from "@/components/ui/input";
+import { ChoiceGrid } from "@/components/ui/misc";
 import { normalizePhone, fmtPhone } from "@/lib/format";
 import { CHANNELS } from "@/lib/domain";
 import { createContact } from "@/lib/actions/contacts";
+import { cn } from "@/lib/utils";
 import type { LeadChannel } from "@/lib/types";
 
 type DedupeContact = { id: string; full_name: string; phone: string | null };
@@ -19,6 +21,7 @@ export function NewContactButton({ contacts }: { contacts: DedupeContact[] }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [more, setMore] = React.useState(false);
   const [name, setName] = React.useState("");
   const [phone, setPhone] = React.useState("");
   const [email, setEmail] = React.useState("");
@@ -38,6 +41,7 @@ export function NewContactButton({ contacts }: { contacts: DedupeContact[] }) {
     setEmail("");
     setCity("");
     setSource("manual");
+    setMore(false);
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -60,7 +64,7 @@ export function NewContactButton({ contacts }: { contacts: DedupeContact[] }) {
       toast.error(res.error);
       return;
     }
-    toast.success("Contacto creado 👌");
+    toast.success("Contacto creado.");
     setOpen(false);
     reset();
     router.push(`/clientes/${res.data.contactId}`);
@@ -75,7 +79,7 @@ export function NewContactButton({ contacts }: { contacts: DedupeContact[] }) {
       </DialogTrigger>
       <DialogContent
         title="Nuevo contacto"
-        description="Solo el nombre es obligatorio, el resto se completa después."
+        description="Con el nombre alcanza. El resto se completa cuando haga falta."
       >
         <form onSubmit={submit} className="space-y-4">
           <div>
@@ -101,7 +105,7 @@ export function NewContactButton({ contacts }: { contacts: DedupeContact[] }) {
               inputMode="tel"
             />
             {duplicate && (
-              <div className="mt-2 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] text-amber-800 animate-fade-in">
+              <div className="mt-2 flex animate-fade-in items-start gap-2 rounded-xl border border-tone-amber-line bg-tone-amber-soft px-3 py-2.5 text-[13px] text-tone-amber-text">
                 <TriangleAlert className="mt-0.5 size-4 shrink-0" />
                 <p>
                   Ya existe{" "}
@@ -118,44 +122,55 @@ export function NewContactButton({ contacts }: { contacts: DedupeContact[] }) {
             )}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <Label htmlFor="nc-email">Email</Label>
-              <Input
-                id="nc-email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="nombre@mail.com"
-                type="email"
-              />
-            </div>
-            <div>
-              <Label htmlFor="nc-city">Ciudad</Label>
-              <Input
-                id="nc-city"
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-                placeholder="Ej: Córdoba"
-              />
-            </div>
-          </div>
-
-          <div>
-            <Label htmlFor="nc-source">¿Por dónde llegó?</Label>
-            <Select
-              id="nc-source"
-              value={source}
-              onChange={(e) => setSource(e.target.value as LeadChannel)}
+          {/* progressive disclosure: lo demás solo si hace falta */}
+          {!more ? (
+            <button
+              type="button"
+              onClick={() => setMore(true)}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-line-strong/70 py-2 text-[13px] font-medium text-ink-soft transition-colors tap-highlight-none hover:border-ink-faint hover:text-ink"
             >
-              {Object.entries(CHANNELS).map(([key, ch]) => (
-                <option key={key} value={key}>
-                  {ch.label}
-                </option>
-              ))}
-            </Select>
-          </div>
+              <ChevronDown className="size-3.5" /> Más datos (email, ciudad, canal)
+            </button>
+          ) : (
+            <div className="animate-slide-up space-y-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="nc-email">Email</Label>
+                  <Input
+                    id="nc-email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="nombre@mail.com"
+                    type="email"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="nc-city">Ciudad</Label>
+                  <Input
+                    id="nc-city"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="Ej: Córdoba"
+                  />
+                </div>
+              </div>
 
-          <div className="flex justify-end gap-2 pt-1">
+              <div>
+                <Label>¿Por dónde llegó?</Label>
+                <ChoiceGrid<LeadChannel>
+                  columns={4}
+                  size="sm"
+                  value={source}
+                  onChange={setSource}
+                  options={(Object.entries(CHANNELS) as [LeadChannel, (typeof CHANNELS)[LeadChannel]][]).map(
+                    ([key, ch]) => ({ value: key, label: ch.short, icon: ch.icon }),
+                  )}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className={cn("flex justify-end gap-2", !more && "pt-1")}>
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
               Cancelar
             </Button>

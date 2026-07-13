@@ -34,18 +34,26 @@ export default function LoadingFiles() {
           <Skeleton className="h-9 w-32 rounded-full" />
         </div>
 
-        {/* filas */}
-        <div className="card divide-y divide-line overflow-hidden">
+        {/* fila-cards */}
+        <div className="space-y-2">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-3 px-4 py-3.5">
-              <Skeleton className="h-4 w-14" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-40" />
-                <Skeleton className="h-3 w-56" />
+            <div key={i} className="card p-3.5 md:px-4 md:py-3">
+              <div className="flex items-center gap-4">
+                <Skeleton className="hidden h-4 w-14 md:block" />
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="h-4 w-40" />
+                    <Skeleton className="h-5 w-20 rounded-full" />
+                  </div>
+                  <Skeleton className="h-3 w-56" />
+                </div>
+                <Skeleton className="hidden h-5 w-24 rounded-full md:block" />
+                <div className="space-y-1.5 text-right">
+                  <Skeleton className="ml-auto h-4 w-20" />
+                  <Skeleton className="ml-auto h-3 w-14" />
+                </div>
+                <Skeleton className="hidden size-7 rounded-full md:block" />
               </div>
-              <Skeleton className="hidden h-4 w-20 md:block" />
-              <Skeleton className="h-4 w-16" />
-              <Skeleton className="size-8 rounded-full" />
             </div>
           ))}
         </div>

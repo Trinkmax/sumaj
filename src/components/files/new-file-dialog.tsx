@@ -3,11 +3,11 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, Plus, Search } from "lucide-react";
+import { Banknote, Check, DollarSign, Plus, Search } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
-import { Segmented } from "@/components/ui/misc";
+import { ChoiceGrid } from "@/components/ui/misc";
 import { Avatar } from "@/components/ui/avatar";
 import { createFile } from "@/lib/actions/files";
 import { fmtPhone } from "@/lib/format";
@@ -98,7 +98,7 @@ function NewFileDialog({
       toast.error(res.error);
       return;
     }
-    toast.success(`File ${res.data.code} creado 🎉`);
+    toast.success(`¡File ${res.data.code} creado!`);
     onOpenChange(false);
     router.push(`/files/${res.data.fileId}`);
   };
@@ -215,7 +215,7 @@ function NewFileDialog({
           </div>
 
           {/* vendedor + moneda */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label htmlFor="nf-seller">Vendedor</Label>
               <Select
@@ -232,13 +232,15 @@ function NewFileDialog({
               </Select>
             </div>
             <div>
-              <Label>Moneda</Label>
-              <Segmented<"USD" | "ARS">
+              <Label>Moneda del file</Label>
+              <ChoiceGrid<"USD" | "ARS">
                 value={currency}
                 onChange={setCurrency}
+                columns={2}
+                size="sm"
                 options={[
-                  { value: "USD", label: "USD" },
-                  { value: "ARS", label: "ARS" },
+                  { value: "USD", label: "Dólares", icon: DollarSign, hint: "USD" },
+                  { value: "ARS", label: "Pesos", icon: Banknote, hint: "ARS" },
                 ]}
               />
             </div>

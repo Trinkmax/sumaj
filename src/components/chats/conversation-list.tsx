@@ -1,17 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Search } from "lucide-react";
+import { Check, MessageCircle, Search, type LucideIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Avatar } from "@/components/ui/avatar";
-import { Input } from "@/components/ui/input";
-import { EmptyState, Segmented } from "@/components/ui/misc";
 import { fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { CONVERSATION_SELECT, type ConversationRow } from "./types";
 
-type Filter = "todos" | "no_leidos" | "sin_asignar";
+type Filter = "todos" | "no_leidas" | "sin_asignar";
+
+const FILTERS: { value: Filter; label: string }[] = [
+  { value: "todos", label: "Todos" },
+  { value: "no_leidas", label: "No leídas" },
+  { value: "sin_asignar", label: "Sin asignar" },
+];
 
 /** "hace 5 min" → "5 min" — hora corta para la fila */
 function shortTime(iso: string | null): string {
@@ -19,44 +23,81 @@ function shortTime(iso: string | null): string {
   return fmtRelative(iso).replace(/^hace /, "");
 }
 
+/** ¿El último mensaje de la fila fue nuestro? (para el tick del preview) */
+function lastIsOutbound(c: ConversationRow): boolean {
+  if (!c.last_message_at) return false;
+  if (!c.last_inbound_at) return true;
+  return new Date(c.last_message_at).getTime() > new Date(c.last_inbound_at).getTime();
+}
+
+/** Empty state del mundo WhatsApp (acá no van los tokens crema). */
+function WaEmpty({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-2.5 px-8 py-14 text-center animate-fade-in">
+      <div className="flex size-14 items-center justify-center rounded-full bg-wa-panel-alt text-wa-ink-faint">
+        <Icon className="size-6" strokeWidth={1.75} />
+      </div>
+      <p className="text-[15px] font-medium text-wa-ink">{title}</p>
+      <p className="max-w-[260px] text-[13px] leading-relaxed text-wa-ink-faint">
+        {description}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Lista de conversaciones clonando WhatsApp Web: título "Chats",
+ * búsqueda redondeada, filtros píldora y filas de 72px sobre wa-panel.
+ */
 export function ConversationList({
   initial,
   agencyId,
   activeId,
   hiddenOnMobile = false,
   onSelect,
+  toolbar,
 }: {
   initial: ConversationRow[];
   agencyId: string;
   activeId?: string | null;
-  /** true en /chats/[id]: la lista está oculta en mobile y no debe suscribirse a realtime ahí */
+  /** true en pantallas donde la lista está oculta en mobile: sin suscripción ahí */
   hiddenOnMobile?: boolean;
-  /** Si viene, las filas llaman onSelect(id) en vez de navegar a /chats/{id} (reuso embebido, p. ej. CRM). */
+  /** Si viene, las filas llaman onSelect(id); si no, navegan a /crm?vista=chats&c={id}. */
   onSelect?: (conversationId: string) => void;
+  /** Acciones del CRM en el header del panel (switcher de vistas, nuevo lead). */
+  toolbar?: React.ReactNode;
 }) {
   const [conversations, setConversations] = useState<ConversationRow[]>(initial);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("todos");
-  const [isDesktop, setIsDesktop] = useState(() =>
-    typeof window === "undefined" ? false : window.matchMedia("(min-width: 768px)").matches,
-  );
 
-  useEffect(() => {
+  /* md+ como store externo (SSR: false = mobile-first) */
+  const subscribeMd = useCallback((cb: () => void) => {
     const mq = window.matchMedia("(min-width: 768px)");
-    setIsDesktop(mq.matches);
-    const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
+    mq.addEventListener("change", cb);
+    return () => mq.removeEventListener("change", cb);
   }, []);
+  const isDesktop = useSyncExternalStore(
+    subscribeMd,
+    () => window.matchMedia("(min-width: 768px)").matches,
+    () => false,
+  );
 
   /* Realtime: cualquier INSERT/UPDATE de conversations de la agencia
      refresca esa fila (con joins) en vivo. */
   useEffect(() => {
-    // en /chats/[id] mobile la lista no se ve: sin suscripción ni refetch
     if (hiddenOnMobile && !isDesktop) return;
     const supabase = createClient();
     const channel = supabase
-      // sufijo único por montaje: la lista existe en /chats y /chats/[id] a la vez durante la navegación
+      // sufijo único por montaje: reutilizar el nombre de un canal suscripto lanza excepción
       .channel(`conversations:${agencyId}:${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
@@ -90,7 +131,7 @@ export function ConversationList({
     const qDigits = q.replace(/\D/g, "");
     return conversations
       .filter((c) => {
-        if (filter === "no_leidos" && (c.unread_count === 0 || c.id === activeId)) return false;
+        if (filter === "no_leidas" && (c.unread_count === 0 || c.id === activeId)) return false;
         if (filter === "sin_asignar" && c.assigned_to != null) return false;
         if (!q) return true;
         const name = c.contact?.full_name?.toLowerCase() ?? "";
@@ -107,93 +148,128 @@ export function ConversationList({
   const hasAny = conversations.length > 0;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* búsqueda + filtros */}
-      <div className="space-y-2.5 px-4 pb-3 md:px-3.5 md:pt-3.5">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-faint" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nombre o teléfono…"
-            className="pl-9"
-            aria-label="Buscar conversaciones"
-          />
-        </div>
-        <Segmented<Filter>
-          value={filter}
-          onChange={setFilter}
-          options={[
-            { value: "todos", label: "Todos" },
-            { value: "no_leidos", label: "No leídos" },
-            { value: "sin_asignar", label: "Sin asignar" },
-          ]}
-        />
+    <div className="flex h-full min-h-0 flex-col bg-wa-panel">
+      {/* título: como el header de WhatsApp Web (+ acciones del CRM a la derecha) */}
+      <div
+        className={cn(
+          "h-[59px] shrink-0 items-center justify-between gap-2 px-4",
+          toolbar ? "flex" : "hidden md:flex",
+        )}
+      >
+        <h2 className="text-[22px] font-bold leading-none tracking-tight text-wa-ink">Chats</h2>
+        {toolbar}
       </div>
 
-      {/* filas */}
+      {/* búsqueda + filtros píldora */}
+      <div className="shrink-0 space-y-2 px-3 pb-2 pt-2 md:pt-0">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-wa-ink-faint" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nombre o teléfono"
+            aria-label="Buscar conversaciones"
+            className="h-[38px] w-full rounded-lg bg-wa-panel-alt pl-10 pr-3 text-[14px] text-wa-ink outline-none transition-shadow placeholder:text-wa-ink-faint focus:ring-2 focus:ring-wa-accent-deep/30"
+          />
+        </div>
+        <div className="flex items-center gap-1.5" role="tablist" aria-label="Filtrar chats">
+          {FILTERS.map((f) => {
+            const active = filter === f.value;
+            return (
+              <button
+                key={f.value}
+                role="tab"
+                aria-selected={active}
+                onClick={() => setFilter(f.value)}
+                className={cn(
+                  "h-8 rounded-full border px-3 text-[13px] transition-colors tap-highlight-none active:scale-[0.97]",
+                  active
+                    ? "border-transparent bg-wa-accent/15 font-medium text-wa-accent-deep"
+                    : "border-wa-line bg-wa-panel text-wa-ink-soft hover:bg-wa-hover",
+                )}
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* filas 72px estilo WA */}
       <div className="min-h-0 flex-1 md:overflow-y-auto">
         {filtered.length === 0 ? (
-          <div className="px-4 pt-2 md:px-3.5">
-            {hasAny ? (
-              <EmptyState
-                emoji="🔍"
-                title="Nada por acá"
-                description="Probá con otra búsqueda u otro filtro."
-              />
-            ) : (
-              <EmptyState
-                emoji="💬"
-                title="Todavía no hay chats"
-                description="Cuando un cliente te escriba por WhatsApp, la conversación aparece acá."
-              />
-            )}
-          </div>
+          hasAny ? (
+            <WaEmpty
+              icon={Search}
+              title="Nada por acá"
+              description="Probá con otra búsqueda u otro filtro."
+            />
+          ) : (
+            <WaEmpty
+              icon={MessageCircle}
+              title="Todavía no hay chats"
+              description="Cuando un cliente te escriba por WhatsApp, la conversación aparece acá."
+            />
+          )
         ) : (
-          <div className="mx-4 divide-y divide-line overflow-hidden rounded-2xl border border-line bg-paper shadow-sm md:mx-0 md:rounded-none md:border-0 md:shadow-none">
+          <div className="divide-y divide-wa-line animate-fade-in">
             {filtered.map((c) => {
               const active = c.id === activeId;
               const unread = active ? 0 : c.unread_count;
               const name = c.contact?.full_name ?? "Sin nombre";
+              const outTick = lastIsOutbound(c);
               const rowClass = cn(
-                "flex items-center gap-3 px-3.5 py-3 transition-colors tap-highlight-none",
-                active ? "bg-sand-soft" : "hover:bg-sand-soft/60 active:bg-sand-soft",
+                "flex h-[72px] items-center gap-3 px-3 transition-colors tap-highlight-none",
+                active ? "bg-wa-active" : "hover:bg-wa-hover active:bg-wa-active",
                 c.status === "cerrada" && !active && "opacity-70",
               );
               const rowContent = (
                 <>
-                  <Avatar name={name} className="size-11 text-sm" />
+                  <Avatar name={name} className="size-[49px] text-base" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2">
                       <p
                         className={cn(
-                          "truncate text-[15px] leading-5 text-ink",
-                          unread > 0 ? "font-semibold" : "font-medium",
+                          "truncate text-[16px] leading-[21px] text-wa-ink",
+                          unread > 0 ? "font-semibold" : "font-normal",
                         )}
                       >
                         {name}
                         {c.status === "cerrada" && (
-                          <span className="ml-1.5 align-middle text-[10px] font-medium text-ink-faint">
+                          <span className="ml-1.5 align-middle text-[10px] font-medium text-wa-ink-faint">
                             · cerrada
                           </span>
                         )}
                       </p>
                       <span
                         className={cn(
-                          "shrink-0 text-[11px] tabular-nums",
-                          unread > 0 ? "font-semibold text-brand-700" : "text-ink-faint",
+                          "shrink-0 text-[12px] leading-[14px] tabular-nums",
+                          unread > 0
+                            ? "font-medium text-wa-accent-deep"
+                            : "text-wa-ink-faint",
                         )}
                       >
                         {shortTime(c.last_message_at)}
                       </span>
                     </div>
-                    <div className="mt-0.5 flex items-end justify-between gap-2">
-                      <p className="min-w-0 flex-1 truncate text-[13px] leading-5 text-ink-faint">
-                        {c.last_message_preview ?? "Sin mensajes todavía"}
+                    <div className="mt-[3px] flex min-h-5 items-center justify-between gap-2">
+                      <p
+                        className={cn(
+                          "flex min-w-0 flex-1 items-center gap-1 text-[13.5px] leading-5",
+                          unread > 0 ? "font-medium text-wa-ink" : "text-wa-ink-soft",
+                        )}
+                      >
+                        {outTick && (
+                          <Check className="size-4 shrink-0 text-wa-ink-faint" />
+                        )}
+                        <span className="truncate">
+                          {c.last_message_preview ?? "Sin mensajes todavía"}
+                        </span>
                       </p>
                       <span className="flex shrink-0 items-center gap-1.5">
                         {unread > 0 && (
-                          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1.5 text-[11px] font-bold leading-none text-white animate-pop">
+                          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-wa-accent px-1.5 text-[11px] font-semibold leading-none text-white animate-pop">
                             {unread > 99 ? "99+" : unread}
                           </span>
                         )}
@@ -219,7 +295,7 @@ export function ConversationList({
                   {rowContent}
                 </button>
               ) : (
-                <Link key={c.id} href={`/chats/${c.id}`} className={rowClass}>
+                <Link key={c.id} href={`/crm?vista=chats&c=${c.id}`} className={rowClass}>
                   {rowContent}
                 </Link>
               );

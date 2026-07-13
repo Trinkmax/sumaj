@@ -83,7 +83,7 @@ export function TagPicker({
     setTags((prev) => [...prev, res.data.tag]);
     setNewName("");
     setShowCreate(false);
-    toast.success("Etiqueta creada 🏷️");
+    toast.success("Etiqueta creada.");
   };
 
   const byCategory = TAG_CATEGORIES.map((cat) => ({

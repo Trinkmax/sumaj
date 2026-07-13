@@ -2,11 +2,16 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { UserPlus, Copy, Trash2, MailQuestion } from "lucide-react";
+import { Check, ChevronDown, Copy, MailPlus, Trash2, UserPlus } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  Dropdown,
+  DropdownContent,
+  DropdownItem,
+  DropdownTrigger,
+} from "@/components/ui/dropdown";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Switch, Tooltip, EmptyState } from "@/components/ui/misc";
 import { ConfirmDialog } from "@/components/config/confirm-dialog";
@@ -18,12 +23,31 @@ import {
   updateMemberRole,
 } from "@/lib/actions/settings";
 import type { MemberRole, Tables } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 type Member = Tables<"members">;
 type Invitation = Tables<"invitations">;
 
+const ROLE_META: Record<MemberRole, { label: string; chip: string; dot: string }> = {
+  admin: {
+    label: "Socio/Admin",
+    chip: "bg-brand-tint text-brand-text border-brand-tint-line",
+    dot: "bg-brand-500",
+  },
+  vendedor: {
+    label: "Vendedor",
+    chip: "bg-tone-sky-soft text-tone-sky-text border-tone-sky-line",
+    dot: "bg-sky-500",
+  },
+  freelance: {
+    label: "Freelance",
+    chip: "bg-tone-violet-soft text-tone-violet-text border-tone-violet-line",
+    dot: "bg-violet-500",
+  },
+};
+
 const ROLE_OPTIONS: { value: MemberRole; label: string }[] = [
-  { value: "admin", label: "Admin" },
+  { value: "admin", label: "Socio/Admin" },
   { value: "vendedor", label: "Vendedor" },
   { value: "freelance", label: "Freelance" },
 ];
@@ -33,6 +57,10 @@ function appUrl() {
     process.env.NEXT_PUBLIC_APP_URL ??
     (typeof window !== "undefined" ? window.location.origin : "")
   );
+}
+
+function inviteMessage(agencyName: string) {
+  return `Sumate al sistema de ${agencyName}: registrate con este email en ${appUrl()}/registro`;
 }
 
 export function TeamSection({
@@ -64,7 +92,7 @@ export function TeamSection({
             <span className="hidden sm:inline">Invitar</span>
           </Button>
         </div>
-        <ul className="divide-y divide-line">
+        <ul className="divide-y divide-line stagger-children">
           {members.map((m) => (
             <MemberRow key={m.id} member={m} isSelf={m.id === currentMemberId} />
           ))}
@@ -78,7 +106,7 @@ export function TeamSection({
         </p>
         {invitations.length === 0 ? (
           <EmptyState
-            emoji="✉️"
+            icon={MailPlus}
             title="No hay invitaciones pendientes"
             description="Invitá a alguien y pasale el mensaje para que se registre."
             className="mt-4 py-8"
@@ -94,6 +122,60 @@ export function TeamSection({
 
       <InviteDialog open={inviteOpen} onOpenChange={setInviteOpen} agencyName={agencyName} />
     </div>
+  );
+}
+
+/* ── Selector de rol como chip tonal ── */
+
+function RoleChip({
+  role,
+  memberName,
+  disabled,
+  onSelect,
+}: {
+  role: MemberRole;
+  memberName: string;
+  disabled?: boolean;
+  onSelect: (r: MemberRole) => void;
+}) {
+  const meta = ROLE_META[role] ?? ROLE_META.vendedor;
+  const chipCls =
+    "inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-[12px] font-medium leading-4 transition-all tap-highlight-none";
+
+  if (disabled) {
+    return (
+      <Tooltip content="Tu propio rol no se cambia desde acá">
+        <span className={cn(chipCls, meta.chip, "opacity-80")}>
+          <span className={cn("size-1.5 rounded-full", meta.dot)} />
+          {meta.label}
+        </span>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Dropdown>
+      <DropdownTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Rol de ${memberName}: ${meta.label}. Cambiar`}
+          className={cn(chipCls, meta.chip, "cursor-pointer active:scale-95")}
+        >
+          <span className={cn("size-1.5 rounded-full", meta.dot)} />
+          {meta.label}
+          <ChevronDown className="size-3 opacity-60" />
+        </button>
+      </DropdownTrigger>
+      <DropdownContent align="end" className="min-w-[160px]">
+        {ROLE_OPTIONS.map((r) => (
+          <DropdownItem key={r.value} onSelect={() => r.value !== role && onSelect(r.value)}>
+            <span className={cn("size-1.5 rounded-full", ROLE_META[r.value].dot)} />
+            {r.label}
+            {r.value === role && <Check className="ml-auto size-3.5" />}
+          </DropdownItem>
+        ))}
+      </DropdownContent>
+    </Dropdown>
   );
 }
 
@@ -114,7 +196,7 @@ function MemberRow({ member, isSelf }: { member: Member; isSelf: boolean }) {
       toast.error(res.error);
       return;
     }
-    toast.success(`${member.display_name} ahora es ${ROLE_OPTIONS.find((r) => r.value === next)?.label}.`);
+    toast.success(`${member.display_name} ahora es ${ROLE_META[next].label}.`);
   }
 
   async function toggleActive(next: boolean) {
@@ -148,7 +230,7 @@ function MemberRow({ member, isSelf }: { member: Member; isSelf: boolean }) {
   }
 
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 px-5 py-3.5">
+    <li className={cn("flex flex-wrap items-center gap-x-3 gap-y-2 px-5 py-3.5 transition-opacity", !active && "opacity-55")}>
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <Avatar name={member.display_name} src={member.avatar_url} />
         <div className="min-w-0">
@@ -161,19 +243,12 @@ function MemberRow({ member, isSelf }: { member: Member; isSelf: boolean }) {
       </div>
 
       <div className="flex w-full items-center gap-2 pl-12 sm:w-auto sm:pl-0">
-        <Select
-          value={role}
-          onChange={(e) => changeRole(e.target.value as MemberRole)}
+        <RoleChip
+          role={role}
+          memberName={member.display_name}
           disabled={isSelf}
-          aria-label={`Rol de ${member.display_name}`}
-          className="h-9 w-[130px] text-[13px]"
-        >
-          {ROLE_OPTIONS.map((r) => (
-            <option key={r.value} value={r.value}>
-              {r.label}
-            </option>
-          ))}
-        </Select>
+          onSelect={changeRole}
+        />
 
         <div className="relative">
           <Input
@@ -217,27 +292,28 @@ function InvitationRow({
   const [confirmOpen, setConfirmOpen] = React.useState(false);
 
   function copyMessage() {
-    const msg = `Sumate al sistema de ${agencyName}: registrate con este email en ${appUrl()}/registro`;
     navigator.clipboard
-      .writeText(msg)
+      .writeText(inviteMessage(agencyName))
       .then(() => toast.success("Mensaje copiado. Pasáselo por WhatsApp."))
       .catch(() => toast.error("No se pudo copiar. Copialo a mano."));
   }
 
   return (
     <li className="flex items-center gap-3 py-3">
-      <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-sand-soft text-ink-faint">
-        <MailQuestion className="size-4" />
+      <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-tint text-brand-text">
+        <MailPlus className="size-4" strokeWidth={1.75} />
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-ink">{invitation.email}</p>
         <p className="truncate text-xs text-ink-faint">
           {invitation.display_name ? `${invitation.display_name} · ` : ""}
-          {ROLE_OPTIONS.find((r) => r.value === invitation.role)?.label}
+          {ROLE_META[invitation.role]?.label ?? invitation.role}
           {invitation.commission_pct > 0 ? ` · ${invitation.commission_pct}% comisión` : ""}
         </p>
       </div>
-      <Badge>Pendiente</Badge>
+      <span className="inline-flex shrink-0 items-center rounded-full border border-tone-amber-line bg-tone-amber-soft px-2 py-0.5 text-[11px] font-medium leading-4 text-tone-amber-text">
+        Pendiente
+      </span>
       <Tooltip content="Copiar mensaje de invitación">
         <Button size="icon-sm" variant="ghost" onClick={copyMessage} aria-label="Copiar mensaje">
           <Copy />
@@ -249,7 +325,7 @@ function InvitationRow({
           variant="ghost"
           onClick={() => setConfirmOpen(true)}
           aria-label="Eliminar invitación"
-          className="text-red-500 hover:bg-red-50 hover:text-red-600"
+          className="text-tone-red-text hover:bg-tone-red-soft hover:text-tone-red-text"
         >
           <Trash2 />
         </Button>
@@ -310,9 +386,12 @@ function InviteDialog({
       toast.error(res.error);
       return;
     }
-    const msg = `Sumate al sistema de ${agencyName}: registrate con este email en ${appUrl()}/registro`;
-    navigator.clipboard.writeText(msg).catch(() => {});
-    toast.success("Invitación creada 🎉 Copiamos el mensaje para que se lo pases.");
+    try {
+      await navigator.clipboard.writeText(inviteMessage(agencyName));
+      toast.success("Invitación creada. Copiamos el mensaje para que se lo pases.");
+    } catch {
+      toast.success("Invitación creada. Copiá el mensaje desde la fila para pasárselo.");
+    }
     setEmail("");
     setDisplayName("");
     setCommission("0");

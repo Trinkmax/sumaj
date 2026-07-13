@@ -2,11 +2,12 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Pencil } from "lucide-react";
+import { Cake, Home, IdCard, NotebookPen, Pencil, StickyNote, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { Input, Label, Textarea } from "@/components/ui/input";
+import { ChoiceGrid } from "@/components/ui/misc";
 import { fmtDate } from "@/lib/format";
 import { updateContact } from "@/lib/actions/contacts";
 import { DOC_TYPE_LABELS, DOC_TYPE_KEYS, birthdayThisMonth, type ContactRow } from "./types";
@@ -31,7 +32,7 @@ export function DatosCard({ contact }: { contact: ContactRow }) {
   });
 
   const set = (k: keyof typeof form) => (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const submit = async (e: React.FormEvent) => {
@@ -60,12 +61,13 @@ export function DatosCard({ contact }: { contact: ContactRow }) {
       return;
     }
     setOpen(false);
-    toast.success("Datos guardados 👌");
+    toast.success("Datos guardados.");
     router.refresh();
   };
 
-  const rows: { label: string; value: React.ReactNode }[] = [
+  const rows: { icon: LucideIcon; label: string; value: React.ReactNode }[] = [
     {
+      icon: IdCard,
       label: "Documento",
       value:
         contact.document_type || contact.document_number
@@ -78,20 +80,21 @@ export function DatosCard({ contact }: { contact: ContactRow }) {
           : null,
     },
     {
+      icon: Cake,
       label: "Nacimiento",
       value: contact.birth_date ? (
-        <span>
+        <span className="inline-flex flex-wrap items-center gap-1.5">
           {fmtDate(contact.birth_date)}
           {birthdayThisMonth(contact.birth_date) && (
-            <span className="ml-1.5" title="Cumple años este mes">
-              🎂
+            <span className="inline-flex items-center gap-1 rounded-full border border-tone-pink-line bg-tone-pink-soft px-1.5 py-px text-[11px] font-medium text-tone-pink-text">
+              <Cake className="size-3" strokeWidth={2} /> cumple este mes
             </span>
           )}
         </span>
       ) : null,
     },
-    { label: "Dirección", value: contact.address },
-    { label: "Notas", value: contact.notes },
+    { icon: Home, label: "Dirección", value: contact.address },
+    { icon: StickyNote, label: "Notas", value: contact.notes },
   ];
 
   const hasData = rows.some((r) => r.value);
@@ -111,16 +114,25 @@ export function DatosCard({ contact }: { contact: ContactRow }) {
             (r) =>
               r.value && (
                 <div key={r.label} className="flex gap-3 text-sm">
-                  <dt className="w-24 shrink-0 text-ink-faint">{r.label}</dt>
+                  <dt className="flex w-28 shrink-0 items-center gap-1.5 self-start text-ink-faint">
+                    <r.icon className="size-3.5" strokeWidth={1.9} />
+                    {r.label}
+                  </dt>
                   <dd className="min-w-0 whitespace-pre-line text-ink">{r.value}</dd>
                 </div>
               ),
           )}
         </dl>
       ) : (
-        <p className="text-sm text-ink-faint">
-          Sin datos cargados todavía. Completalos con el lápiz ✏️
-        </p>
+        <div className="flex flex-col items-start gap-2.5 rounded-xl border border-dashed border-line-strong/70 px-4 py-4">
+          <div className="flex items-center gap-2 text-sm text-ink-faint">
+            <NotebookPen className="size-4" strokeWidth={1.9} />
+            Documento, cumpleaños, dirección… todavía sin cargar.
+          </div>
+          <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
+            <Pencil /> Completar datos
+          </Button>
+        </div>
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -153,17 +165,29 @@ export function DatosCard({ contact }: { contact: ContactRow }) {
                 <Label htmlFor="dc-city">Ciudad</Label>
                 <Input id="dc-city" value={form.city} onChange={set("city")} />
               </div>
-              <div>
-                <Label htmlFor="dc-doctype">Tipo de documento</Label>
-                <Select id="dc-doctype" value={form.documentType} onChange={set("documentType")}>
-                  <option value="">Sin documento</option>
-                  {DOC_TYPE_KEYS.map((k) => (
-                    <option key={k} value={k}>
-                      {DOC_TYPE_LABELS[k]}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+            </div>
+
+            <div>
+              <Label>Documento</Label>
+              <ChoiceGrid<DocumentType | "">
+                columns={5}
+                size="sm"
+                value={form.documentType}
+                onChange={(v) =>
+                  setForm((f) => ({ ...f, documentType: f.documentType === v ? "" : v }))
+                }
+                options={[
+                  ...DOC_TYPE_KEYS.map((k) => ({
+                    value: k as DocumentType | "",
+                    label: DOC_TYPE_LABELS[k],
+                    icon: IdCard,
+                  })),
+                  { value: "" as DocumentType | "", label: "Ninguno" },
+                ]}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <Label htmlFor="dc-docnum">Número</Label>
                 <Input
@@ -177,7 +201,7 @@ export function DatosCard({ contact }: { contact: ContactRow }) {
                 <Label htmlFor="dc-birth">Fecha de nacimiento</Label>
                 <Input id="dc-birth" type="date" value={form.birthDate} onChange={set("birthDate")} />
               </div>
-              <div>
+              <div className="sm:col-span-2">
                 <Label htmlFor="dc-address">Dirección</Label>
                 <Input id="dc-address" value={form.address} onChange={set("address")} />
               </div>

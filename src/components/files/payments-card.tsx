@@ -3,9 +3,9 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, Copy } from "lucide-react";
+import { Banknote, Check, CheckCircle2, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tooltip } from "@/components/ui/misc";
+import { Tooltip, ProgressRing } from "@/components/ui/misc";
 import { PaymentDialog } from "@/components/caja/payment-dialog";
 import { PAYMENT_METHODS, waLink } from "@/lib/domain";
 import { fmtDate, fmtMoney } from "@/lib/format";
@@ -42,7 +42,7 @@ export function PaymentsCard({
 
   const pct =
     totals.total_sale > 0
-      ? Math.min(100, Math.max(0, (totals.paid_total / totals.total_sale) * 100))
+      ? Math.min(1, Math.max(0, totals.paid_total / totals.total_sale))
       : 0;
   const settled = totals.total_sale > 0 && totals.balance <= 0;
 
@@ -57,56 +57,65 @@ export function PaymentsCard({
         </span>
       </div>
 
-      {/* progreso */}
-      <div>
-        <div className="flex items-baseline justify-between text-[13px]">
-          <span className="text-ink-soft">
-            Cobrado{" "}
-            <span className="font-semibold tabular-nums text-money-700">
-              {fmtMoney(totals.paid_total, file.currency)}
+      {/* progreso cobrado/total */}
+      <div className="flex items-center gap-4">
+        <ProgressRing
+          value={mounted ? pct : 0}
+          size={64}
+          strokeWidth={6}
+          className="shrink-0 text-money-700"
+        >
+          <span className="text-[13px] font-bold tabular-nums text-ink">
+            {Math.round(pct * 100)}%
+          </span>
+        </ProgressRing>
+
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xl font-bold tabular-nums text-money-text">
+            {fmtMoney(totals.paid_total, file.currency)}
+          </p>
+          <p className="text-[13px] text-ink-faint">
+            cobrado de{" "}
+            <span className="font-medium tabular-nums text-ink-soft">
+              {fmtMoney(totals.total_sale, file.currency)}
             </span>
-          </span>
-          <span className="tabular-nums text-ink-faint">
-            de {fmtMoney(totals.total_sale, file.currency)}
-          </span>
-        </div>
-        <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-sand-soft">
-          <div
-            className="h-full rounded-full bg-money-600 transition-[width] duration-700 ease-out"
-            style={{ width: mounted ? `${pct}%` : "0%" }}
-          />
+          </p>
+          {settled ? (
+            <span className="mt-1.5 inline-flex animate-pop items-center gap-1 rounded-full border border-tone-emerald-line bg-tone-emerald-soft px-2.5 py-0.5 text-xs font-semibold text-tone-emerald-text">
+              <CheckCircle2 className="size-3.5" strokeWidth={2} />
+              Saldado
+            </span>
+          ) : (
+            <p className="mt-1 text-[13px]">
+              <span className="text-ink-faint">Saldo</span>{" "}
+              <span className="font-bold tabular-nums text-tone-amber-text">
+                {fmtMoney(totals.balance, file.currency)}
+              </span>
+            </p>
+          )}
         </div>
       </div>
-
-      {/* saldo */}
-      {settled ? (
-        <div className="mt-3 flex items-center justify-center gap-2 rounded-xl border border-money-100 bg-money-50 px-3 py-2.5 text-sm font-semibold text-money-700">
-          Saldado ✅
-        </div>
-      ) : (
-        <div className="mt-3 flex items-end justify-between rounded-xl bg-sand-soft/60 px-3.5 py-2.5">
-          <span className="text-sm text-ink-soft">Saldo pendiente</span>
-          <span className="text-xl font-bold tabular-nums text-amber-600">
-            {fmtMoney(totals.balance, file.currency)}
-          </span>
-        </div>
-      )}
 
       {/* registrar */}
       {!settled && (
         <Button
           variant="success"
-          className="mt-3 w-full"
+          className="mt-4 w-full"
           size="lg"
           onClick={() => setDialogOpen(true)}
         >
-          💵 Registrar cobro
+          <Banknote /> Registrar cobro
         </Button>
       )}
 
       {/* lista */}
       {payments.length > 0 && (
-        <div className="mt-4 divide-y divide-line border-t border-line">
+        <div
+          className={cn(
+            "mt-4 divide-y divide-line border-t border-line",
+            payments.length <= 14 && "stagger-children",
+          )}
+        >
           {payments.map((p) => (
             <PaymentItem
               key={p.id}
@@ -143,12 +152,14 @@ function PaymentItem({
   const [copied, setCopied] = React.useState(false);
   const crossCurrency = p.currency !== fileCurrency;
   const receiptUrl = `${appUrl()}/r/${p.receipt_token}`;
+  const method = PAYMENT_METHODS[p.method];
+  const MethodIcon = method.icon;
 
   const copyLink = async () => {
     try {
       await navigator.clipboard.writeText(receiptUrl);
       setCopied(true);
-      toast.success("Link del recibo copiado ✅");
+      toast.success("Link del recibo copiado");
       setTimeout(() => setCopied(false), 1600);
     } catch {
       toast.error("No se pudo copiar. Probá de nuevo.");
@@ -161,9 +172,13 @@ function PaymentItem({
 
   return (
     <div className="flex items-center gap-3 py-2.5">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-money-tint text-money-text">
+        <MethodIcon className="size-4" strokeWidth={1.9} />
+      </span>
+
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-ink">
-          {PAYMENT_METHODS[p.method]}
+          {method.label}
           <span className="ml-1.5 font-normal text-ink-faint">{fmtDate(p.paid_at)}</span>
         </p>
         <p className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-faint">
@@ -175,7 +190,7 @@ function PaymentItem({
       </div>
 
       <div className="shrink-0 text-right">
-        <p className="text-sm font-semibold tabular-nums text-money-700">
+        <p className="text-sm font-semibold tabular-nums text-money-text">
           {fmtMoney(p.amount, p.currency)}
         </p>
         {crossCurrency && (
@@ -187,8 +202,17 @@ function PaymentItem({
 
       <div className="flex shrink-0 items-center gap-0.5">
         <Tooltip content="Copiar link del recibo">
-          <Button variant="ghost" size="icon-sm" onClick={copyLink} aria-label="Copiar link del recibo">
-            {copied ? <Check className="text-money-700" /> : <Copy />}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={copyLink}
+            aria-label="Copiar link del recibo"
+          >
+            {copied ? (
+              <Check className="animate-check-pop text-money-text" />
+            ) : (
+              <Copy />
+            )}
           </Button>
         </Tooltip>
         {contactPhone && (
@@ -199,7 +223,12 @@ function PaymentItem({
               onClick={() => window.open(waLink(contactPhone, waText), "_blank", "noopener")}
               aria-label="Enviar recibo por WhatsApp"
             >
-              <svg viewBox="0 0 24 24" fill="#25d366" className="size-4" aria-hidden>
+              <svg
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                className="size-4 !text-wa-accent"
+                aria-hidden
+              >
                 <path d="M12.04 2c-5.46 0-9.9 4.44-9.9 9.9 0 1.75.46 3.45 1.32 4.95L2.05 22l5.3-1.38c1.45.79 3.08 1.2 4.7 1.2h.01c5.46 0 9.9-4.44 9.9-9.9 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Zm0 18.15c-1.48 0-2.94-.4-4.2-1.15l-.3-.18-3.12.82.83-3.05-.2-.31a8.26 8.26 0 0 1-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.82 2.42a8.18 8.18 0 0 1 2.41 5.83c0 4.54-3.7 8.24-8.23 8.24Zm4.52-6.16c-.25-.13-1.47-.72-1.7-.8-.22-.09-.39-.13-.55.12-.17.25-.64.8-.78.97-.15.16-.29.18-.54.06-.25-.13-1.05-.39-2-1.23-.73-.66-1.23-1.47-1.38-1.72-.14-.25-.01-.38.11-.51.11-.11.25-.29.37-.43.12-.15.16-.25.25-.41.08-.17.04-.31-.02-.43-.06-.13-.55-1.34-.76-1.84-.2-.48-.4-.42-.55-.42h-.47c-.16 0-.43.06-.66.31-.22.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.6.19 1.13.16 1.56.1.48-.07 1.47-.6 1.67-1.18.21-.58.21-1.07.15-1.18-.06-.1-.23-.16-.48-.29Z" />
               </svg>
             </Button>

@@ -2,76 +2,64 @@ import { Skeleton } from "@/components/ui/misc";
 
 export default function InicioLoading() {
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 pb-6 md:px-6">
-      {/* header */}
-      <div className="pt-6 md:pt-8">
-        <Skeleton className="h-8 w-56 md:h-9 md:w-72" />
-        <Skeleton className="mt-2 h-4 w-40" />
+    <div className="mx-auto w-full max-w-6xl px-4 pb-6 md:px-6">
+      {/* header: fecha + saludo + consejo */}
+      <div className="pt-5 md:pt-6">
+        <Skeleton className="h-3 w-36" />
+        <Skeleton className="mt-2 h-8 w-52 md:h-9 md:w-64" />
+        <Skeleton className="mt-3 h-4 w-72 max-w-full" />
       </div>
 
-      <div className="mt-6 space-y-10 md:mt-8">
-        {/* para hoy */}
-        <div>
-          <Skeleton className="h-3 w-20" />
-          <div className="mt-3 grid grid-cols-3 gap-2 md:gap-3">
+      {/* banda de KPIs */}
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 md:mt-5 md:gap-3">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-[74px] rounded-2xl" />
+        ))}
+      </div>
+
+      {/* para hoy + card con tabs */}
+      <div className="mt-4 grid gap-4 md:mt-5 lg:grid-cols-12 lg:gap-5">
+        <div className="lg:col-span-5">
+          <Skeleton className="h-4 w-20" />
+          <div className="mt-2 grid grid-cols-3 gap-2 md:gap-3">
             {Array.from({ length: 3 }).map((_, i) => (
-              <Skeleton key={i} className="h-24 rounded-2xl md:h-28" />
+              <Skeleton key={i} className="h-[104px] rounded-2xl" />
             ))}
           </div>
-          <Skeleton className="mt-4 h-4 w-28" />
-          <div className="card mt-2 divide-y divide-line overflow-hidden">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1 space-y-1.5">
-                  <Skeleton className="h-4 w-2/3" />
-                  <Skeleton className="h-3 w-1/2" />
+          <div className="card mt-3 overflow-hidden md:mt-4">
+            <div className="border-b border-line px-3.5 py-2">
+              <Skeleton className="h-3.5 w-24" />
+            </div>
+            <div className="divide-y divide-line">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 px-3.5 py-2.5">
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <Skeleton className="h-3.5 w-2/3" />
+                    <Skeleton className="h-3 w-1/2" />
+                  </div>
+                  <Skeleton className="h-3 w-12" />
                 </div>
-                <Skeleton className="h-3 w-14" />
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* el mes */}
-        <div>
-          <Skeleton className="h-3 w-16" />
-          <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-[74px] rounded-2xl" />
-            ))}
-          </div>
-          <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_320px]">
-            <Skeleton className="h-56 rounded-2xl md:h-60" />
-            <Skeleton className="hidden h-60 rounded-2xl md:block" />
+        <div className="lg:col-span-7">
+          <div className="card flex h-full flex-col p-4">
+            <div className="flex items-center justify-between gap-2">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-8 w-44 rounded-full" />
+            </div>
+            <Skeleton className="mt-3 h-40 w-full flex-1 rounded-xl md:h-44" />
           </div>
         </div>
+      </div>
 
-        {/* la pauta */}
-        <div>
-          <Skeleton className="h-3 w-20" />
-          <Skeleton className="mt-2 h-3.5 w-52" />
-          <div className="card mt-3 divide-y divide-line overflow-hidden">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-3.5">
-                <Skeleton className="h-4 flex-1" />
-                <Skeleton className="h-4 w-8" />
-                <Skeleton className="h-4 w-8" />
-                <Skeleton className="h-4 w-10" />
-                <Skeleton className="h-4 w-12" />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* radar */}
-        <div>
-          <Skeleton className="h-3 w-14" />
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-48 rounded-2xl" />
-            ))}
-          </div>
-        </div>
+      {/* radar */}
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 md:mt-5 md:gap-3 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-44 rounded-2xl" />
+        ))}
       </div>
     </div>
   );

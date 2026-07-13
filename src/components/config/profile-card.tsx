@@ -4,15 +4,27 @@ import * as React from "react";
 import { toast } from "sonner";
 import { Pencil, Check, X } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { updateMyProfile } from "@/lib/actions/settings";
+import { cn } from "@/lib/utils";
 
-const ROLE_LABELS: Record<string, string> = {
-  admin: "Socio/Admin",
-  vendedor: "Vendedor",
-  freelance: "Freelance",
+const ROLE_META: Record<string, { label: string; chip: string; dot: string }> = {
+  admin: {
+    label: "Socio/Admin",
+    chip: "bg-brand-tint text-brand-text border-brand-tint-line",
+    dot: "bg-brand-500",
+  },
+  vendedor: {
+    label: "Vendedor",
+    chip: "bg-tone-sky-soft text-tone-sky-text border-tone-sky-line",
+    dot: "bg-sky-500",
+  },
+  freelance: {
+    label: "Freelance",
+    chip: "bg-tone-violet-soft text-tone-violet-text border-tone-violet-line",
+    dot: "bg-violet-500",
+  },
 };
 
 export function ProfileCard({
@@ -28,6 +40,8 @@ export function ProfileCard({
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState(displayName);
   const [saving, setSaving] = React.useState(false);
+
+  const roleMeta = ROLE_META[role];
 
   async function save() {
     const next = draft.trim();
@@ -104,7 +118,15 @@ export function ProfileCard({
           )}
           <p className="mt-0.5 truncate text-sm text-ink-soft">{email ?? "Sin email"}</p>
         </div>
-        <Badge className="shrink-0">{ROLE_LABELS[role] ?? role}</Badge>
+        <span
+          className={cn(
+            "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium leading-4",
+            roleMeta ? roleMeta.chip : "border-line bg-sand-soft text-ink-soft",
+          )}
+        >
+          {roleMeta && <span className={cn("size-1.5 rounded-full", roleMeta.dot)} aria-hidden />}
+          {roleMeta?.label ?? role}
+        </span>
       </div>
     </div>
   );

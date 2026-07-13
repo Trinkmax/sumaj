@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Search, Tag, X } from "lucide-react";
+import { BadgeCheck, ChevronRight, Luggage, Search, SearchX, Tag, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
@@ -14,11 +14,13 @@ import {
   PopoverTrigger,
   PopoverContent,
   Checkbox,
+  Tooltip,
 } from "@/components/ui/misc";
-import { fmtDate, fmtPhone } from "@/lib/format";
-import { TAG_CATEGORIES } from "@/lib/domain";
+import { fmtPhone, fmtRelative } from "@/lib/format";
+import { TAG_CATEGORIES, TAG_DOTS } from "@/lib/domain";
 import { cn } from "@/lib/utils";
 import type { Tables } from "@/lib/types";
+import { NewContactButton } from "./new-contact-dialog";
 import type { ContactRow } from "./types";
 
 type Filter = "todos" | "clientes" | "prospectos";
@@ -44,6 +46,7 @@ export function ClientesList({
       if (!q) return true;
       if (c.full_name.toLowerCase().includes(q)) return true;
       if (c.email?.toLowerCase().includes(q)) return true;
+      if (c.city?.toLowerCase().includes(q)) return true;
       if (qDigits.length >= 3 && c.phone?.includes(qDigits)) return true;
       return false;
     });
@@ -62,24 +65,25 @@ export function ClientesList({
   if (contacts.length === 0) {
     return (
       <EmptyState
-        emoji="🧳"
+        icon={Luggage}
         title="Todavía no hay contactos"
-        description="Cargá el primero con el botón de arriba y empezá a armar tu cartera de clientes."
+        description="Cargá el primero y empezá a armar tu cartera de clientes."
+        action={<NewContactButton contacts={[]} />}
       />
     );
   }
 
   return (
     <div className="animate-slide-up space-y-3">
-      {/* búsqueda + filtros */}
+      {/* búsqueda prominente + filtros */}
       <div className="flex flex-col gap-2.5">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-ink-faint" />
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4.5 -translate-y-1/2 text-ink-faint" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar por nombre, teléfono o email…"
-            className="pl-10"
+            placeholder="Buscar por nombre, teléfono, email o ciudad…"
+            className="h-11 pl-11 text-[15px]"
             type="search"
           />
         </div>
@@ -108,7 +112,7 @@ export function ClientesList({
                   )}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-64 max-h-80 overflow-y-auto">
+              <PopoverContent align="end" className="max-h-80 w-64 overflow-y-auto">
                 <div className="space-y-3">
                   {tagsByCategory.map((group) => (
                     <div key={group.key}>
@@ -125,7 +129,14 @@ export function ClientesList({
                               checked={tagIds.includes(tag.id)}
                               onCheckedChange={() => toggleTag(tag.id)}
                             />
-                            <Badge color={tag.color}>{tag.name}</Badge>
+                            <span
+                              className={cn(
+                                "size-2.5 shrink-0 rounded-full",
+                                TAG_DOTS[tag.color] ?? TAG_DOTS.gray,
+                              )}
+                              aria-hidden
+                            />
+                            <span className="text-[13px] text-ink">{tag.name}</span>
                           </label>
                         ))}
                       </div>
@@ -149,7 +160,7 @@ export function ClientesList({
       {/* resultados */}
       {filtered.length === 0 ? (
         <EmptyState
-          emoji="🔍"
+          icon={SearchX}
           title="No encontramos contactos"
           description="Probá con otro nombre o sacá los filtros."
           action={
@@ -167,7 +178,12 @@ export function ClientesList({
           }
         />
       ) : (
-        <div className="card divide-y divide-line overflow-hidden">
+        <div
+          className={cn(
+            "card divide-y divide-line overflow-hidden",
+            filtered.length <= 14 ? "stagger-children" : "animate-slide-up",
+          )}
+        >
           {filtered.map((c) => (
             <ContactRowItem key={c.id} contact={c} />
           ))}
@@ -178,45 +194,66 @@ export function ClientesList({
 }
 
 function ContactRowItem({ contact: c }: { contact: ContactRow }) {
-  const meta = [c.phone ? fmtPhone(c.phone) : null, c.city].filter(Boolean).join(" · ");
+  const meta = [c.city, c.phone ? fmtPhone(c.phone) : null].filter(Boolean).join(" · ");
 
   return (
     <Link
       href={`/clientes/${c.id}`}
       className={cn(
-        "flex min-h-14 items-center gap-3 px-3.5 py-2.5 transition-colors tap-highlight-none",
+        "group flex min-h-16 items-center gap-3 px-3.5 py-2.5 transition-colors tap-highlight-none",
         "hover:bg-sand-soft/60 active:bg-sand-soft",
       )}
     >
-      <Avatar name={c.full_name} className="size-10" />
+      <Avatar
+        name={c.full_name}
+        className="size-11 text-sm transition-transform duration-200 group-hover:scale-105"
+      />
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <p className="truncate text-sm font-medium text-ink">{c.full_name}</p>
-          {c.is_client && (
-            <Badge className="shrink-0 border-money-100 bg-money-50 text-money-700">
-              Cliente
+          {c.is_client ? (
+            <Badge className="shrink-0 border-tone-emerald-line bg-tone-emerald-soft text-tone-emerald-text">
+              <BadgeCheck className="size-3" /> Cliente
             </Badge>
+          ) : (
+            <Badge className="shrink-0">Contacto</Badge>
           )}
         </div>
-        <div className="mt-0.5 flex items-center gap-1.5 overflow-hidden">
-          {meta && <p className="shrink-0 truncate text-[13px] text-ink-faint">{meta}</p>}
+        <div className="mt-0.5 flex items-center gap-2 overflow-hidden">
+          {meta ? (
+            <p className="truncate text-[13px] text-ink-faint">{meta}</p>
+          ) : (
+            <p className="truncate text-[13px] text-ink-faint">Sin teléfono todavía</p>
+          )}
           {c.tags.length > 0 && (
-            <span className="hidden items-center gap-1 overflow-hidden sm:flex">
-              {c.tags.slice(0, 3).map((t) => (
-                <Badge key={t.id} color={t.color} className="shrink-0">
-                  {t.name}
-                </Badge>
+            <span className="flex shrink-0 items-center gap-1">
+              {c.tags.slice(0, 4).map((t) => (
+                <Tooltip key={t.id} content={t.name}>
+                  <span
+                    className={cn(
+                      "size-2 rounded-full ring-2 ring-paper",
+                      TAG_DOTS[t.color] ?? TAG_DOTS.gray,
+                    )}
+                  />
+                </Tooltip>
               ))}
-              {c.tags.length > 3 && (
-                <span className="shrink-0 text-[11px] text-ink-faint">+{c.tags.length - 3}</span>
+              {c.tags.length > 4 && (
+                <span className="text-[11px] text-ink-faint">+{c.tags.length - 4}</span>
               )}
             </span>
           )}
         </div>
       </div>
 
-      <span className="shrink-0 text-xs tabular-nums text-ink-faint">{fmtDate(c.created_at)}</span>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {c.last_activity_at && (
+          <span className="text-xs tabular-nums text-ink-faint">
+            {fmtRelative(c.last_activity_at)}
+          </span>
+        )}
+        <ChevronRight className="size-4 text-ink-faint/60 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-ink-faint" />
+      </div>
     </Link>
   );
 }

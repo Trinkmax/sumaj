@@ -3,12 +3,22 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Pencil, Plane } from "lucide-react";
+import {
+  CalendarDays,
+  MapPin,
+  Pencil,
+  Plane,
+  Users,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 import { TRIP_TYPES } from "@/lib/domain";
 import { fmtDate, fmtMoney, nightsBetween } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label } from "@/components/ui/input";
+import { ChoiceGrid, Segmented } from "@/components/ui/misc";
 import { updateLeadDetails } from "@/lib/actions/leads";
 import type { TripType } from "@/lib/types";
 import type { DetailLead } from "./types";
@@ -23,11 +33,13 @@ export function TripDetailsCard({ lead }: { lead: DetailLead }) {
   const [to, setTo] = React.useState(lead.trip_date_to ?? "");
   const [adults, setAdults] = React.useState(String(lead.pax_adults));
   const [children, setChildren] = React.useState(String(lead.pax_children));
-  const [tripType, setTripType] = React.useState<string>(lead.trip_type ?? "");
+  const [tripType, setTripType] = React.useState<TripType | null>(lead.trip_type);
   const [budget, setBudget] = React.useState(
     lead.budget_estimate != null ? String(lead.budget_estimate) : "",
   );
-  const [currency, setCurrency] = React.useState(lead.budget_currency || "USD");
+  const [currency, setCurrency] = React.useState<"USD" | "ARS">(
+    lead.budget_currency === "ARS" ? "ARS" : "USD",
+  );
 
   function openDialog() {
     setDestination(lead.destination ?? "");
@@ -35,9 +47,9 @@ export function TripDetailsCard({ lead }: { lead: DetailLead }) {
     setTo(lead.trip_date_to ?? "");
     setAdults(String(lead.pax_adults));
     setChildren(String(lead.pax_children));
-    setTripType(lead.trip_type ?? "");
+    setTripType(lead.trip_type);
     setBudget(lead.budget_estimate != null ? String(lead.budget_estimate) : "");
-    setCurrency(lead.budget_currency || "USD");
+    setCurrency(lead.budget_currency === "ARS" ? "ARS" : "USD");
     setOpen(true);
   }
 
@@ -51,16 +63,16 @@ export function TripDetailsCard({ lead }: { lead: DetailLead }) {
       tripDateTo: to || null,
       paxAdults: Math.max(0, parseInt(adults, 10) || 0),
       paxChildren: Math.max(0, parseInt(children, 10) || 0),
-      tripType: (tripType || null) as TripType | null,
+      tripType,
       budgetEstimate: budget.trim() ? Number(budget) : null,
-      budgetCurrency: currency === "ARS" ? "ARS" : "USD",
+      budgetCurrency: currency,
     });
     setSaving(false);
     if (!res.ok) {
       toast.error(res.error);
       return;
     }
-    toast.success("Datos del viaje guardados ✈️");
+    toast.success("Datos del viaje guardados");
     setOpen(false);
     router.refresh();
   }
@@ -72,11 +84,13 @@ export function TripDetailsCard({ lead }: { lead: DetailLead }) {
       ? ` · ${lead.pax_children} ${lead.pax_children === 1 ? "menor" : "menores"}`
       : "");
 
+  const tripMeta = lead.trip_type ? TRIP_TYPES[lead.trip_type] : null;
+
   return (
     <section className="card p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-[15px] font-semibold text-ink">
-          <Plane className="size-4 text-brand-600" />
+          <Plane className="size-4 text-brand-600" strokeWidth={1.75} />
           Datos del viaje
         </h2>
         <Button variant="ghost" size="sm" onClick={openDialog}>
@@ -86,8 +100,9 @@ export function TripDetailsCard({ lead }: { lead: DetailLead }) {
       </div>
 
       <dl className="space-y-2.5 text-sm">
-        <Row label="Destino" value={lead.destination ? `✈️ ${lead.destination}` : null} />
+        <Row icon={MapPin} label="Destino" value={lead.destination} />
         <Row
+          icon={CalendarDays}
           label="Fechas"
           value={
             lead.trip_date_from
@@ -97,9 +112,14 @@ export function TripDetailsCard({ lead }: { lead: DetailLead }) {
               : null
           }
         />
-        <Row label="Pasajeros" value={paxLabel} />
-        <Row label="Tipo de viaje" value={lead.trip_type ? TRIP_TYPES[lead.trip_type] : null} />
+        <Row icon={Users} label="Pasajeros" value={paxLabel} />
         <Row
+          icon={tripMeta?.icon ?? Users}
+          label="Tipo de viaje"
+          value={tripMeta?.label ?? null}
+        />
+        <Row
+          icon={Wallet}
           label="Presupuesto est."
           value={
             lead.budget_estimate != null
@@ -146,7 +166,7 @@ export function TripDetailsCard({ lead }: { lead: DetailLead }) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="td-adults">Adultos</Label>
                 <Input
@@ -171,24 +191,24 @@ export function TripDetailsCard({ lead }: { lead: DetailLead }) {
                   onChange={(e) => setChildren(e.target.value)}
                 />
               </div>
-              <div className="col-span-2 sm:col-span-1">
-                <Label htmlFor="td-type">Tipo de viaje</Label>
-                <Select
-                  id="td-type"
-                  value={tripType}
-                  onChange={(e) => setTripType(e.target.value)}
-                >
-                  <option value="">—</option>
-                  {Object.entries(TRIP_TYPES).map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
             </div>
 
-            <div className="grid grid-cols-[1fr_110px] gap-4">
+            <div>
+              <Label>Tipo de viaje</Label>
+              <ChoiceGrid<TripType>
+                options={(Object.keys(TRIP_TYPES) as TripType[]).map((key) => ({
+                  value: key,
+                  label: TRIP_TYPES[key].label,
+                  icon: TRIP_TYPES[key].icon,
+                }))}
+                value={tripType}
+                onChange={(v) => setTripType(v === tripType ? null : v)}
+                columns={3}
+                size="sm"
+              />
+            </div>
+
+            <div className="grid grid-cols-[1fr_auto] items-end gap-4">
               <div>
                 <Label htmlFor="td-budget">Presupuesto estimado</Label>
                 <Input
@@ -202,17 +222,15 @@ export function TripDetailsCard({ lead }: { lead: DetailLead }) {
                   placeholder="0"
                 />
               </div>
-              <div>
-                <Label htmlFor="td-currency">Moneda</Label>
-                <Select
-                  id="td-currency"
-                  value={currency}
-                  onChange={(e) => setCurrency(e.target.value)}
-                >
-                  <option value="USD">USD</option>
-                  <option value="ARS">ARS</option>
-                </Select>
-              </div>
+              <Segmented<"USD" | "ARS">
+                value={currency}
+                onChange={setCurrency}
+                options={[
+                  { value: "USD", label: "USD" },
+                  { value: "ARS", label: "ARS" },
+                ]}
+                className="mb-0.5"
+              />
             </div>
 
             <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
@@ -236,25 +254,31 @@ export function TripDetailsCard({ lead }: { lead: DetailLead }) {
 }
 
 function Row({
+  icon: Icon,
   label,
   value,
   money,
 }: {
+  icon: LucideIcon;
   label: string;
   value: string | null;
   money?: boolean;
 }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="shrink-0 text-[13px] text-ink-faint">{label}</dt>
+      <dt className="flex shrink-0 items-center gap-1.5 text-[13px] text-ink-faint">
+        <Icon className="size-3.5 shrink-0" strokeWidth={1.75} />
+        {label}
+      </dt>
       <dd
-        className={
+        className={cn(
+          "text-right",
           value
             ? money
-              ? "text-right font-semibold tabular-nums text-money-700"
-              : "text-right font-medium text-ink"
-            : "text-right text-ink-faint/60"
-        }
+              ? "font-semibold tabular-nums text-money-700"
+              : "font-medium text-ink"
+            : "text-ink-faint/60",
+        )}
       >
         {value ?? "—"}
       </dd>

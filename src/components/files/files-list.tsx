@@ -2,12 +2,11 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Search } from "lucide-react";
+import { Luggage, PlaneTakeoff, Search, SearchX } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Segmented, EmptyState, Tooltip } from "@/components/ui/misc";
+import { Segmented, EmptyState, Tooltip, AnimatedNumber } from "@/components/ui/misc";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { FILE_STATUSES } from "@/lib/domain";
 import { cn } from "@/lib/utils";
@@ -60,7 +59,7 @@ export function FilesList({
   if (rows.length === 0) {
     return (
       <EmptyState
-        emoji="🧳"
+        icon={Luggage}
         title="Todavía no hay files"
         description="Las ventas nacen del CRM al ganar un lead, o cargá una directa con el botón de arriba."
       />
@@ -69,7 +68,7 @@ export function FilesList({
 
   return (
     <div className="animate-slide-up space-y-3">
-      <StatTiles stats={stats} />
+      <StatTiles stats={stats} ownerFiltered={owner === "mios"} />
 
       {/* búsqueda */}
       <div className="relative">
@@ -111,7 +110,7 @@ export function FilesList({
       {/* resultados */}
       {filtered.length === 0 ? (
         <EmptyState
-          emoji="🔍"
+          icon={SearchX}
           title="No encontramos files"
           description="Probá con otro nombre o sacá los filtros."
           action={
@@ -129,21 +128,11 @@ export function FilesList({
           }
         />
       ) : (
-        <>
-          {/* mobile: cards */}
-          <div className="space-y-2 md:hidden">
-            {filtered.map((r) => (
-              <FileCard key={r.id} row={r} />
-            ))}
-          </div>
-
-          {/* desktop: tabla */}
-          <div className="card hidden overflow-hidden md:block">
-            <div className="overflow-x-auto">
-              <FilesTable rows={filtered} />
-            </div>
-          </div>
-        </>
+        <div className={cn("space-y-2", filtered.length <= 14 && "stagger-children")}>
+          {filtered.map((r) => (
+            <FileRowCard key={r.id} row={r} />
+          ))}
+        </div>
       )}
     </div>
   );
@@ -182,28 +171,32 @@ function computeStats(rows: FileListRow[]): Stats {
   return { salesMonth, utilityMonth, receivable, upcoming };
 }
 
-function StatTiles({ stats }: { stats: Stats }) {
+function StatTiles({ stats, ownerFiltered }: { stats: Stats; ownerFiltered: boolean }) {
+  const suffix = ownerFiltered ? " · míos" : "";
   return (
     <div className="grid grid-cols-3 gap-2.5 md:grid-cols-4 md:gap-3">
-      <StatTile label="Ventas del mes" lines={moneyLines(stats.salesMonth)} />
+      <StatTile label={`Ventas del mes${suffix}`} lines={moneyLines(stats.salesMonth)} />
       <StatTile
-        label="Utilidad del mes"
+        label={`Utilidad del mes${suffix}`}
         lines={moneyLines(stats.utilityMonth)}
-        valueClass="text-money-700"
+        valueClass="text-money-text"
       />
       <StatTile
         label="Por cobrar"
         lines={moneyLines(stats.receivable)}
         valueClass={
-          Object.keys(stats.receivable).length > 0 ? "text-amber-700" : "text-money-700"
+          Object.keys(stats.receivable).length > 0 ? "text-tone-amber-text" : "text-money-text"
         }
       />
-      <StatTile
-        label="Próximas salidas"
-        lines={[`${stats.upcoming}`]}
-        hint="en 30 días"
-        className="hidden md:block"
-      />
+      <div className="card hidden min-w-0 p-3.5 md:block md:p-4">
+        <p className="truncate text-[11px] font-medium uppercase tracking-wide text-ink-faint">
+          Próximas salidas
+        </p>
+        <p className="mt-1 flex items-baseline gap-1.5 truncate text-base font-semibold tabular-nums text-ink md:text-xl">
+          <AnimatedNumber value={stats.upcoming} from={0} />
+          <span className="text-xs font-normal text-ink-faint">en 30 días</span>
+        </p>
+      </div>
     </div>
   );
 }
@@ -211,13 +204,11 @@ function StatTiles({ stats }: { stats: Stats }) {
 function StatTile({
   label,
   lines,
-  hint,
   valueClass,
   className,
 }: {
   label: string;
   lines: string[];
-  hint?: string;
   valueClass?: string;
   className?: string;
 }) {
@@ -233,9 +224,6 @@ function StatTile({
         )}
       >
         {lines[0]}
-        {hint && (
-          <span className="ml-1.5 text-xs font-normal normal-case text-ink-faint">{hint}</span>
-        )}
       </p>
       {lines.slice(1).map((l) => (
         <p key={l} className={cn("truncate text-xs font-medium tabular-nums text-ink-soft", valueClass)}>
@@ -248,27 +236,39 @@ function StatTile({
 
 /* ───────────────────────────── filas ───────────────────────────── */
 
-function StatusChip({ status }: { status: FileStatus }) {
+function StatusChip({ status, className }: { status: FileStatus; className?: string }) {
   const meta = FILE_STATUSES[status];
+  const Icon = meta.icon;
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4",
+        "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4",
         meta.chip,
+        className,
       )}
     >
+      <Icon className="size-3" strokeWidth={2} />
       {meta.label}
+    </span>
+  );
+}
+
+function DepartureChip({ label }: { label: string }) {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-tone-sky-line bg-tone-sky-soft px-2 py-0.5 text-[11px] font-medium leading-4 text-tone-sky-text">
+      <PlaneTakeoff className="size-3" strokeWidth={2} />
+      {label}
     </span>
   );
 }
 
 function SaldoCell({ row }: { row: FileListRow }) {
   if (row.total_sale > 0 && row.balance <= 0) {
-    return <span className="text-[13px] font-semibold text-money-700">Saldado</span>;
+    return <span className="text-[13px] font-semibold text-money-text">Saldado</span>;
   }
   if (row.balance > 0) {
     return (
-      <span className="text-[13px] font-semibold tabular-nums text-amber-700">
+      <span className="text-[13px] font-semibold tabular-nums text-tone-amber-text">
         {fmtMoney(row.balance, row.currency)}
       </span>
     );
@@ -276,110 +276,83 @@ function SaldoCell({ row }: { row: FileListRow }) {
   return <span className="text-[13px] text-ink-faint">—</span>;
 }
 
-function FileCard({ row }: { row: FileListRow }) {
+function FileRowCard({ row }: { row: FileListRow }) {
   const badge = departureBadge(row.departure_date);
   return (
     <Link
       href={`/files/${row.id}`}
-      className="card block p-3.5 transition-all tap-highlight-none hover:-translate-y-px hover:border-line-strong hover:shadow-md active:bg-sand-soft/50"
+      className="card card-hover block p-3.5 tap-highlight-none active:bg-sand-soft/50 md:px-4 md:py-3"
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 font-mono text-xs font-semibold text-ink-soft">{row.code}</span>
-          <StatusChip status={row.status} />
+      {/* mobile: dos líneas */}
+      <div className="md:hidden">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0 font-mono text-xs font-semibold text-ink-soft">
+              {row.code}
+            </span>
+            <StatusChip status={row.status} />
+          </div>
+          {badge && <DepartureChip label={badge} />}
         </div>
-        {badge && (
-          <span className="shrink-0 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
-            {badge}
-          </span>
-        )}
+
+        <div className="mt-1.5 flex items-end justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-[15px] font-semibold text-ink">{row.destination}</p>
+            <div className="mt-0.5 flex items-center gap-1.5 text-[13px] text-ink-faint">
+              {row.seller_name && (
+                <Avatar name={row.seller_name} className="size-4.5 text-[8px]" />
+              )}
+              <span className="truncate">
+                {row.contact_name}
+                {row.departure_date ? ` · sale ${fmtDate(row.departure_date)}` : ""}
+              </span>
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="text-sm font-semibold tabular-nums text-ink">
+              {fmtMoney(row.total_sale, row.currency)}
+            </p>
+            <SaldoCell row={row} />
+          </div>
+        </div>
       </div>
 
-      <div className="mt-1.5 flex items-end justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-[15px] font-medium text-ink">{row.destination}</p>
+      {/* desktop: fila-card */}
+      <div className="hidden items-center gap-4 md:flex">
+        <span className="w-16 shrink-0 font-mono text-xs font-semibold text-ink-soft">
+          {row.code}
+        </span>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="truncate text-[15px] font-semibold text-ink">{row.destination}</p>
+            {badge && <DepartureChip label={badge} />}
+          </div>
           <p className="mt-0.5 truncate text-[13px] text-ink-faint">
             {row.contact_name}
-            {row.departure_date ? ` · sale ${fmtDate(row.departure_date)}` : ""}
+            {row.departure_date ? ` · sale ${fmtDate(row.departure_date)}` : " · fechas a definir"}
           </p>
         </div>
-        <div className="shrink-0 text-right">
+
+        <StatusChip status={row.status} />
+
+        <div className="w-32 shrink-0 text-right">
           <p className="text-sm font-semibold tabular-nums text-ink">
             {fmtMoney(row.total_sale, row.currency)}
           </p>
           <SaldoCell row={row} />
         </div>
+
+        {row.seller_name ? (
+          <Tooltip content={row.seller_name}>
+            <span className="shrink-0">
+              <Avatar name={row.seller_name} className="size-7 text-[10px]" />
+            </span>
+          </Tooltip>
+        ) : (
+          <span className="size-7 shrink-0" aria-hidden />
+        )}
       </div>
     </Link>
-  );
-}
-
-function FilesTable({ rows }: { rows: FileListRow[] }) {
-  const router = useRouter();
-  return (
-    <table className="w-full min-w-[760px] text-sm">
-      <thead>
-        <tr className="border-b border-line text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-          <th className="px-4 py-2.5">File</th>
-          <th className="px-3 py-2.5">Cliente</th>
-          <th className="px-3 py-2.5">Destino</th>
-          <th className="px-3 py-2.5">Salida</th>
-          <th className="px-3 py-2.5">Estado</th>
-          <th className="px-3 py-2.5 text-right">Venta</th>
-          <th className="px-3 py-2.5 text-right">Saldo</th>
-          <th className="px-4 py-2.5 text-right">Vendedor</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-line">
-        {rows.map((r) => {
-          const badge = departureBadge(r.departure_date);
-          return (
-            <tr
-              key={r.id}
-              onClick={() => router.push(`/files/${r.id}`)}
-              className="cursor-pointer transition-colors hover:bg-sand-soft/60"
-            >
-              <td className="px-4 py-3">
-                <span className="font-mono text-xs font-semibold text-ink-soft">{r.code}</span>
-              </td>
-              <td className="max-w-[180px] truncate px-3 py-3 font-medium text-ink">
-                {r.contact_name}
-              </td>
-              <td className="max-w-[200px] truncate px-3 py-3 text-ink-soft">{r.destination}</td>
-              <td className="whitespace-nowrap px-3 py-3 text-ink-soft">
-                {r.departure_date ? fmtDate(r.departure_date) : "—"}
-                {badge && (
-                  <span className="ml-1.5 rounded-full border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700">
-                    {badge}
-                  </span>
-                )}
-              </td>
-              <td className="px-3 py-3">
-                <StatusChip status={r.status} />
-              </td>
-              <td className="whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums text-ink">
-                {fmtMoney(r.total_sale, r.currency)}
-              </td>
-              <td className="whitespace-nowrap px-3 py-3 text-right">
-                <SaldoCell row={r} />
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex justify-end">
-                  {r.seller_name ? (
-                    <Tooltip content={r.seller_name}>
-                      <span>
-                        <Avatar name={r.seller_name} className="size-7 text-[10px]" />
-                      </span>
-                    </Tooltip>
-                  ) : (
-                    <span className="text-ink-faint">—</span>
-                  )}
-                </div>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
   );
 }

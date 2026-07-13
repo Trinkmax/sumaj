@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { NAV_MOBILE } from "./nav";
 import { createClient } from "@/lib/supabase/client";
+import { ThemeToggle } from "./theme";
 
 const MORE_ITEMS = [
   { href: "/clientes", label: "Clientes", icon: Users },
@@ -37,7 +38,7 @@ export function MobileTabs() {
     <>
       {moreOpen && (
         <div
-          className="fixed inset-0 z-40 bg-ink/30 backdrop-blur-[2px] animate-fade-in md:hidden"
+          className="fixed inset-0 z-40 bg-overlay backdrop-blur-[2px] animate-fade-in md:hidden"
           onClick={() => setMoreOpen(false)}
         >
           <div
@@ -61,9 +62,14 @@ export function MobileTabs() {
               </Link>
             ))}
             <div className="mx-3 my-1 h-px bg-line" />
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-[15px] font-medium text-ink-soft">Tema</span>
+              <ThemeToggle />
+            </div>
+            <div className="mx-3 my-1 h-px bg-line" />
             <button
               onClick={logout}
-              className="flex w-full items-center gap-3 rounded-2xl px-4 py-3.5 text-[15px] font-medium text-red-600 transition-colors tap-highlight-none active:bg-red-50"
+              className="flex w-full items-center gap-3 rounded-2xl px-4 py-3.5 text-[15px] font-medium text-tone-red-text transition-colors tap-highlight-none active:bg-tone-red-soft"
             >
               <LogOut className="size-5" />
               Cerrar sesión
@@ -86,14 +92,14 @@ export function MobileTabs() {
                 <item.icon
                   className={cn(
                     "size-[22px] transition-all duration-200",
-                    active ? "scale-110 text-brand-600" : "text-ink-faint",
+                    active ? "scale-110 text-brand-text" : "text-ink-faint",
                   )}
                   strokeWidth={active ? 2.4 : 2}
                 />
                 <span
                   className={cn(
                     "text-[10px] font-medium leading-none",
-                    active ? "text-brand-700" : "text-ink-faint",
+                    active ? "text-brand-text" : "text-ink-faint",
                   )}
                 >
                   {item.label}
@@ -108,13 +114,13 @@ export function MobileTabs() {
             <MoreHorizontal
               className={cn(
                 "size-[22px] transition-all duration-200",
-                moreActive || moreOpen ? "scale-110 text-brand-600" : "text-ink-faint",
+                moreActive || moreOpen ? "scale-110 text-brand-text" : "text-ink-faint",
               )}
             />
             <span
               className={cn(
                 "text-[10px] font-medium leading-none",
-                moreActive || moreOpen ? "text-brand-700" : "text-ink-faint",
+                moreActive || moreOpen ? "text-brand-text" : "text-ink-faint",
               )}
             >
               Más

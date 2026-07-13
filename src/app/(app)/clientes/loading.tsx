@@ -13,24 +13,27 @@ export default function LoadingClientes() {
       </div>
 
       <div className="space-y-3 px-4 md:px-6">
-        {/* búsqueda */}
-        <Skeleton className="h-10 w-full rounded-xl" />
-        {/* segmented + filtro */}
+        {/* búsqueda prominente */}
+        <Skeleton className="h-11 w-full rounded-xl" />
+        {/* segmented + filtro de etiquetas */}
         <div className="flex items-center justify-between">
           <Skeleton className="h-9 w-60 rounded-full" />
           <Skeleton className="h-8 w-24 rounded-full" />
         </div>
 
-        {/* filas de contactos */}
+        {/* filas de contactos (64px) */}
         <div className="card divide-y divide-line overflow-hidden">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-3 px-3.5 py-3">
-              <Skeleton className="size-10 rounded-full" />
+            <div key={i} className="flex min-h-16 items-center gap-3 px-3.5 py-2.5">
+              <Skeleton className="size-11 rounded-full" />
               <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-40" />
-                <Skeleton className="h-3 w-56" />
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-4 w-36" />
+                  <Skeleton className="h-4 w-14 rounded-full" />
+                </div>
+                <Skeleton className="h-3 w-48" />
               </div>
-              <Skeleton className="h-3 w-12" />
+              <Skeleton className="h-3 w-14" />
             </div>
           ))}
         </div>

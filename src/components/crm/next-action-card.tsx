@@ -18,6 +18,10 @@ function toLocalInput(iso: string | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/**
+ * Próxima acción: la card prominente del seguimiento manual.
+ * Quick-set de fecha con chips (hoy / mañana / en 3 días).
+ */
 export function NextActionCard({
   leadId,
   nextAction,
@@ -40,6 +44,29 @@ export function NextActionCard({
     setAt(toLocalInput(d.toISOString()));
   }
 
+  // quick-set: hoy (a la tarde, o en 1 h si ya es tarde) / mañana 10:00 / en 3 días 10:00
+  const quickToday = () =>
+    quick((n) => {
+      const d = new Date(n);
+      if (d.getHours() < 17) d.setHours(18, 0, 0, 0);
+      else d.setTime(d.getTime() + 3600_000);
+      return d;
+    });
+  const quickTomorrow = () =>
+    quick((n) => {
+      const d = new Date(n);
+      d.setDate(d.getDate() + 1);
+      d.setHours(10, 0, 0, 0);
+      return d;
+    });
+  const quickIn3Days = () =>
+    quick((n) => {
+      const d = new Date(n);
+      d.setDate(d.getDate() + 3);
+      d.setHours(10, 0, 0, 0);
+      return d;
+    });
+
   async function save() {
     setSaving(true);
     const res = await setNextAction({
@@ -52,7 +79,7 @@ export function NextActionCard({
       toast.error(res.error);
       return;
     }
-    toast.success(at ? "Seguimiento agendado ⏰" : "Seguimiento guardado");
+    toast.success(at ? "Seguimiento agendado" : "Seguimiento guardado");
     router.refresh();
   }
 
@@ -72,23 +99,32 @@ export function NextActionCard({
   }
 
   return (
-    <section className="card p-4">
+    <section
+      className={cn(
+        "card p-4",
+        // la card del seguimiento pide atención cuando está vencida
+        due?.overdue && "border-tone-red-line",
+      )}
+    >
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-[15px] font-semibold text-ink">
-          <AlarmClock className="size-4 text-brand-600" />
+          <span className="flex size-7 items-center justify-center rounded-full bg-brand-tint text-brand-text">
+            <AlarmClock className="size-4" strokeWidth={1.75} />
+          </span>
           Próxima acción
         </h2>
         {due && (
           <span
             className={cn(
-              "rounded-full px-2 py-0.5 text-[12px] font-medium",
+              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium",
               due.overdue
-                ? "bg-red-50 text-red-600"
+                ? "bg-tone-red-soft text-tone-red-text"
                 : due.today
-                  ? "bg-amber-50 text-amber-700"
+                  ? "bg-tone-amber-soft text-tone-amber-text"
                   : "bg-sand-soft text-ink-soft",
             )}
           >
+            <AlarmClock className="size-3" strokeWidth={2} />
             {due.label}
           </span>
         )}
@@ -114,32 +150,9 @@ export function NextActionCard({
             onChange={(e) => setAt(e.target.value)}
           />
           <div className="mt-2 flex flex-wrap gap-1.5">
-            <QuickChip onClick={() => quick((n) => new Date(n.getTime() + 2 * 3600_000))}>
-              +2 h
-            </QuickChip>
-            <QuickChip
-              onClick={() =>
-                quick((n) => {
-                  const d = new Date(n);
-                  d.setDate(d.getDate() + 1);
-                  d.setHours(10, 0, 0, 0);
-                  return d;
-                })
-              }
-            >
-              Mañana 10:00
-            </QuickChip>
-            <QuickChip
-              onClick={() =>
-                quick((n) => {
-                  const d = new Date(n);
-                  d.setDate(d.getDate() + 7);
-                  return d;
-                })
-              }
-            >
-              +1 semana
-            </QuickChip>
+            <QuickChip onClick={quickToday}>Hoy</QuickChip>
+            <QuickChip onClick={quickTomorrow}>Mañana</QuickChip>
+            <QuickChip onClick={quickIn3Days}>En 3 días</QuickChip>
           </div>
         </div>
 
@@ -169,7 +182,7 @@ function QuickChip({
     <button
       type="button"
       onClick={onClick}
-      className="rounded-full border border-line bg-paper px-2.5 py-1 text-[12px] font-medium text-ink-soft transition-all hover:border-brand-300 hover:text-brand-700 active:scale-[0.97] tap-highlight-none"
+      className="min-h-8 rounded-full border border-line bg-paper px-3 py-1 text-[12px] font-medium text-ink-soft transition-all hover:border-brand-300 hover:text-brand-text active:scale-[0.97] tap-highlight-none"
     >
       {children}
     </button>

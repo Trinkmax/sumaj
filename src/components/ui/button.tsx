@@ -19,7 +19,7 @@ const buttonVariants = cva(
         ghost: "text-ink-soft hover:bg-sand-soft hover:text-ink",
         danger: "bg-red-600 text-white hover:bg-red-700",
         success: "bg-money-700 text-white hover:bg-money-800",
-        whatsapp: "bg-[#25d366] text-white hover:bg-[#1fb958] shadow-sm",
+        whatsapp: "bg-wa-accent text-white shadow-sm hover:brightness-95",
       },
       size: {
         sm: "h-8 px-3 text-[13px] [&_svg]:size-3.5",

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, Clock, Trophy, XCircle } from "lucide-react";
 import { requireMember } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
@@ -74,10 +74,11 @@ export default async function PresupuestoDetallePage({
   };
 
   const statusMeta = QUOTE_STATUSES[quote.status];
+  const StatusIcon = statusMeta.icon;
+  const isOpen = quote.status !== "aceptado" && quote.status !== "rechazado";
   const expired =
     !!quote.valid_until &&
-    quote.status !== "aceptado" &&
-    quote.status !== "rechazado" &&
+    isOpen &&
     new Date(quote.valid_until + "T23:59:59").getTime() < Date.now();
 
   return (
@@ -88,10 +89,11 @@ export default async function PresupuestoDetallePage({
         actions={
           <span
             className={cn(
-              "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
               statusMeta.chip,
             )}
           >
+            <StatusIcon className="size-3.5" strokeWidth={2} />
             {statusMeta.label}
           </span>
         }
@@ -100,14 +102,16 @@ export default async function PresupuestoDetallePage({
       <div className="space-y-4 px-4 md:px-6">
         {/* banners de estado */}
         {quote.status === "aceptado" && (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 animate-slide-up">
-            <p className="text-sm font-medium text-emerald-800">
-              🎉 Presupuesto aceptado{quote.accepted_at ? ` ${fmtRelative(quote.accepted_at)}` : ""}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-tone-emerald-line bg-tone-emerald-soft px-4 py-3 animate-slide-up">
+            <p className="flex items-center gap-2 text-sm font-medium text-tone-emerald-text">
+              <Trophy className="size-4 shrink-0" strokeWidth={1.9} />
+              Presupuesto aceptado
+              {quote.accepted_at ? ` ${fmtRelative(quote.accepted_at)}` : ""}
             </p>
             {quote.file_id && (
               <Link
                 href={`/files/${quote.file_id}`}
-                className="inline-flex items-center gap-1 text-sm font-medium text-emerald-700 underline-offset-2 hover:underline"
+                className="inline-flex items-center gap-1 text-sm font-medium text-tone-emerald-text underline-offset-2 hover:underline"
               >
                 Ver el file <ArrowUpRight className="size-3.5" />
               </Link>
@@ -115,9 +119,19 @@ export default async function PresupuestoDetallePage({
           </div>
         )}
         {quote.status === "rechazado" && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 animate-slide-up">
-            <p className="text-sm font-medium text-red-700">
+          <div className="rounded-2xl border border-tone-red-line bg-tone-red-soft px-4 py-3 animate-slide-up">
+            <p className="flex items-center gap-2 text-sm font-medium text-tone-red-text">
+              <XCircle className="size-4 shrink-0" strokeWidth={1.9} />
               Este presupuesto fue rechazado. Podés duplicarlo y ajustar la propuesta.
+            </p>
+          </div>
+        )}
+        {expired && quote.status !== "rechazado" && (
+          <div className="rounded-2xl border border-tone-amber-line bg-tone-amber-soft px-4 py-3 animate-slide-up">
+            <p className="flex items-center gap-2 text-sm font-medium text-tone-amber-text">
+              <Clock className="size-4 shrink-0" strokeWidth={1.9} />
+              Venció el {fmtDate(quote.valid_until)}. Editá la validez o duplicalo para
+              reactivarlo.
             </p>
           </div>
         )}
@@ -172,7 +186,7 @@ export default async function PresupuestoDetallePage({
                   <dd
                     className={cn(
                       "mt-0.5 font-medium",
-                      expired ? "text-red-600" : "text-ink",
+                      expired ? "text-tone-red-text" : "text-ink",
                     )}
                   >
                     {quote.valid_until
@@ -209,21 +223,31 @@ export default async function PresupuestoDetallePage({
                     {items.map((i) => {
                       const gross = i.gross != null ? Number(i.gross) : Number(i.cost);
                       const commission = (gross * Number(i.commission_pct)) / 100;
+                      const TypeIcon = SERVICE_TYPES[i.type].icon;
                       return (
                         <tr key={i.id} className="border-b border-line/60 last:border-0">
                           <td className="px-4 py-2.5 sm:px-5">
-                            <p className="font-medium text-ink">
-                              {SERVICE_TYPES[i.type].emoji} {i.description}
-                            </p>
-                            {i.supplier && (
-                              <p className="text-xs text-ink-faint">{i.supplier.name}</p>
-                            )}
+                            <div className="flex items-start gap-2">
+                              <TypeIcon
+                                className="mt-0.5 size-4 shrink-0 text-ink-faint"
+                                strokeWidth={1.75}
+                                aria-label={SERVICE_TYPES[i.type].label}
+                              />
+                              <div className="min-w-0">
+                                <p className="font-medium text-ink">{i.description}</p>
+                                {i.supplier && (
+                                  <p className="text-xs text-ink-faint">{i.supplier.name}</p>
+                                )}
+                              </div>
+                            </div>
                           </td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-ink">
                             {fmtMoney(Number(i.cost), quote.currency)}
                           </td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-ink-soft">
-                            {i.gross != null ? fmtMoney(Number(i.gross), quote.currency) : "= final"}
+                            {i.gross != null
+                              ? fmtMoney(Number(i.gross), quote.currency)
+                              : "= final"}
                           </td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-ink-soft">
                             {Number(i.commission_pct)}%

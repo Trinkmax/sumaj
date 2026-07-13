@@ -12,9 +12,23 @@ import type {
   ContactRow,
   FileSummary,
   QuoteSummary,
+  TravelsWithRow,
 } from "@/components/clientes/types";
 
-export const metadata = { title: "Cliente" };
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("contacts")
+    .select("full_name")
+    .eq("id", id)
+    .maybeSingle();
+  return { title: data?.full_name ?? "Cliente" };
+}
 
 export default async function ClienteDetallePage({
   params,
@@ -25,36 +39,55 @@ export default async function ClienteDetallePage({
   await requireMember();
   const supabase = await createClient();
 
-  const [contactRes, travelersRes, leadsRes, filesRes, activitiesRes, tagsRes] =
-    await Promise.all([
-      supabase
-        .from("contacts")
-        .select("*, contact_tags(tag:tags(*))")
-        .eq("id", id)
-        .maybeSingle(),
-      supabase
-        .from("travelers")
-        .select("*")
-        .eq("contact_id", id)
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("leads")
-        .select("id, stage, destination, created_at, won_file_id")
-        .eq("contact_id", id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("files")
-        .select("id, code, destination, status, currency, created_at")
-        .eq("contact_id", id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("activities")
-        .select("*, member:members(display_name)")
-        .eq("contact_id", id)
-        .order("created_at", { ascending: false })
-        .limit(60),
-      supabase.from("tags").select("*").order("name"),
-    ]);
+  const [
+    contactRes,
+    travelersRes,
+    travelsWithRes,
+    conversationRes,
+    leadsRes,
+    filesRes,
+    activitiesRes,
+    tagsRes,
+  ] = await Promise.all([
+    supabase
+      .from("contacts")
+      .select("*, contact_tags(tag:tags(*))")
+      .eq("id", id)
+      .maybeSingle(),
+    supabase
+      .from("travelers")
+      .select("*")
+      .eq("contact_id", id)
+      .order("created_at", { ascending: true }),
+    // navegación inversa: grupos donde este contacto viaja como pasajero
+    supabase
+      .from("travelers")
+      .select("id, relationship, owner:contacts!travelers_contact_id_fkey(id, full_name)")
+      .eq("linked_contact_id", id),
+    supabase
+      .from("conversations")
+      .select("id")
+      .eq("contact_id", id)
+      .eq("channel", "whatsapp")
+      .maybeSingle(),
+    supabase
+      .from("leads")
+      .select("id, stage, destination, created_at, won_file_id")
+      .eq("contact_id", id)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("files")
+      .select("id, code, destination, status, currency, created_at")
+      .eq("contact_id", id)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("activities")
+      .select("*, member:members(display_name)")
+      .eq("contact_id", id)
+      .order("created_at", { ascending: false })
+      .limit(60),
+    supabase.from("tags").select("*").order("name"),
+  ]);
 
   if (!contactRes.data) notFound();
 
@@ -68,6 +101,14 @@ export default async function ClienteDetallePage({
 
   const leads = leadsRes.data ?? [];
   const rawFiles = filesRes.data ?? [];
+
+  const travelsWith: TravelsWithRow[] = (travelsWithRes.data ?? [])
+    .filter((t) => t.owner != null)
+    .map((t) => ({
+      travelerId: t.id,
+      relationship: t.relationship,
+      owner: t.owner as { id: string; full_name: string },
+    }));
 
   // totales de las ventas (vista file_totals)
   const fileIds = rawFiles.map((f) => f.id);
@@ -96,7 +137,7 @@ export default async function ClienteDetallePage({
     .order("created_at", { ascending: false });
   const quotes: QuoteSummary[] = quotesData ?? [];
 
-  // lead activo más reciente (para "Presupuestar")
+  // lead activo más reciente (habilita presupuestar sobre ese lead)
   const activeLead =
     leads.find((l) => l.stage !== "ganado" && l.stage !== "perdido") ?? null;
 
@@ -115,12 +156,22 @@ export default async function ClienteDetallePage({
         contact={contact}
         allTags={tagsRes.data ?? []}
         activeLeadId={activeLead?.id ?? null}
+        latestLeadId={leads[0]?.id ?? null}
+        conversationId={conversationRes.data?.id ?? null}
+        latestQuoteId={quotes[0]?.id ?? null}
+        latestFileId={files[0]?.id ?? null}
+        counts={{ leads: leads.length, quotes: quotes.length, files: files.length }}
       />
 
       <div className="grid gap-4 px-4 pt-4 md:px-6 lg:grid-cols-[2fr_3fr] lg:items-start">
         <div className="space-y-4">
+          <TravelersCard
+            contactId={contact.id}
+            contactName={contact.full_name}
+            travelers={travelersRes.data ?? []}
+            travelsWith={travelsWith}
+          />
           <DatosCard contact={contact} />
-          <TravelersCard contactId={contact.id} travelers={travelersRes.data ?? []} />
         </div>
 
         <div className="space-y-4">

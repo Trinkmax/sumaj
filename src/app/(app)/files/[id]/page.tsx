@@ -19,6 +19,9 @@ import type {
 
 export const metadata = { title: "File" };
 
+const TRAVELER_FIELDS =
+  "id, full_name, document_type, document_number, document_expiry, birth_date, linked_contact_id";
+
 export default async function FileDetailPage({
   params,
 }: {
@@ -38,45 +41,66 @@ export default async function FileDetailPage({
 
   if (!fileData) notFound();
 
-  const [totalsRes, servicesRes, paymentsRes, linkedRes, contactTravelersRes, activitiesRes, suppliersRes] =
-    await Promise.all([
-      supabase
-        .from("file_totals")
-        .select("total_cost, total_sale, utility, paid_total, balance")
-        .eq("file_id", id)
-        .maybeSingle(),
-      supabase
-        .from("file_services")
-        .select("*, supplier:suppliers(id, name)")
-        .eq("file_id", id)
-        .order("position", { ascending: true })
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("payments")
-        .select(
-          "id, paid_at, method, amount, currency, amount_in_file_currency, receipt_code, receipt_token, note",
-        )
-        .eq("file_id", id)
-        .eq("direction", "cobro")
-        .order("paid_at", { ascending: false })
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("file_travelers")
-        .select("traveler:travelers(id, full_name, document_type, document_number, document_expiry, birth_date)")
-        .eq("file_id", id),
-      supabase
-        .from("travelers")
-        .select("id, full_name, document_type, document_number, document_expiry, birth_date")
-        .eq("contact_id", fileData.contact_id)
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("activities")
-        .select("id, type, body, created_at, member:members(display_name)")
-        .eq("file_id", id)
-        .order("created_at", { ascending: false })
-        .limit(50),
-      supabase.from("suppliers").select("id, name").eq("is_active", true).order("name"),
-    ]);
+  const [
+    totalsRes,
+    servicesRes,
+    paymentsRes,
+    linkedRes,
+    contactTravelersRes,
+    activitiesRes,
+    suppliersRes,
+    conversationRes,
+    quoteRes,
+  ] = await Promise.all([
+    supabase
+      .from("file_totals")
+      .select("total_cost, total_sale, utility, paid_total, balance")
+      .eq("file_id", id)
+      .maybeSingle(),
+    supabase
+      .from("file_services")
+      .select("*, supplier:suppliers(id, name)")
+      .eq("file_id", id)
+      .order("position", { ascending: true })
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("payments")
+      .select(
+        "id, paid_at, method, amount, currency, amount_in_file_currency, receipt_code, receipt_token, note",
+      )
+      .eq("file_id", id)
+      .eq("direction", "cobro")
+      .order("paid_at", { ascending: false })
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("file_travelers")
+      .select(`traveler:travelers(${TRAVELER_FIELDS})`)
+      .eq("file_id", id),
+    supabase
+      .from("travelers")
+      .select(TRAVELER_FIELDS)
+      .eq("contact_id", fileData.contact_id)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("activities")
+      .select("id, type, body, created_at, member:members(display_name)")
+      .eq("file_id", id)
+      .order("created_at", { ascending: false })
+      .limit(50),
+    supabase.from("suppliers").select("id, name").eq("is_active", true).order("name"),
+    // navegación cruzada: la conversación del contacto (si existe) para el chip "Chat"
+    supabase
+      .from("conversations")
+      .select("id")
+      .eq("contact_id", fileData.contact_id)
+      .order("last_message_at", { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle(),
+    // navegación cruzada: código del presupuesto de origen (si el file nació de uno)
+    fileData.quote_id
+      ? supabase.from("quotes").select("id, code").eq("id", fileData.quote_id).maybeSingle()
+      : Promise.resolve({ data: null as { id: string; code: string } | null }),
+  ]);
 
   const totals = totalsRes.data;
   const file: FileDetail = {
@@ -90,6 +114,8 @@ export default async function FileDetailPage({
     notes: fileData.notes,
     commission_pct: Number(fileData.commission_pct) || 0,
     created_at: fileData.created_at,
+    lead_id: fileData.lead_id,
+    quote_id: fileData.quote_id,
     contact: fileData.contact,
     seller: fileData.seller,
     totals: {
@@ -152,6 +178,8 @@ export default async function FileDetailPage({
         services={services}
         travelers={linkedTravelers}
         agencyName={agency.name}
+        quoteCode={quoteRes.data?.code ?? null}
+        conversationId={conversationRes.data?.id ?? null}
       />
 
       <div className="flex flex-col gap-4 px-4 pb-4 pt-4 md:px-6 lg:grid lg:grid-cols-[3fr_2fr] lg:items-start">

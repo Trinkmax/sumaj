@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Copy, Pencil, Share2, ThumbsDown } from "lucide-react";
+import { Copy, Pencil, Send, Share2, ThumbsDown, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { ShareDialog } from "@/components/quotes/share-dialog";
@@ -36,14 +36,17 @@ export function QuoteDetailActions({
   const [shareOpen, setShareOpen] = React.useState(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [rejectOpen, setRejectOpen] = React.useState(false);
-  const [busy, setBusy] = React.useState<"compartir" | "convertir" | "duplicar" | "rechazar" | null>(
-    null,
-  );
+  const [busy, setBusy] = React.useState<
+    "compartir" | "convertir" | "duplicar" | "rechazar" | null
+  >(null);
 
   const isOpen = status === "borrador" || status === "enviado" || status === "vencido";
+  const isDraft = status === "borrador";
 
+  /** Borrador → "Enviar": lo marca enviado y abre el compartir.
+   *  Ya enviado → "Compartir": abre el diálogo directo, sin tocar el estado. */
   async function handleShare() {
-    if (status === "borrador") {
+    if (isDraft) {
       setBusy("compartir");
       const res = await setQuoteStatus({ quoteId, status: "enviado" });
       setBusy(null);
@@ -65,7 +68,7 @@ export function QuoteDetailActions({
       toast.error(res.error);
       return;
     }
-    toast.success(`🎉 ¡Venta creada! File ${res.data.fileCode}`);
+    toast.success(`¡Venta creada! File ${res.data.fileCode}`);
     router.push(`/files/${res.data.fileId}`);
   }
 
@@ -95,7 +98,7 @@ export function QuoteDetailActions({
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 animate-slide-up">
       {isOpen && !fileId && (
         <Button
           variant="success"
@@ -105,18 +108,26 @@ export function QuoteDetailActions({
           disabled={busy !== null}
           onClick={() => setConfirmOpen(true)}
         >
-          🏆 Convertir en venta
+          <Trophy /> Convertir en venta
         </Button>
       )}
 
       <div className="grid grid-cols-2 gap-2">
         <Button
-          variant="secondary"
+          variant={isDraft ? "brand" : "secondary"}
           loading={busy === "compartir"}
           disabled={busy !== null}
           onClick={handleShare}
         >
-          <Share2 /> Compartir
+          {isDraft ? (
+            <>
+              <Send /> Enviar
+            </>
+          ) : (
+            <>
+              <Share2 /> Compartir
+            </>
+          )}
         </Button>
         {status !== "aceptado" ? (
           <Link href={`/presupuestos/${quoteId}/editar`} className="block">
@@ -149,7 +160,7 @@ export function QuoteDetailActions({
           {isOpen ? (
             <Button
               variant="ghost"
-              className="text-red-600 hover:bg-red-50 hover:text-red-700"
+              className="text-tone-red-text hover:bg-tone-red-soft hover:text-tone-red-text"
               loading={busy === "rechazar"}
               disabled={busy !== null}
               onClick={() => setRejectOpen(true)}
@@ -186,7 +197,7 @@ export function QuoteDetailActions({
               disabled={busy !== null}
               onClick={handleReject}
             >
-              Marcar rechazado
+              <ThumbsDown /> Marcar rechazado
             </Button>
           </div>
         </DialogContent>
@@ -207,7 +218,7 @@ export function QuoteDetailActions({
               disabled={busy !== null}
               onClick={handleConvert}
             >
-              🏆 Sí, crear la venta
+              <Trophy /> Sí, crear la venta
             </Button>
           </div>
         </DialogContent>

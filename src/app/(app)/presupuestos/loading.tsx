@@ -13,16 +13,16 @@ export default function PresupuestosLoading() {
       </div>
 
       <div className="px-4 md:px-6">
-        {/* búsqueda + segmented */}
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <Skeleton className="h-10 w-full rounded-xl sm:max-w-xs" />
-          <Skeleton className="h-9 w-72 rounded-full" />
+        {/* búsqueda + segmented de estados */}
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <Skeleton className="h-10 w-full rounded-xl lg:max-w-xs" />
+          <Skeleton className="h-9 w-full max-w-md rounded-full" />
         </div>
 
-        {/* filas */}
-        <div className="card divide-y divide-line overflow-hidden">
+        {/* filas como tarjetas */}
+        <div className="space-y-2">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-3 px-4 py-3 sm:px-5">
+            <div key={i} className="card flex items-center gap-3 px-4 py-3 sm:px-5">
               <div className="min-w-0 flex-1">
                 <Skeleton className="h-4 w-2/3 max-w-64" />
                 <Skeleton className="mt-2 h-3 w-1/2 max-w-48" />
@@ -31,7 +31,7 @@ export default function PresupuestosLoading() {
                 <Skeleton className="h-4 w-20" />
                 <Skeleton className="hidden h-3 w-12 sm:block" />
               </div>
-              <Skeleton className="h-5 w-16 rounded-full" />
+              <Skeleton className="h-5 w-6 rounded-full sm:w-20" />
             </div>
           ))}
         </div>

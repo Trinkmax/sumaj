@@ -2,18 +2,27 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { UserRound } from "lucide-react";
+import { ChevronDown, UserRound } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { ChoiceGrid } from "@/components/ui/misc";
 import { CHANNELS } from "@/lib/domain";
 import { normalizePhone } from "@/lib/format";
 import { createLead, findContactByPhone } from "@/lib/actions/leads";
 import type { LeadChannel } from "@/lib/types";
 import type { BoardLead, MemberOption } from "./types";
 
+const CHANNEL_OPTIONS = (Object.keys(CHANNELS) as LeadChannel[]).map((key) => ({
+  value: key,
+  label: CHANNELS[key].short,
+  icon: CHANNELS[key].icon,
+}));
+
 /**
- * Alta de lead en menos de 30 segundos: solo el nombre es obligatorio.
+ * Alta de lead en menos de 30 segundos: nombre y teléfono arriba,
+ * canal visual, y el resto opcional detrás de "Agregar detalles".
  */
 export function NewLeadDialog({
   open,
@@ -36,6 +45,7 @@ export function NewLeadDialog({
   const [notes, setNotes] = React.useState("");
   const [existing, setExisting] = React.useState<{ id: string; full_name: string } | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const [showDetails, setShowDetails] = React.useState(false);
 
   // reset del formulario al abrir (ajuste de estado durante el render)
   const [prevOpen, setPrevOpen] = React.useState(open);
@@ -49,6 +59,7 @@ export function NewLeadDialog({
       setAssignedTo(meId);
       setNotes("");
       setExisting(null);
+      setShowDetails(false);
     }
   }
 
@@ -101,6 +112,8 @@ export function NewLeadDialog({
       pax_children: 0,
       assigned_to: assignedTo || null,
       won_file_id: null,
+      budget_estimate: null,
+      budget_currency: null,
       contact: {
         id: res.data.contactId,
         full_name: existing?.full_name ?? name.trim(),
@@ -113,8 +126,8 @@ export function NewLeadDialog({
 
     toast.success(
       res.data.existingContact
-        ? `Nueva consulta creada para ${existing?.full_name ?? name.trim()} ✨`
-        : "Lead creado ✨",
+        ? `Nueva consulta creada para ${existing?.full_name ?? name.trim()}`
+        : "Lead creado",
     );
     onOpenChange(false);
   }
@@ -126,20 +139,19 @@ export function NewLeadDialog({
         description="Solo el nombre es obligatorio. Lo demás se completa después."
       >
         <form onSubmit={submit} className="space-y-4">
-          <div>
-            <Label htmlFor="nl-name">Nombre *</Label>
-            <Input
-              id="nl-name"
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Ej: Carla Domínguez"
-              maxLength={120}
-              required
-            />
-          </div>
-
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="nl-name">Nombre *</Label>
+              <Input
+                id="nl-name"
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Ej: Carla Domínguez"
+                maxLength={120}
+                required
+              />
+            </div>
             <div>
               <Label htmlFor="nl-phone">Teléfono</Label>
               <Input
@@ -154,70 +166,80 @@ export function NewLeadDialog({
                 onBlur={checkPhone}
                 placeholder="351 555 0000"
               />
-              {existing && (
-                <p className="mt-1.5 flex items-center gap-1.5 text-[12px] text-brand-700 animate-fade-in">
-                  <UserRound className="size-3.5 shrink-0" />
-                  Ya existe {existing.full_name} — se le va a crear una nueva consulta.
-                </p>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="nl-dest">Destino</Label>
-              <Input
-                id="nl-dest"
-                value={destination}
-                onChange={(e) => setDestination(e.target.value)}
-                placeholder="Ej: Cancún"
-                maxLength={120}
-              />
             </div>
           </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <Label htmlFor="nl-channel">Canal</Label>
-              <Select
-                id="nl-channel"
-                value={channel}
-                onChange={(e) => setChannel(e.target.value as LeadChannel)}
-              >
-                {Object.entries(CHANNELS).map(([key, c]) => (
-                  <option key={key} value={key}>
-                    {c.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="nl-assignee">Asignar a</Label>
-              <Select
-                id="nl-assignee"
-                value={assignedTo}
-                onChange={(e) => setAssignedTo(e.target.value)}
-              >
-                {members.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.display_name}
-                    {m.id === meId ? " (yo)" : ""}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          </div>
+          {existing && (
+            <p className="-mt-2 flex items-center gap-1.5 text-[12px] text-brand-text animate-fade-in">
+              <UserRound className="size-3.5 shrink-0" strokeWidth={2} />
+              Ya existe {existing.full_name} — se le va a crear una nueva consulta.
+            </p>
+          )}
 
           <div>
-            <Label htmlFor="nl-notes">Notas / mensaje inicial</Label>
-            <Textarea
-              id="nl-notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Ej: quiere viajar en enero con los chicos…"
-              className="min-h-[72px]"
-              maxLength={2000}
+            <Label>Canal</Label>
+            <ChoiceGrid<LeadChannel>
+              options={CHANNEL_OPTIONS}
+              value={channel}
+              onChange={setChannel}
+              columns={4}
+              size="sm"
             />
           </div>
 
-          <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
+          {/* resto opcional: progressive disclosure */}
+          {!showDetails ? (
+            <button
+              type="button"
+              onClick={() => setShowDetails(true)}
+              className="flex min-h-9 w-full items-center justify-center gap-1 rounded-xl border border-dashed border-line-strong/70 py-1.5 text-[13px] font-medium text-ink-faint transition-colors hover:border-brand-300 hover:text-brand-text tap-highlight-none"
+            >
+              <ChevronDown className="size-3.5" strokeWidth={2} />
+              Agregar detalles
+            </button>
+          ) : (
+            <div className="space-y-4 animate-slide-up">
+              <div>
+                <Label htmlFor="nl-dest">Destino</Label>
+                <Input
+                  id="nl-dest"
+                  value={destination}
+                  onChange={(e) => setDestination(e.target.value)}
+                  placeholder="Ej: Cancún"
+                  maxLength={120}
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="nl-assignee">Asignar a</Label>
+                <Select
+                  id="nl-assignee"
+                  value={assignedTo}
+                  onChange={(e) => setAssignedTo(e.target.value)}
+                >
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.display_name}
+                      {m.id === meId ? " (yo)" : ""}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="nl-notes">Notas / mensaje inicial</Label>
+                <Textarea
+                  id="nl-notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Ej: quiere viajar en enero con los chicos…"
+                  className="min-h-[72px]"
+                  maxLength={2000}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className={cn("flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end")}>
             <Button
               type="button"
               variant="secondary"

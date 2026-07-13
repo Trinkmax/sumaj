@@ -50,7 +50,7 @@ export default async function CajaPage({
     supabase
       .from("payments")
       .select(
-        "id, paid_at, created_at, direction, amount, currency, amount_in_file_currency, method, note, receipt_code, receipt_token, contact:contacts(full_name), supplier:suppliers(name), file:files(id, code, currency)",
+        "id, paid_at, created_at, direction, amount, currency, exchange_rate, amount_in_file_currency, method, note, receipt_code, receipt_token, contact:contacts(full_name), supplier:suppliers(name), file:files(id, code, currency)",
       )
       .gte("paid_at", startDateStr)
       .lt("paid_at", endDateStr)
@@ -96,6 +96,9 @@ export default async function CajaPage({
       supplier_name: p.supplier?.name ?? null,
       file_id: p.file!.id,
       file_code: p.file!.code,
+      file_currency: p.file!.currency,
+      amount_in_file_currency: Number(p.amount_in_file_currency),
+      exchange_rate: p.exchange_rate != null ? Number(p.exchange_rate) : null,
     }));
 
   // ── stats ──

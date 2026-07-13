@@ -2,11 +2,18 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  ArrowRight,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  ReceiptText,
+  Trash2,
+} from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
-import { Switch, EmptyState, Tooltip } from "@/components/ui/misc";
+import { Switch, EmptyState, Tooltip, ChoiceGrid } from "@/components/ui/misc";
 import {
   Dropdown,
   DropdownTrigger,
@@ -25,6 +32,19 @@ import { cn } from "@/lib/utils";
 import type { ServiceType } from "@/lib/types";
 import { numToInput, parseAmount } from "./helpers";
 import type { ServiceRow, SupplierOption } from "./types";
+
+/** círculo tonal por tipo de servicio (clases estáticas para Tailwind) */
+const SERVICE_TONES: Record<ServiceType, string> = {
+  aereo: "bg-tone-sky-soft text-tone-sky-text",
+  hotel: "bg-tone-violet-soft text-tone-violet-text",
+  paquete: "bg-tone-amber-soft text-tone-amber-text",
+  circuito: "bg-tone-indigo-soft text-tone-indigo-text",
+  crucero: "bg-tone-blue-soft text-tone-blue-text",
+  excursion: "bg-tone-green-soft text-tone-green-text",
+  traslado: "bg-tone-cyan-soft text-tone-cyan-text",
+  asistencia: "bg-tone-emerald-soft text-tone-emerald-text",
+  otro: "bg-tone-stone-soft text-tone-stone-text",
+};
 
 export function ServicesCard({
   fileId,
@@ -76,6 +96,16 @@ export function ServicesCard({
     setToDelete(null);
   };
 
+  /* agrupado por tipo, en el orden de la planilla */
+  const groups = React.useMemo(
+    () =>
+      SERVICE_ORDER.map((type) => ({
+        type,
+        items: services.filter((s) => s.type === type),
+      })).filter((g) => g.items.length > 0),
+    [services],
+  );
+
   const totalCost = round2(services.reduce((a, s) => a + s.cost, 0));
   const totalSale = round2(services.reduce((a, s) => a + s.price, 0));
   const utility = round2(totalSale - totalCost);
@@ -92,7 +122,7 @@ export function ServicesCard({
 
       {services.length === 0 ? (
         <EmptyState
-          emoji="🧾"
+          icon={ReceiptText}
           title="Sin servicios cargados"
           description="Agregá el aéreo, la hotelería y todo lo que vendiste en este file."
           action={
@@ -103,105 +133,57 @@ export function ServicesCard({
         />
       ) : (
         <>
-          {/* mobile: cards */}
-          <div className="space-y-2 md:hidden">
-            {services.map((s) => (
-              <ServiceItemMobile
-                key={s.id}
-                service={s}
-                currency={currency}
-                paid={isPaid(s)}
-                onTogglePaid={() => togglePaid(s)}
-                onEdit={() => setDialogService(s)}
-                onDelete={() => setToDelete(s)}
-              />
-            ))}
+          <div className="space-y-4 stagger-children">
+            {groups.map((g) => {
+              const meta = SERVICE_TYPES[g.type];
+              const GroupIcon = meta.icon;
+              const groupSale = round2(g.items.reduce((a, s) => a + s.price, 0));
+              return (
+                <div key={g.type}>
+                  {/* header del grupo */}
+                  <div className="flex items-center gap-2.5">
+                    <span
+                      className={cn(
+                        "flex size-8 shrink-0 items-center justify-center rounded-full",
+                        SERVICE_TONES[g.type],
+                      )}
+                    >
+                      <GroupIcon className="size-4" strokeWidth={1.9} />
+                    </span>
+                    <h3 className="text-[13px] font-semibold text-ink">
+                      {g.items.length === 1 ? meta.label : meta.plural}
+                    </h3>
+                    {g.items.length > 1 && (
+                      <span className="rounded-full bg-sand-soft px-1.5 text-[11px] font-medium tabular-nums text-ink-faint">
+                        {g.items.length}
+                      </span>
+                    )}
+                    <span className="ml-auto text-xs font-medium tabular-nums text-ink-soft">
+                      {fmtMoney(groupSale, currency)}
+                    </span>
+                  </div>
+
+                  {/* servicios del grupo */}
+                  <div className="mt-0.5 divide-y divide-line/70 pl-[42px]">
+                    {g.items.map((s) => (
+                      <ServiceItem
+                        key={s.id}
+                        service={s}
+                        currency={currency}
+                        paid={isPaid(s)}
+                        onTogglePaid={() => togglePaid(s)}
+                        onEdit={() => setDialogService(s)}
+                        onDelete={() => setToDelete(s)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
-          {/* desktop: tabla */}
-          <div className="hidden overflow-x-auto md:block">
-            <table className="w-full min-w-[640px] text-sm">
-              <thead>
-                <tr className="border-b border-line text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-                  <th className="py-2 pr-3">Servicio</th>
-                  <th className="px-3 py-2">Fechas</th>
-                  <th className="px-3 py-2 text-right">Costo</th>
-                  <th className="px-3 py-2 text-right">Precio</th>
-                  <th className="px-3 py-2 text-center">Pagado</th>
-                  <th className="py-2 pl-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {services.map((s) => {
-                  const meta = SERVICE_TYPES[s.type];
-                  return (
-                    <tr key={s.id} className="group">
-                      <td className="max-w-[260px] py-2.5 pr-3">
-                        <div className="flex items-start gap-2">
-                          <span className="mt-0.5 text-base leading-none">{meta.emoji}</span>
-                          <div className="min-w-0">
-                            <p className="truncate font-medium text-ink">{s.description}</p>
-                            <p className="truncate text-xs text-ink-faint">
-                              {[
-                                meta.label,
-                                s.supplier_name,
-                                s.reservation_code ? `Reserva ${s.reservation_code}` : null,
-                              ]
-                                .filter(Boolean)
-                                .join(" · ")}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2.5 text-ink-soft">
-                        {s.date_from ? (
-                          <>
-                            {fmtDate(s.date_from)}
-                            {s.date_to && ` → ${fmtDate(s.date_to)}`}
-                          </>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-ink-soft">
-                        {fmtMoney(s.cost, currency)}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2.5 text-right font-medium tabular-nums text-ink">
-                        {fmtMoney(s.price, currency)}
-                      </td>
-                      <td className="px-3 py-2.5 text-center">
-                        <Tooltip content={isPaid(s) ? "Pagado al proveedor" : "Pendiente de pago al proveedor"}>
-                          <span className="inline-flex">
-                            <Switch checked={isPaid(s)} onCheckedChange={() => togglePaid(s)} />
-                          </span>
-                        </Tooltip>
-                      </td>
-                      <td className="py-2.5 pl-3 text-right">
-                        <Dropdown>
-                          <DropdownTrigger asChild>
-                            <Button variant="ghost" size="icon-sm" aria-label="Opciones del servicio">
-                              <MoreHorizontal />
-                            </Button>
-                          </DropdownTrigger>
-                          <DropdownContent align="end">
-                            <DropdownItem onSelect={() => setDialogService(s)}>
-                              <Pencil /> Editar
-                            </DropdownItem>
-                            <DropdownItem destructive onSelect={() => setToDelete(s)}>
-                              <Trash2 /> Eliminar
-                            </DropdownItem>
-                          </DropdownContent>
-                        </Dropdown>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* totales */}
-          <div className="mt-3 space-y-1.5 rounded-xl bg-sand-soft/60 p-3.5">
+          {/* totales — costo / venta / utilidad alineados tabular */}
+          <div className="mt-4 space-y-1.5 rounded-xl bg-sand-soft/60 p-3.5">
             <div className="flex items-center justify-between text-sm">
               <span className="text-ink-soft">Costo total</span>
               <span className="font-medium tabular-nums text-ink-soft">
@@ -216,7 +198,7 @@ export function ServicesCard({
             </div>
             <div className="flex items-center justify-between border-t border-line pt-1.5">
               <span className="text-sm font-semibold text-ink">Utilidad</span>
-              <span className="text-lg font-bold tabular-nums text-money-700">
+              <span className="text-lg font-bold tabular-nums text-money-text">
                 {fmtMoney(utility, currency)}
               </span>
             </div>
@@ -266,9 +248,9 @@ export function ServicesCard({
   );
 }
 
-/* ───────────────────────── fila mobile ───────────────────────── */
+/* ───────────────────────── fila de servicio ───────────────────────── */
 
-function ServiceItemMobile({
+function ServiceItem({
   service: s,
   currency,
   paid,
@@ -283,54 +265,70 @@ function ServiceItemMobile({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const meta = SERVICE_TYPES[s.type];
   return (
-    <div className="rounded-xl border border-line bg-paper p-3">
-      <div className="flex items-start gap-2.5">
-        <span className="mt-0.5 text-lg leading-none">{meta.emoji}</span>
+    <div className="py-2.5">
+      <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium leading-snug text-ink">{s.description}</p>
-          <p className="mt-0.5 truncate text-xs text-ink-faint">
-            {[
-              meta.label,
-              s.supplier_name,
-              s.reservation_code ? `Reserva ${s.reservation_code}` : null,
-              s.date_from
-                ? `${fmtDate(s.date_from)}${s.date_to ? ` → ${fmtDate(s.date_to)}` : ""}`
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-faint">
+            {s.supplier_name && <span className="truncate">{s.supplier_name}</span>}
+            {s.reservation_code && (
+              <span className="font-mono font-medium text-ink-soft">{s.reservation_code}</span>
+            )}
+            {s.date_from && (
+              <span className="inline-flex items-center gap-1 tabular-nums">
+                {fmtDate(s.date_from)}
+                {s.date_to && (
+                  <>
+                    <ArrowRight className="size-3" strokeWidth={2} />
+                    {fmtDate(s.date_to)}
+                  </>
+                )}
+              </span>
+            )}
           </p>
         </div>
-        <Dropdown>
-          <DropdownTrigger asChild>
-            <Button variant="ghost" size="icon-sm" className="-mr-1 -mt-1" aria-label="Opciones del servicio">
-              <MoreHorizontal />
-            </Button>
-          </DropdownTrigger>
-          <DropdownContent align="end">
-            <DropdownItem onSelect={onEdit}>
-              <Pencil /> Editar
-            </DropdownItem>
-            <DropdownItem destructive onSelect={onDelete}>
-              <Trash2 /> Eliminar
-            </DropdownItem>
-          </DropdownContent>
-        </Dropdown>
+
+        <div className="shrink-0 text-right tabular-nums">
+          <p className="text-sm font-semibold text-ink">{fmtMoney(s.price, currency)}</p>
+          <p className="text-xs text-ink-faint">costo {fmtMoney(s.cost, currency)}</p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-0.5">
+          {/* switch de pagado: visible directo en desktop */}
+          <Tooltip content={paid ? "Pagado al proveedor" : "Debe al proveedor"}>
+            <span className="hidden md:inline-flex">
+              <Switch checked={paid} onCheckedChange={onTogglePaid} />
+            </span>
+          </Tooltip>
+          <Dropdown>
+            <DropdownTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="-mr-1"
+                aria-label="Opciones del servicio"
+              >
+                <MoreHorizontal />
+              </Button>
+            </DropdownTrigger>
+            <DropdownContent align="end">
+              <DropdownItem onSelect={onEdit}>
+                <Pencil /> Editar
+              </DropdownItem>
+              <DropdownItem destructive onSelect={onDelete}>
+                <Trash2 /> Eliminar
+              </DropdownItem>
+            </DropdownContent>
+          </Dropdown>
+        </div>
       </div>
 
-      <div className="mt-2.5 flex items-center justify-between gap-3">
-        <label className="flex min-h-6 items-center gap-2 text-xs text-ink-faint tap-highlight-none">
-          <Switch checked={paid} onCheckedChange={onTogglePaid} />
-          {paid ? "Pagado a proveedor" : "Debe al proveedor"}
-        </label>
-        <p className="text-sm tabular-nums">
-          <span className="text-ink-faint">{fmtMoney(s.cost, currency)}</span>
-          <span className="mx-1 text-ink-faint">→</span>
-          <span className="font-semibold text-ink">{fmtMoney(s.price, currency)}</span>
-        </p>
-      </div>
+      {/* mobile: switch con label explícito */}
+      <label className="mt-1.5 flex min-h-6 w-fit items-center gap-2 text-xs text-ink-faint tap-highlight-none md:hidden">
+        <Switch checked={paid} onCheckedChange={onTogglePaid} />
+        {paid ? "Pagado a proveedor" : "Debe al proveedor"}
+      </label>
     </div>
   );
 }
@@ -402,21 +400,33 @@ function ServiceDialog({
         size="lg"
       >
         <div className="space-y-4">
+          <div>
+            <Label>Tipo de servicio</Label>
+            <ChoiceGrid<ServiceType>
+              options={SERVICE_ORDER.map((t) => ({
+                value: t,
+                label: SERVICE_TYPES[t].label,
+                icon: SERVICE_TYPES[t].icon,
+              }))}
+              value={type}
+              onChange={setType}
+              columns={3}
+              size="sm"
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="sv-desc">Descripción</Label>
+            <Input
+              id="sv-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Ej: Aéreo EZE–GIG ida y vuelta, GOL"
+              autoFocus={!isEdit}
+            />
+          </div>
+
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <Label htmlFor="sv-type">Tipo</Label>
-              <Select
-                id="sv-type"
-                value={type}
-                onChange={(e) => setType(e.target.value as ServiceType)}
-              >
-                {SERVICE_ORDER.map((t) => (
-                  <option key={t} value={t}>
-                    {SERVICE_TYPES[t].emoji} {SERVICE_TYPES[t].label}
-                  </option>
-                ))}
-              </Select>
-            </div>
             <div>
               <Label htmlFor="sv-supplier">Proveedor</Label>
               <Select
@@ -432,19 +442,6 @@ function ServiceDialog({
                 ))}
               </Select>
             </div>
-          </div>
-
-          <div>
-            <Label htmlFor="sv-desc">Descripción</Label>
-            <Input
-              id="sv-desc"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Ej: Aéreo EZE–GIG ida y vuelta, GOL"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div>
               <Label htmlFor="sv-code">Código de reserva</Label>
               <Input
@@ -455,6 +452,9 @@ function ServiceDialog({
                 className="font-mono"
               />
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="sv-from">Desde</Label>
               <Input
@@ -506,7 +506,11 @@ function ServiceDialog({
             <span
               className={cn(
                 "font-semibold tabular-nums",
-                utility > 0 ? "text-money-700" : utility < 0 ? "text-red-600" : "text-ink-faint",
+                utility > 0
+                  ? "text-money-text"
+                  : utility < 0
+                    ? "text-tone-red-text"
+                    : "text-ink-faint",
               )}
             >
               {fmtMoney(utility, currency)}

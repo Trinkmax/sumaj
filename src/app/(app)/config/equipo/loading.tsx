@@ -7,8 +7,10 @@ export default function EquipoLoading() {
         <Skeleton className="h-8 w-28" />
         <Skeleton className="mt-2 h-4 w-64" />
       </div>
-      <div className="flex gap-1.5 overflow-hidden px-4 py-2 md:px-6">
-        {Array.from({ length: 6 }).map((_, i) => (
+      {/* ConfigNav: volver + 7 pills */}
+      <div className="flex items-center gap-1.5 overflow-hidden px-4 py-2 md:px-6">
+        <Skeleton className="size-8 shrink-0 rounded-full" />
+        {Array.from({ length: 7 }).map((_, i) => (
           <Skeleton key={i} className="h-8 w-24 shrink-0 rounded-full" />
         ))}
       </div>
@@ -28,7 +30,7 @@ export default function EquipoLoading() {
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="mt-1.5 h-3 w-44" />
               </div>
-              <Skeleton className="h-9 w-[130px] rounded-xl" />
+              <Skeleton className="h-9 w-[104px] rounded-full" />
               <Skeleton className="h-9 w-[72px] rounded-xl" />
               <Skeleton className="h-6 w-10 rounded-full" />
             </div>

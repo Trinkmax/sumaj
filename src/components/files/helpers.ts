@@ -10,13 +10,16 @@ export function daysUntil(date: string | null | undefined): number | null {
   return Math.round((target.getTime() - today.getTime()) / 86400000);
 }
 
-/** "✈️ hoy" / "✈️ mañana" / "✈️ en 12 días" — solo si falta menos de `max` días */
+/**
+ * "sale hoy" / "sale mañana" / "sale en 12 días" — solo si falta menos de `max` días.
+ * Devuelve SOLO texto: el icono (PlaneTakeoff) lo pone el componente que lo consume.
+ */
 export function departureBadge(date: string | null | undefined, max = 30): string | null {
   const days = daysUntil(date);
   if (days == null || days < 0 || days >= max) return null;
-  if (days === 0) return "✈️ sale hoy";
-  if (days === 1) return "✈️ mañana";
-  return `✈️ en ${days} días`;
+  if (days === 0) return "sale hoy";
+  if (days === 1) return "sale mañana";
+  return `sale en ${days} días`;
 }
 
 /** true si la fecha ya pasó o cae antes del regreso del viaje */

@@ -73,7 +73,7 @@ export function NotesCard({
             </>
           )}
           {state === "saved" && (
-            <span className="flex animate-pop items-center gap-1 text-money-700">
+            <span className="flex animate-check-pop items-center gap-1 text-money-text">
               <Check className="size-3" /> Guardado
             </span>
           )}

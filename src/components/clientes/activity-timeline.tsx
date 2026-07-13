@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Send } from "lucide-react";
+import { Send, StickyNote, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
@@ -82,20 +82,14 @@ export function ActivityTimeline({
       ) : (
         <ol className="mt-4 space-y-0">
           {pending.map((p) => (
-            <TimelineItem
-              key={p.id}
-              emoji="📝"
-              body={p.body}
-              meta="guardando…"
-              pending
-            />
+            <TimelineItem key={p.id} icon={StickyNote} body={p.body} meta="guardando…" pending />
           ))}
           {activities.map((a) => {
             const meta = ACTIVITY_TYPES[a.type] ?? ACTIVITY_TYPES.sistema;
             return (
               <TimelineItem
                 key={a.id}
-                emoji={meta.emoji}
+                icon={meta.icon}
                 body={a.body}
                 meta={[a.member?.display_name, fmtRelative(a.created_at)]
                   .filter(Boolean)
@@ -110,12 +104,12 @@ export function ActivityTimeline({
 }
 
 function TimelineItem({
-  emoji,
+  icon: Icon,
   body,
   meta,
   pending,
 }: {
-  emoji: string;
+  icon: LucideIcon;
   body: string;
   meta: string;
   pending?: boolean;
@@ -123,10 +117,10 @@ function TimelineItem({
   return (
     <li className={cn("group", pending && "animate-slide-up opacity-70")}>
       <div className="relative flex gap-3 pb-4 group-last:pb-0">
-        {/* línea vertical */}
+        {/* icono + línea vertical fina */}
         <div className="flex flex-col items-center">
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-sand-soft text-sm">
-            {emoji}
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-sand-soft text-ink-soft ring-1 ring-line/60">
+            <Icon className="size-3.5" strokeWidth={1.9} />
           </span>
           <span className="mt-1 w-px flex-1 bg-line group-last:hidden" aria-hidden />
         </div>

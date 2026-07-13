@@ -22,6 +22,7 @@ export default async function CrmPage({
       .select(
         `id, stage, position, destination, origin_channel, origin_campaign,
          next_action_at, created_at, pax_adults, pax_children, assigned_to, won_file_id,
+         budget_estimate, budget_currency,
          contact:contacts(id, full_name, phone),
          assignee:members!leads_assigned_to_fkey(id, display_name)`,
       )
@@ -69,6 +70,8 @@ export default async function CrmPage({
       pax_children: l.pax_children,
       assigned_to: l.assigned_to,
       won_file_id: l.won_file_id,
+      budget_estimate: l.budget_estimate != null ? Number(l.budget_estimate) : null,
+      budget_currency: l.budget_currency,
       contact: l.contact!,
       assignee: l.assignee,
       conversation: convByContact.get(l.contact!.id) ?? null,

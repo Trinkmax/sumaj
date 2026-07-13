@@ -474,7 +474,7 @@ export async function setQuoteStatus(input: {
 
   const bodies: Record<string, string> = {
     enviado: `Presupuesto ${quote.code} enviado`,
-    aceptado: `Presupuesto ${quote.code} aceptado ✅`,
+    aceptado: `Presupuesto ${quote.code} aceptado`,
     rechazado: `Presupuesto ${quote.code} rechazado`,
     vencido: `Presupuesto ${quote.code} vencido`,
     borrador: `Presupuesto ${quote.code} vuelto a borrador`,
@@ -602,7 +602,7 @@ export async function convertQuoteDirect(input: {
     contactId: quote.contact_id,
     fileId: file.id,
     type: "presupuesto",
-    body: `Presupuesto ${quote.code} aceptado 🎉 — se creó el file ${file.code}`,
+    body: `Presupuesto ${quote.code} aceptado — se creó el file ${file.code}`,
     metadata: { quote_id: quote.id },
   });
 

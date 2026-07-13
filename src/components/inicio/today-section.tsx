@@ -1,7 +1,8 @@
 import Link from "next/link";
+import { Clock, MessageCircle, Sparkles, Sun, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmtDue } from "@/lib/format";
-import { EmptyState } from "@/components/ui/misc";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export type AgendaItem = {
   id: string;
@@ -11,6 +12,16 @@ export type AgendaItem = {
   nextActionAt: string;
 };
 
+const TONE_CIRCLE: Record<"sky" | "amber" | "green", string> = {
+  sky: "bg-tone-sky-soft text-tone-sky-text",
+  amber: "bg-tone-amber-soft text-tone-amber-text",
+  green: "bg-tone-green-soft text-tone-green-text",
+};
+
+/**
+ * "Para hoy": 3 tarjetas de acción tappables + agenda compacta del día.
+ * Server component: solo links, sin estado.
+ */
 export function TodaySection({
   newLeads,
   followupsCount,
@@ -25,89 +36,103 @@ export function TodaySection({
   agenda: AgendaItem[];
 }) {
   return (
-    <section className="animate-slide-up">
-      <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
-        Para hoy
-      </h2>
+    <section className="flex h-full flex-col">
+      <h2 className="text-sm font-medium text-ink-soft">Para hoy</h2>
 
       {/* cards accionables */}
-      <div className="mt-3 grid grid-cols-3 gap-2 md:gap-3">
+      <div className="mt-2 grid grid-cols-3 gap-2 md:gap-3 stagger-children">
         <ActionCard
           href="/crm"
-          emoji="✨"
+          icon={Sparkles}
+          tone="sky"
           count={newLeads}
           label="Leads sin atender"
-          highlight={newLeads > 0}
+          pulse={newLeads > 0 ? "brand" : undefined}
         />
         <ActionCard
           href="/crm"
-          emoji="⏰"
+          icon={Clock}
+          tone="amber"
           count={followupsCount}
           label="Seguimientos"
           danger={overdueCount > 0}
+          pulse={overdueCount > 0 ? "red" : undefined}
           hint={
             overdueCount > 0
               ? `${overdueCount} vencido${overdueCount === 1 ? "" : "s"}`
               : undefined
           }
         />
-        <ActionCard href="/crm?vista=chats" emoji="💬" count={unread} label="Chats sin leer" />
+        <ActionCard
+          href="/crm?vista=chats"
+          icon={MessageCircle}
+          tone="green"
+          count={unread}
+          label="Chats sin leer"
+        />
       </div>
 
       {/* agenda del día */}
-      <div className="mt-4">
-        <p className="mb-2 text-[13px] font-medium text-ink-soft">Agenda de hoy</p>
+      <div className="mt-3 flex min-h-0 flex-1 flex-col md:mt-4">
         {agenda.length === 0 ? (
           <EmptyState
-            emoji="☀️"
+            icon={Sun}
             title="Día despejado"
             description="No tenés seguimientos pendientes. ¿Un toque a los presupuestados?"
-            className="py-8"
+            className="flex-1 py-6"
           />
         ) : (
-          <div className="card divide-y divide-line overflow-hidden">
-            {agenda.slice(0, 6).map((item) => {
-              const due = fmtDue(item.nextActionAt);
-              return (
-                <Link
-                  key={item.id}
-                  href={`/crm/${item.id}`}
-                  className="flex min-h-14 items-center gap-3 px-4 py-2.5 transition-colors hover:bg-sand-soft/60 tap-highlight-none"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-ink">
-                      {item.contactName}
-                      {item.destination && (
-                        <span className="font-normal text-ink-faint"> · {item.destination}</span>
-                      )}
-                    </p>
-                    <p className="truncate text-[13px] text-ink-soft">
-                      {item.nextAction ?? "Seguimiento"}
-                    </p>
-                  </div>
-                  <span
-                    className={cn(
-                      "shrink-0 text-xs font-medium tabular-nums",
-                      due.overdue
-                        ? "text-red-600"
-                        : due.today
-                          ? "text-brand-700"
-                          : "text-ink-faint",
-                    )}
+          <div className="card overflow-hidden">
+            <p className="border-b border-line px-3.5 py-2 text-[13px] font-medium text-ink-soft">
+              Agenda de hoy
+            </p>
+            <div className="divide-y divide-line stagger-children">
+              {agenda.slice(0, 5).map((item) => {
+                const due = fmtDue(item.nextActionAt);
+                return (
+                  <Link
+                    key={item.id}
+                    href={`/crm/${item.id}`}
+                    className="flex min-h-11 items-center gap-3 px-3.5 py-2 transition-colors hover:bg-sand-soft/60 active:bg-sand-soft tap-highlight-none"
                   >
-                    {due.label}
-                  </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-ink">
+                        {item.contactName}
+                        {item.destination && (
+                          <span className="font-normal text-ink-faint">
+                            {" "}
+                            · {item.destination}
+                          </span>
+                        )}
+                      </p>
+                      <p className="truncate text-xs text-ink-soft">
+                        {item.nextAction ?? "Seguimiento"}
+                      </p>
+                    </div>
+                    <span
+                      className={cn(
+                        "shrink-0 text-xs font-medium tabular-nums",
+                        due.overdue
+                          ? "text-tone-red-text"
+                          : due.today
+                            ? "text-brand-text"
+                            : "text-ink-faint",
+                      )}
+                    >
+                      {due.label}
+                    </span>
+                  </Link>
+                );
+              })}
+              {followupsCount > 5 && (
+                <Link
+                  href="/crm"
+                  className="block px-3.5 py-2.5 text-center text-[13px] font-medium text-brand-text transition-colors hover:bg-brand-tint tap-highlight-none"
+                >
+                  Ver todos ({followupsCount})
                 </Link>
-              );
-            })}
-            {followupsCount > 6 && (
-              <Link
-                href="/crm"
-                className="block px-4 py-3 text-center text-[13px] font-medium text-brand-700 transition-colors hover:bg-brand-50 tap-highlight-none"
-              >
-                Ver todos ({followupsCount})
-              </Link>
-            )}
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -117,44 +142,59 @@ export function TodaySection({
 
 function ActionCard({
   href,
-  emoji,
+  icon: Icon,
+  tone,
   count,
   label,
-  highlight,
   danger,
   hint,
+  pulse,
 }: {
   href: string;
-  emoji: string;
+  icon: LucideIcon;
+  tone: keyof typeof TONE_CIRCLE;
   count: number;
   label: string;
-  highlight?: boolean;
   danger?: boolean;
   hint?: string;
+  /** muestra un punto que late arriba a la derecha */
+  pulse?: "brand" | "red";
 }) {
   return (
     <Link
       href={href}
-      className={cn(
-        "card relative flex flex-col p-3 transition-all hover:-translate-y-px hover:border-line-strong hover:shadow-md tap-highlight-none md:p-4",
-        highlight && "border-brand-300",
-        danger && "border-red-200",
-      )}
+      className="card card-hover relative flex flex-col gap-2 p-3 transition-transform active:scale-[0.98] tap-highlight-none md:p-3.5"
     >
-      {highlight && (
-        <span className="absolute right-3 top-3 size-2 rounded-full bg-brand-500 animate-pulse-dot" />
+      {pulse && (
+        <span
+          className={cn(
+            "absolute right-3 top-3 size-2 rounded-full animate-pulse-dot",
+            pulse === "red" ? "bg-red-500" : "bg-brand-500",
+          )}
+        />
       )}
-      <span className="text-base leading-none md:text-lg">{emoji}</span>
-      <p
+      <span
         className={cn(
-          "mt-1.5 text-2xl font-semibold leading-none tabular-nums md:text-3xl",
-          danger ? "text-red-600" : "text-ink",
+          "flex size-8 shrink-0 items-center justify-center rounded-full",
+          TONE_CIRCLE[tone],
         )}
       >
-        {count}
-      </p>
-      <p className="mt-1 text-[11px] leading-tight text-ink-soft md:text-xs">{label}</p>
-      {hint && <p className="mt-0.5 text-[10px] font-medium text-red-600">{hint}</p>}
+        <Icon className="size-4" strokeWidth={1.9} />
+      </span>
+      <div>
+        <p
+          className={cn(
+            "text-2xl font-semibold leading-none tabular-nums md:text-[26px]",
+            danger ? "text-tone-red-text" : "text-ink",
+          )}
+        >
+          {count}
+        </p>
+        <p className="mt-1 text-[11px] leading-tight text-ink-soft md:text-xs">{label}</p>
+        {hint && (
+          <p className="mt-0.5 text-[10px] font-semibold text-tone-red-text">{hint}</p>
+        )}
+      </div>
     </Link>
   );
 }

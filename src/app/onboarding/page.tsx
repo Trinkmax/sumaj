@@ -31,14 +31,20 @@ export default async function OnboardingPage() {
     "";
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-cream px-4">
-      <div className="w-full max-w-md animate-slide-up-slow">
+    <div className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-cream px-4 py-10">
+      {/* halo editorial de marca, sutil en ambos temas */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-40 left-1/2 h-80 w-[38rem] -translate-x-1/2 rounded-full bg-brand-tint opacity-70 blur-3xl"
+      />
+
+      <div className="relative w-full max-w-md animate-slide-up-slow">
         <div className="mb-8 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/viajerOS-2.png"
             alt="viajerOS"
-            className="mx-auto h-9 w-auto"
+            className="mx-auto h-8 w-auto dark:invert"
           />
         </div>
         <OnboardingForm

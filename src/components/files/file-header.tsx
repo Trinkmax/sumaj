@@ -2,15 +2,24 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
+  ArrowRight,
   Calendar,
-  Check,
-  ChevronDown,
   Copy,
+  Loader2,
+  MessageCircle,
+  MoreHorizontal,
   Pencil,
+  PlaneTakeoff,
+  ReceiptText,
+  RotateCcw,
   Share2,
+  Target,
   User,
+  XCircle,
+  type LucideIcon,
 } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -20,45 +29,74 @@ import {
   DropdownTrigger,
   DropdownContent,
   DropdownItem,
-  DropdownLabel,
 } from "@/components/ui/dropdown";
 import { Avatar } from "@/components/ui/avatar";
 import { updateFile, updateFileStatus } from "@/lib/actions/files";
-import { FILE_STATUSES, SERVICE_TYPES, waLink } from "@/lib/domain";
+import { getLeadConversationId } from "@/lib/actions/leads";
+import { FILE_STATUSES, waLink } from "@/lib/domain";
 import { fmtDate, fmtDateFull, nightsBetween } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { FileStatus } from "@/lib/types";
+import type { FileStatus, ServiceType } from "@/lib/types";
 import { departureBadge } from "./helpers";
 import type { FileDetail, ServiceRow, TravelerRow } from "./types";
 
-const STATUS_KEYS = Object.keys(FILE_STATUSES) as FileStatus[];
+/** camino feliz del expediente; "cancelado" queda fuera del stepper */
+const STEPPER_STATUSES: FileStatus[] = ["vendido", "pagado", "en_curso", "finalizado"];
 
 export function FileHeader({
   file,
   services,
   travelers,
   agencyName,
+  quoteCode,
+  conversationId,
 }: {
   file: FileDetail;
   services: ServiceRow[];
   travelers: TravelerRow[];
   agencyName: string;
+  quoteCode?: string | null;
+  conversationId?: string | null;
 }) {
   const [datesOpen, setDatesOpen] = React.useState(false);
+  const [cancelOpen, setCancelOpen] = React.useState(false);
+
+  /* estado del file, optimista y compartido por stepper + menú */
+  const [status, setStatus] = React.useState<FileStatus>(file.status);
+  React.useEffect(() => setStatus(file.status), [file.status]);
+
+  const changeStatus = async (next: FileStatus) => {
+    if (next === status) return;
+    const prev = status;
+    setStatus(next);
+    const res = await updateFileStatus({ fileId: file.id, status: next });
+    if (!res.ok) {
+      setStatus(prev);
+      toast.error(res.error);
+      return;
+    }
+    toast.success(
+      next === "cancelado"
+        ? `El file ${file.code} quedó cancelado`
+        : `El file pasó a ${FILE_STATUSES[next].label}`,
+    );
+  };
+
+  const cancelled = status === "cancelado";
   const badge = departureBadge(file.departure_date);
   const nights = nightsBetween(file.departure_date, file.return_date);
 
   return (
     <div className="animate-slide-up px-4 pt-4 md:px-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-lg bg-sand-soft px-2 py-0.5 font-mono text-sm font-bold tracking-wide text-ink">
               {file.code}
             </span>
-            <StatusSelect fileId={file.id} status={file.status} />
-            {badge && (
-              <span className="animate-pop rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+            {badge && !cancelled && (
+              <span className="inline-flex animate-pop items-center gap-1 rounded-full border border-tone-sky-line bg-tone-sky-soft px-2.5 py-0.5 text-[11px] font-semibold text-tone-sky-text">
+                <PlaneTakeoff className="size-3" strokeWidth={2} />
                 {badge}
               </span>
             )}
@@ -69,21 +107,6 @@ export function FileHeader({
           </h1>
 
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-ink-soft">
-            {file.contact && (
-              <Link
-                href={`/clientes/${file.contact.id}`}
-                className="inline-flex items-center gap-1.5 font-medium text-ink transition-colors hover:text-brand-600 tap-highlight-none"
-              >
-                <User className="size-4 text-ink-faint" />
-                {file.contact.full_name}
-              </Link>
-            )}
-            {file.seller && (
-              <span className="inline-flex items-center gap-1.5">
-                <Avatar name={file.seller.display_name} className="size-5 text-[9px]" />
-                {file.seller.display_name}
-              </span>
-            )}
             <button
               type="button"
               onClick={() => setDatesOpen(true)}
@@ -91,87 +114,267 @@ export function FileHeader({
             >
               <Calendar className="size-4 text-ink-faint" />
               {file.departure_date ? (
-                <>
+                <span className="inline-flex items-center gap-1.5 tabular-nums">
                   {fmtDate(file.departure_date)}
-                  {file.return_date && ` → ${fmtDate(file.return_date)}`}
+                  {file.return_date && (
+                    <>
+                      <ArrowRight className="size-3.5 text-ink-faint" />
+                      {fmtDate(file.return_date)}
+                    </>
+                  )}
                   {nights != null && (
                     <span className="text-ink-faint">· {nights} noches</span>
                   )}
-                </>
+                </span>
               ) : (
                 <span className="text-ink-faint">Fechas a definir</span>
               )}
               <Pencil className="size-3.5 text-ink-faint" />
             </button>
+            {file.seller && (
+              <span className="inline-flex items-center gap-1.5">
+                <Avatar name={file.seller.display_name} className="size-5 text-[9px]" />
+                {file.seller.display_name}
+              </span>
+            )}
           </div>
         </div>
 
-        <ShareVoucherButton
-          file={file}
-          services={services}
-          travelers={travelers}
-          agencyName={agencyName}
-        />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <ShareVoucherButton
+            file={file}
+            services={services}
+            travelers={travelers}
+            agencyName={agencyName}
+          />
+          <Dropdown>
+            <DropdownTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="Más opciones del file">
+                <MoreHorizontal />
+              </Button>
+            </DropdownTrigger>
+            <DropdownContent align="end">
+              <DropdownItem onSelect={() => setDatesOpen(true)}>
+                <Calendar /> Editar fechas
+              </DropdownItem>
+              {cancelled ? (
+                <DropdownItem onSelect={() => changeStatus("vendido")}>
+                  <RotateCcw /> Reactivar file
+                </DropdownItem>
+              ) : (
+                <DropdownItem destructive onSelect={() => setCancelOpen(true)}>
+                  <XCircle /> Cancelar file
+                </DropdownItem>
+              )}
+            </DropdownContent>
+          </Dropdown>
+        </div>
+      </div>
+
+      {/* stepper de estado del expediente */}
+      <StatusStepper status={status} cancelled={cancelled} onChange={changeStatus} />
+
+      {cancelled && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-tone-red-line bg-tone-red-soft px-3.5 py-2.5 animate-fade-in">
+          <span className="inline-flex items-center gap-2 text-sm font-medium text-tone-red-text">
+            <XCircle className="size-4" strokeWidth={2} />
+            File cancelado
+          </span>
+          <Button variant="secondary" size="sm" onClick={() => changeStatus("vendido")}>
+            <RotateCcw /> Reactivar
+          </Button>
+        </div>
+      )}
+
+      {/* navegación cruzada: el expediente conecta todo */}
+      <div className="mt-4 flex flex-wrap items-center gap-2 stagger-children">
+        {file.contact && (
+          <NavChip href={`/clientes/${file.contact.id}`} icon={User} label={file.contact.full_name} />
+        )}
+        {file.contact && (
+          <ChatChip contactId={file.contact.id} conversationId={conversationId ?? null} />
+        )}
+        {file.quote_id && (
+          <NavChip
+            href={`/presupuestos/${file.quote_id}`}
+            icon={ReceiptText}
+            label={quoteCode ? `Presupuesto ${quoteCode}` : "Presupuesto de origen"}
+          />
+        )}
+        {file.lead_id && (
+          <NavChip href={`/crm/${file.lead_id}`} icon={Target} label="Lead de origen" />
+        )}
       </div>
 
       {datesOpen && (
         <DatesDialog file={file} open={datesOpen} onOpenChange={setDatesOpen} />
       )}
+
+      {cancelOpen && (
+        <Dialog open onOpenChange={(o) => !o && setCancelOpen(false)}>
+          <DialogContent
+            title="Cancelar file"
+            description={`${file.code} · ${file.destination}`}
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-ink-soft">
+                El file queda como cancelado y sale de las ventas activas. Los cobros
+                registrados no se tocan; si hace falta devolver plata, resolvelo desde Caja.
+              </p>
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => setCancelOpen(false)}>
+                  No, volver
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    setCancelOpen(false);
+                    changeStatus("cancelado");
+                  }}
+                >
+                  <XCircle /> Cancelar file
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
 
-/* ───────────────────────── estado (optimista) ───────────────────────── */
+/* ───────────────────────── stepper de estado ───────────────────────── */
 
-function StatusSelect({ fileId, status }: { fileId: string; status: FileStatus }) {
-  const [current, setCurrent] = React.useState(status);
-  React.useEffect(() => setCurrent(status), [status]);
-  const meta = FILE_STATUSES[current];
+function StatusStepper({
+  status,
+  cancelled,
+  onChange,
+}: {
+  status: FileStatus;
+  cancelled: boolean;
+  onChange: (next: FileStatus) => void;
+}) {
+  const currentIdx = STEPPER_STATUSES.indexOf(status);
 
-  const change = async (next: FileStatus) => {
-    if (next === current) return;
-    const prev = current;
-    setCurrent(next);
-    const res = await updateFileStatus({ fileId, status: next });
+  return (
+    <ol
+      className={cn(
+        "mt-5 flex w-full max-w-lg items-start transition-opacity duration-200",
+        cancelled && "pointer-events-none opacity-40",
+      )}
+      aria-label="Estado del file"
+    >
+      {STEPPER_STATUSES.map((key, i) => {
+        const meta = FILE_STATUSES[key];
+        const Icon = meta.icon;
+        const reached = currentIdx >= i;
+        const isCurrent = currentIdx === i;
+        return (
+          <li key={key} className={cn("flex items-start", i > 0 && "min-w-0 flex-1")}>
+            {i > 0 && (
+              <span
+                aria-hidden
+                className={cn(
+                  "mx-1 mt-[17px] h-0.5 min-w-3 flex-1 rounded-full transition-colors duration-300 md:mx-1.5",
+                  reached ? "bg-ink" : "bg-line-strong",
+                )}
+              />
+            )}
+            <button
+              type="button"
+              onClick={() => onChange(key)}
+              disabled={cancelled}
+              aria-current={isCurrent ? "step" : undefined}
+              title={`Marcar como ${meta.label}`}
+              className="group flex min-w-11 shrink-0 flex-col items-center gap-1.5 tap-highlight-none"
+            >
+              <span
+                className={cn(
+                  "flex size-9 items-center justify-center rounded-full border transition-all duration-200 group-active:scale-95",
+                  reached
+                    ? "border-ink bg-ink text-cream shadow-sm"
+                    : "border-line bg-paper text-ink-faint group-hover:border-line-strong group-hover:text-ink-soft",
+                  isCurrent && "ring-2 ring-brand-tint-line ring-offset-2 ring-offset-cream",
+                )}
+              >
+                <Icon className="size-4" strokeWidth={1.9} />
+              </span>
+              <span
+                className={cn(
+                  "text-[11px] leading-none transition-colors",
+                  isCurrent
+                    ? "font-semibold text-ink"
+                    : reached
+                      ? "font-medium text-ink-soft"
+                      : "text-ink-faint",
+                )}
+              >
+                {meta.label}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/* ───────────────────────── chips de navegación ───────────────────────── */
+
+const CHIP_CLASS =
+  "inline-flex min-h-10 items-center gap-1.5 rounded-full border border-line bg-paper px-3.5 text-[13px] font-medium text-ink-soft transition-all tap-highlight-none hover:border-line-strong hover:text-ink hover:shadow-sm active:scale-[0.98]";
+
+function NavChip({
+  href,
+  icon: Icon,
+  label,
+}: {
+  href: string;
+  icon: LucideIcon;
+  label: string;
+}) {
+  return (
+    <Link href={href} className={CHIP_CLASS}>
+      <Icon className="size-3.5 text-ink-faint" strokeWidth={2} />
+      <span className="max-w-44 truncate">{label}</span>
+    </Link>
+  );
+}
+
+function ChatChip({
+  contactId,
+  conversationId,
+}: {
+  contactId: string;
+  conversationId: string | null;
+}) {
+  const router = useRouter();
+  const [loading, setLoading] = React.useState(false);
+
+  const open = async () => {
+    if (conversationId) {
+      router.push(`/crm?vista=chats&c=${conversationId}`);
+      return;
+    }
+    setLoading(true);
+    const res = await getLeadConversationId({ contactId });
+    setLoading(false);
     if (!res.ok) {
-      setCurrent(prev);
       toast.error(res.error);
       return;
     }
-    toast.success(`Estado: ${FILE_STATUSES[next].label}`);
+    router.push(`/crm?vista=chats&c=${res.data.conversationId}`);
   };
 
   return (
-    <Dropdown>
-      <DropdownTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            "inline-flex min-h-7 items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-all tap-highlight-none active:scale-[0.98]",
-            meta.chip,
-          )}
-        >
-          {meta.label}
-          <ChevronDown className="size-3.5 opacity-60" />
-        </button>
-      </DropdownTrigger>
-      <DropdownContent align="start">
-        <DropdownLabel>Estado del file</DropdownLabel>
-        {STATUS_KEYS.map((key) => (
-          <DropdownItem key={key} onSelect={() => change(key)}>
-            <span
-              className={cn(
-                "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                FILE_STATUSES[key].chip,
-              )}
-            >
-              {FILE_STATUSES[key].label}
-            </span>
-            {key === current && <Check className="ml-auto size-4 text-money-700" />}
-          </DropdownItem>
-        ))}
-      </DropdownContent>
-    </Dropdown>
+    <button type="button" onClick={open} disabled={loading} className={CHIP_CLASS}>
+      {loading ? (
+        <Loader2 className="size-3.5 animate-spin text-ink-faint" />
+      ) : (
+        <MessageCircle className="size-3.5 text-ink-faint" strokeWidth={2} />
+      )}
+      Chat
+    </button>
   );
 }
 
@@ -245,7 +448,21 @@ function DatesDialog({
   );
 }
 
-/* ───────────────────────── voucher ───────────────────────── */
+/* ───────────────────────── voucher ─────────────────────────
+   El texto va AL CLIENTE por WhatsApp: acá los emojis están permitidos
+   (única excepción a la regla; la UI interna usa solo iconos lucide). */
+
+const VOUCHER_EMOJI: Record<ServiceType, string> = {
+  aereo: "✈️",
+  hotel: "🏨",
+  paquete: "🧳",
+  excursion: "🚌",
+  traslado: "🚐",
+  asistencia: "🛡️",
+  circuito: "🗺️",
+  crucero: "🛳️",
+  otro: "📎",
+};
 
 function buildVoucherText(
   file: FileDetail,
@@ -268,8 +485,7 @@ function buildVoucherText(
     lines.push("");
     lines.push("*Servicios:*");
     for (const s of services) {
-      const meta = SERVICE_TYPES[s.type];
-      let line = `${meta.emoji} ${s.description}`;
+      let line = `${VOUCHER_EMOJI[s.type]} ${s.description}`;
       if (s.reservation_code) line += ` — reserva ${s.reservation_code}`;
       if (s.date_from) {
         line += ` (${fmtDateFull(s.date_from)}${s.date_to ? ` al ${fmtDateFull(s.date_to)}` : ""})`;
@@ -315,7 +531,7 @@ function ShareVoucherButton({
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(text);
-      toast.success("Confirmación copiada ✅");
+      toast.success("Confirmación copiada");
     } catch {
       toast.error("No se pudo copiar. Probá de nuevo.");
     }
@@ -348,7 +564,7 @@ function ShareVoucherButton({
 
 function WhatsAppIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className="size-4 !text-[#25d366]" aria-hidden>
+    <svg viewBox="0 0 24 24" fill="currentColor" className="size-4 !text-wa-accent" aria-hidden>
       <path d="M12.04 2c-5.46 0-9.9 4.44-9.9 9.9 0 1.75.46 3.45 1.32 4.95L2.05 22l5.3-1.38c1.45.79 3.08 1.2 4.7 1.2h.01c5.46 0 9.9-4.44 9.9-9.9 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Zm0 18.15c-1.48 0-2.94-.4-4.2-1.15l-.3-.18-3.12.82.83-3.05-.2-.31a8.26 8.26 0 0 1-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.82 2.42a8.18 8.18 0 0 1 2.41 5.83c0 4.54-3.7 8.24-8.23 8.24Zm4.52-6.16c-.25-.13-1.47-.72-1.7-.8-.22-.09-.39-.13-.55.12-.17.25-.64.8-.78.97-.15.16-.29.18-.54.06-.25-.13-1.05-.39-2-1.23-.73-.66-1.23-1.47-1.38-1.72-.14-.25-.01-.38.11-.51.11-.11.25-.29.37-.43.12-.15.16-.25.25-.41.08-.17.04-.31-.02-.43-.06-.13-.55-1.34-.76-1.84-.2-.48-.4-.42-.55-.42h-.47c-.16 0-.43.06-.66.31-.22.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.6.19 1.13.16 1.56.1.48-.07 1.47-.6 1.67-1.18.21-.58.21-1.07.15-1.18-.06-.1-.23-.16-.48-.29Z" />
     </svg>
   );

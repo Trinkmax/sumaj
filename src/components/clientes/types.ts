@@ -1,9 +1,20 @@
 import type { Tables, DocumentType } from "@/lib/types";
 
-/** Contacto con sus etiquetas ya aplanadas */
-export type ContactRow = Tables<"contacts"> & { tags: Tables<"tags">[] };
+/** Contacto con sus etiquetas ya aplanadas + última actividad */
+export type ContactRow = Tables<"contacts"> & {
+  tags: Tables<"tags">[];
+  /** timestamp de la última actividad registrada (fallback: created_at) */
+  last_activity_at?: string | null;
+};
 
 export type TravelerRow = Tables<"travelers">;
+
+/** Grupo del que este contacto participa como pasajero (navegación inversa) */
+export type TravelsWithRow = {
+  travelerId: string;
+  relationship: string | null;
+  owner: { id: string; full_name: string };
+};
 
 export type LeadSummary = Pick<
   Tables<"leads">,
@@ -28,8 +39,10 @@ export type ActivityRow = Tables<"activities"> & {
 export type ExpiringDoc = {
   travelerId: string;
   travelerName: string;
+  /** ficha a la que linkea: la propia del pasajero si existe, sino la del titular */
   contactId: string;
   contactName: string;
+  documentType: DocumentType | null;
   expiry: string;
 };
 
@@ -42,22 +55,36 @@ export const DOC_TYPE_LABELS: Record<DocumentType, string> = {
 
 export const DOC_TYPE_KEYS = Object.keys(DOC_TYPE_LABELS) as DocumentType[];
 
+/** días hasta el vencimiento (negativo = ya venció) */
+export function daysUntil(expiry: string): number {
+  const [y, m, d] = expiry.slice(0, 10).split("-").map(Number);
+  const target = new Date(y, m - 1, d);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86400000);
+}
+
 /** ¿vence dentro de los próximos `days` días (o ya venció)? */
 export function expiresSoon(expiry: string | null | undefined, days = 90): boolean {
   if (!expiry) return false;
-  const limit = new Date();
-  limit.setDate(limit.getDate() + days);
-  const [y, m, d] = expiry.slice(0, 10).split("-").map(Number);
-  return new Date(y, m - 1, d) <= limit;
+  return daysUntil(expiry) <= days;
 }
 
 /** ¿ya venció? */
 export function isExpired(expiry: string | null | undefined): boolean {
   if (!expiry) return false;
-  const [y, m, d] = expiry.slice(0, 10).split("-").map(Number);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return new Date(y, m - 1, d) < today;
+  return daysUntil(expiry) < 0;
+}
+
+/** "venció hace 12 días" / "vence en 45 días" — countdown humano */
+export function expiryCountdown(expiry: string): string {
+  const days = daysUntil(expiry);
+  if (days < -1) return `venció hace ${Math.abs(days)} días`;
+  if (days === -1) return "venció ayer";
+  if (days === 0) return "vence hoy";
+  if (days === 1) return "vence mañana";
+  if (days <= 60) return `vence en ${days} días`;
+  return `vence en ${Math.round(days / 30)} meses`;
 }
 
 /** ¿cumple años este mes? */

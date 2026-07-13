@@ -22,10 +22,14 @@ export function FileTimeline({
         <ol className="relative space-y-4 before:absolute before:inset-y-1 before:left-[15px] before:w-px before:bg-line">
           {activities.map((a) => {
             const meta = ACTIVITY_TYPES[a.type];
+            const Icon = meta.icon;
             return (
               <li key={a.id} className="relative flex gap-3">
-                <span className="z-10 flex size-8 shrink-0 items-center justify-center rounded-full border border-line bg-paper text-sm">
-                  {meta.emoji}
+                <span
+                  className="z-10 flex size-8 shrink-0 items-center justify-center rounded-full border border-line bg-paper text-ink-faint"
+                  title={meta.label}
+                >
+                  <Icon className="size-3.5" strokeWidth={1.9} />
                 </span>
                 <div className="min-w-0 flex-1 pt-1">
                   <p className="text-sm leading-snug text-ink">{a.body}</p>

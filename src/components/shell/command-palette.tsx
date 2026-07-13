@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import {
   Search,
+  SearchX,
   Home,
   KanbanSquare,
   MessagesSquare,
@@ -147,14 +148,16 @@ export function CommandPalette(): React.JSX.Element {
     };
   }, []);
 
-  /* bloquear scroll de fondo mientras está abierto */
+  /* bloquear scroll de fondo + devolver el foco a donde estaba al cerrar */
   React.useEffect(() => {
     if (!open) return;
+    const prevFocus = document.activeElement as HTMLElement | null;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     inputRef.current?.focus();
     return () => {
       document.body.style.overflow = prev;
+      prevFocus?.focus?.();
     };
   }, [open]);
 
@@ -230,7 +233,7 @@ export function CommandPalette(): React.JSX.Element {
                 <p className="truncate text-xs text-ink-faint">{fmtPhone(c.phone)}</p>
               </div>
               {c.isClient && (
-                <Chip className="border-emerald-200 bg-emerald-50 text-emerald-700">
+                <Chip className="border-tone-emerald-line bg-tone-emerald-soft text-tone-emerald-text">
                   Cliente
                 </Chip>
               )}
@@ -350,7 +353,9 @@ export function CommandPalette(): React.JSX.Element {
   }, [sel, open]);
 
   function onPanelKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Escape") {
+    if (e.key === "Tab") {
+      e.preventDefault();
+    } else if (e.key === "Escape") {
       e.preventDefault();
       close();
     } else if (e.key === "ArrowDown") {
@@ -377,7 +382,7 @@ export function CommandPalette(): React.JSX.Element {
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Buscador">
       {/* overlay */}
       <div
-        className="absolute inset-0 bg-ink/40 backdrop-blur-sm animate-fade-in"
+        className="absolute inset-0 bg-overlay backdrop-blur-sm animate-fade-in"
         onMouseDown={close}
       />
 
@@ -415,7 +420,7 @@ export function CommandPalette(): React.JSX.Element {
             </div>
           ) : showEmpty ? (
             <EmptyState
-              emoji="🔍"
+              icon={SearchX}
               title="Nada por acá"
               description="Probá con otro nombre, destino o código."
               className="border-0 py-8"

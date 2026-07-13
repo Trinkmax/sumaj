@@ -24,6 +24,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@/lib/utils";
 import { STAGES, STAGE_BY_KEY } from "@/lib/domain";
+import { fmtMoney } from "@/lib/format";
 import type { LeadStage } from "@/lib/types";
 import { updateLeadStage, reorderLead } from "@/lib/actions/leads";
 import { LeadCard } from "./lead-card";
@@ -53,6 +54,22 @@ function computePosition(items: BoardLead[], index: number): number {
   if (prev) return prev.position + 1;
   if (next) return next.position - 1;
   return 0;
+}
+
+/** Suma sutil de presupuesto estimado por columna, agrupada por moneda. */
+function budgetSummary(leads: BoardLead[]): string | null {
+  let usd = 0;
+  let ars = 0;
+  for (const l of leads) {
+    const b = l.budget_estimate;
+    if (b == null || b <= 0) continue;
+    if (l.budget_currency === "ARS") ars += b;
+    else usd += b;
+  }
+  const parts: string[] = [];
+  if (usd > 0) parts.push(fmtMoney(usd, "USD"));
+  if (ars > 0) parts.push(fmtMoney(ars, "ARS"));
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 export function KanbanBoard({
@@ -311,8 +328,11 @@ function KanbanColumn({
   onCardClick: (lead: BoardLead) => void;
 }) {
   const meta = STAGE_BY_KEY[stage];
+  const StageIcon = meta.icon;
   const muted = !meta.active;
   const { setNodeRef } = useDroppable({ id: stage });
+
+  const budget = budgetSummary(leads);
 
   return (
     <section
@@ -320,18 +340,32 @@ function KanbanColumn({
       className={cn(
         "flex h-full w-[85vw] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-line bg-sand-soft/50 transition-all md:w-[270px]",
         muted && "opacity-75",
-        isOver && "border-transparent bg-brand-50/40 opacity-100 ring-2 ring-brand-300",
+        isOver && "border-transparent bg-brand-tint/40 opacity-100 ring-2 ring-brand-300",
       )}
     >
-      <div className={cn("h-1.5 shrink-0", meta.headerBar, muted && "opacity-50")} />
-      <header className="flex shrink-0 items-center justify-between px-3 py-2.5">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className={cn("size-2 shrink-0 rounded-full", meta.dot)} />
-          <h2 className="truncate text-[13px] font-semibold text-ink">{meta.label}</h2>
+      <div className={cn("h-1 shrink-0", meta.headerBar, muted && "opacity-50")} />
+      <header className="shrink-0 px-3 pb-2 pt-2.5">
+        <div className="flex items-center justify-between">
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              className={cn(
+                "flex size-5 shrink-0 items-center justify-center rounded-md border",
+                meta.chip,
+              )}
+            >
+              <StageIcon className="size-3" strokeWidth={2} />
+            </span>
+            <h2 className="truncate text-[13px] font-semibold text-ink">{meta.label}</h2>
+          </div>
+          <span className="rounded-full bg-paper px-2 py-0.5 text-[11px] font-semibold tabular-nums text-ink-soft shadow-sm">
+            {leads.length}
+          </span>
         </div>
-        <span className="rounded-full bg-paper px-2 py-0.5 text-[11px] font-semibold tabular-nums text-ink-soft shadow-sm">
-          {leads.length}
-        </span>
+        {budget && (
+          <p className="mt-1 truncate pl-7 text-[10px] font-medium tabular-nums text-ink-faint">
+            {budget} est.
+          </p>
+        )}
       </header>
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
@@ -348,12 +382,16 @@ function KanbanColumn({
         {leads.length === 0 && (
           <div
             className={cn(
-              "flex h-24 items-center justify-center rounded-xl border border-dashed text-[12px]",
+              "flex h-28 flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed text-[12px] transition-colors",
               dragging
-                ? "border-brand-300 text-brand-600"
+                ? "border-brand-300 bg-brand-tint/30 text-brand-text"
                 : "border-line-strong/60 text-ink-faint/70",
             )}
           >
+            <StageIcon
+              className={cn("size-4", dragging ? "text-brand-text" : "text-ink-faint/50")}
+              strokeWidth={1.75}
+            />
             {dragging ? "Soltá acá" : "Sin leads"}
           </div>
         )}

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { Copy, Check } from "lucide-react";
+import { Check, ChevronRight, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { updateAgency } from "@/lib/actions/settings";
@@ -10,6 +10,20 @@ import { fmtPhone } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const WEBHOOK_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/wa-webhook`;
+
+/** Miga de pan inline (reemplaza los "→" literales). */
+function Crumb({ parts }: { parts: string[] }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-0.5 align-baseline font-medium text-ink">
+      {parts.map((p, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && <ChevronRight className="size-3 shrink-0 text-ink-faint" aria-hidden />}
+          {p}
+        </React.Fragment>
+      ))}
+    </span>
+  );
+}
 
 export function WhatsappSettings({
   initial,
@@ -62,23 +76,35 @@ export function WhatsappSettings({
           <span
             className={cn(
               "mt-1.5 size-3 shrink-0 rounded-full",
-              initial.connected ? "bg-[#25d366] animate-pulse-dot" : "bg-line-strong",
+              initial.connected
+                ? "bg-wa-accent ring-4 ring-wa-accent/15 animate-pulse-dot"
+                : "bg-stone-400 ring-4 ring-tone-stone-soft",
             )}
             aria-hidden
           />
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             {initial.connected ? (
               <>
-                <h2 className="font-display text-lg font-semibold text-ink">
-                  Conectado{initial.display_number ? ` — ${fmtPhone(initial.display_number)}` : ""}
-                </h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="font-display text-lg font-semibold text-ink">Conectado</h2>
+                  {initial.display_number && (
+                    <span className="rounded-full border border-tone-emerald-line bg-tone-emerald-soft px-2.5 py-0.5 text-[12px] font-medium text-tone-emerald-text tabular-nums">
+                      {fmtPhone(initial.display_number)}
+                    </span>
+                  )}
+                </div>
                 <p className="mt-0.5 text-sm text-ink-soft">
                   Los mensajes entran y salen solos por la Cloud API de Meta.
                 </p>
               </>
             ) : (
               <>
-                <h2 className="font-display text-lg font-semibold text-ink">No conectado</h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="font-display text-lg font-semibold text-ink">No conectado</h2>
+                  <span className="rounded-full border border-tone-stone-line bg-tone-stone-soft px-2.5 py-0.5 text-[12px] font-medium text-tone-stone-text">
+                    Sin Cloud API
+                  </span>
+                </div>
                 <p className="mt-0.5 text-sm text-ink-soft">
                   Los mensajes se registran en el sistema y podés seguir operando; para enviar y
                   recibir automáticamente, conectá la Cloud API de Meta con los pasos de abajo.
@@ -112,7 +138,7 @@ export function WhatsappSettings({
               className="font-mono text-[13px]"
             />
             <p className="mt-1.5 text-xs text-ink-faint">
-              Lo encontrás en Meta for Developers → WhatsApp → API Setup.
+              Lo encontrás en <Crumb parts={["Meta for Developers", "WhatsApp", "API Setup"]} />.
             </p>
           </div>
         </div>
@@ -136,13 +162,13 @@ export function WhatsappSettings({
             {WEBHOOK_URL}
           </code>
           <Button size="icon" variant="secondary" onClick={copyWebhook} aria-label="Copiar URL del webhook">
-            {copied ? <Check className="text-money-700" /> : <Copy />}
+            {copied ? <Check className="text-money-700 animate-check-pop" /> : <Copy />}
           </Button>
         </div>
 
-        <ol className="mt-5 space-y-3">
+        <ol className="mt-5 space-y-3 stagger-children">
           {[
-            <>
+            <React.Fragment key="s1">
               Entrá a{" "}
               <a
                 href="https://developers.facebook.com"
@@ -153,18 +179,19 @@ export function WhatsappSettings({
                 developers.facebook.com
               </a>{" "}
               y abrí tu app.
-            </>,
-            <>
-              Andá a <span className="font-medium text-ink">WhatsApp → Configuration</span>.
-            </>,
-            <>
+            </React.Fragment>,
+            <React.Fragment key="s2">
+              Andá a <Crumb parts={["WhatsApp", "Configuration"]} />.
+            </React.Fragment>,
+            <React.Fragment key="s3">
               En <span className="font-medium text-ink">Webhook</span>, pegá la URL de arriba y el
               verify token que te dio soporte al activar la integración.
-            </>,
-            <>
-              Suscribite al campo <code className="rounded bg-sand-soft px-1 py-0.5 font-mono text-[12px]">messages</code>{" "}
+            </React.Fragment>,
+            <React.Fragment key="s4">
+              Suscribite al campo{" "}
+              <code className="rounded bg-sand-soft px-1 py-0.5 font-mono text-[12px]">messages</code>{" "}
               y guardá.
-            </>,
+            </React.Fragment>,
           ].map((step, i) => (
             <li key={i} className="flex items-start gap-3">
               <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-ink text-[11px] font-semibold text-cream">

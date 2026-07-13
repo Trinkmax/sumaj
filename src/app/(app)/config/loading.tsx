@@ -20,11 +20,21 @@ export default function ConfigLoading() {
           <Skeleton className="h-5 w-20 rounded-full" />
         </div>
 
+        {/* Apariencia */}
+        <div className="card flex items-center gap-4 p-4">
+          <Skeleton className="size-11 rounded-full" />
+          <div className="flex-1">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="mt-2 h-3 w-40" />
+          </div>
+          <Skeleton className="h-8 w-24 rounded-full" />
+        </div>
+
         {/* Cards de secciones */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 pb-2 sm:grid-cols-2">
           {Array.from({ length: 7 }).map((_, i) => (
             <div key={i} className="card flex items-center gap-4 p-4">
-              <Skeleton className="size-11 rounded-xl" />
+              <Skeleton className="size-11 rounded-full" />
               <div className="flex-1">
                 <Skeleton className="h-4 w-24" />
                 <Skeleton className="mt-2 h-3 w-40" />

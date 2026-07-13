@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Building2,
-  Users,
+  UsersRound,
   Tags,
   Handshake,
   MessageSquareText,
@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 
 const SECTIONS = [
   { href: "/config/agencia", label: "Agencia", icon: Building2 },
-  { href: "/config/equipo", label: "Equipo", icon: Users },
+  { href: "/config/equipo", label: "Equipo", icon: UsersRound },
   { href: "/config/etiquetas", label: "Etiquetas", icon: Tags },
   { href: "/config/proveedores", label: "Proveedores", icon: Handshake },
   { href: "/config/plantillas", label: "Plantillas", icon: MessageSquareText },

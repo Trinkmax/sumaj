@@ -37,3 +37,21 @@ export type QuoteLite = Pick<
   | "valid_until"
   | "created_at"
 >;
+
+/* ── aditivos v2 (panel de herramientas del chat) ── */
+
+/** Lead con lo que necesita el panel de herramientas (stepper, seguimiento, file). */
+export type PanelLead = Pick<
+  Tables<"leads">,
+  | "id"
+  | "destination"
+  | "stage"
+  | "next_action"
+  | "next_action_at"
+  | "followups_paused"
+  | "won_file_id"
+>;
+
+export type TagLite = Pick<Tables<"tags">, "id" | "name" | "color">;
+
+export type FileLite = Pick<Tables<"files">, "id" | "code" | "destination" | "status">;

@@ -1493,6 +1493,7 @@ export type Database = {
           document_type: Database["public"]["Enums"]["document_type"] | null
           full_name: string
           id: string
+          linked_contact_id: string | null
           notes: string | null
           relationship: string | null
           updated_at: string
@@ -1507,6 +1508,7 @@ export type Database = {
           document_type?: Database["public"]["Enums"]["document_type"] | null
           full_name: string
           id?: string
+          linked_contact_id?: string | null
           notes?: string | null
           relationship?: string | null
           updated_at?: string
@@ -1521,6 +1523,7 @@ export type Database = {
           document_type?: Database["public"]["Enums"]["document_type"] | null
           full_name?: string
           id?: string
+          linked_contact_id?: string | null
           notes?: string | null
           relationship?: string | null
           updated_at?: string
@@ -1536,6 +1539,13 @@ export type Database = {
           {
             foreignKeyName: "travelers_contact_id_fkey"
             columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "travelers_linked_contact_id_fkey"
+            columns: ["linked_contact_id"]
             isOneToOne: false
             referencedRelation: "contacts"
             referencedColumns: ["id"]

@@ -7,8 +7,10 @@ export default function WhatsappLoading() {
         <Skeleton className="h-8 w-36" />
         <Skeleton className="mt-2 h-4 w-64" />
       </div>
-      <div className="flex gap-1.5 overflow-hidden px-4 py-2 md:px-6">
-        {Array.from({ length: 6 }).map((_, i) => (
+      {/* ConfigNav: volver + 7 pills */}
+      <div className="flex items-center gap-1.5 overflow-hidden px-4 py-2 md:px-6">
+        <Skeleton className="size-8 shrink-0 rounded-full" />
+        {Array.from({ length: 7 }).map((_, i) => (
           <Skeleton key={i} className="h-8 w-24 shrink-0 rounded-full" />
         ))}
       </div>
@@ -17,13 +19,19 @@ export default function WhatsappLoading() {
           <div className="flex items-start gap-3">
             <Skeleton className="mt-1.5 size-3 rounded-full" />
             <div className="flex-1">
-              <Skeleton className="h-5 w-40" />
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-5 w-32" />
+                <Skeleton className="h-5 w-24 rounded-full" />
+              </div>
               <Skeleton className="mt-2 h-4 w-full" />
             </div>
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <Skeleton className="h-10 w-full rounded-xl" />
             <Skeleton className="h-10 w-full rounded-xl" />
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Skeleton className="h-10 w-24 rounded-xl" />
           </div>
         </div>
         <div className="card p-5">

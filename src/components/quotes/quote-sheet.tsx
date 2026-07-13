@@ -144,26 +144,37 @@ export function QuoteSheet({ data, className }: { data: QuoteSheetData; classNam
         </p>
       </div>
 
-      {/* servicios */}
+      {/* servicios — etiqueta tipográfica fina con icono lucide delgado */}
       {groups.length > 0 && (
         <div className="mt-9 space-y-6">
-          {groups.map((g) => (
-            <div key={g.type}>
-              <p
-                className="text-center text-[11px] font-medium uppercase tracking-[0.28em]"
-                style={{ color: color.accent }}
-              >
-                {SERVICE_TYPES[g.type].emoji} {SERVICE_TYPES[g.type].plural}
-              </p>
-              <ul className="mt-2.5 space-y-1.5">
-                {g.items.map((item, i) => (
-                  <li key={i} className="text-center text-[14px] leading-snug">
-                    {item.description}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          {groups.map((g) => {
+            const GroupIcon = SERVICE_TYPES[g.type].icon;
+            return (
+              <div key={g.type}>
+                <div className="flex flex-col items-center gap-1.5">
+                  <GroupIcon
+                    className="size-4"
+                    strokeWidth={1.5}
+                    style={{ color: color.accent }}
+                    aria-hidden
+                  />
+                  <p
+                    className="text-center text-[11px] font-medium uppercase tracking-[0.28em]"
+                    style={{ color: color.accent }}
+                  >
+                    {SERVICE_TYPES[g.type].plural}
+                  </p>
+                </div>
+                <ul className="mt-2.5 space-y-1.5">
+                  {g.items.map((item, i) => (
+                    <li key={i} className="text-center text-[14px] leading-snug">
+                      {item.description}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
         </div>
       )}
 

@@ -18,7 +18,8 @@ export function DropdownContent({
         sideOffset={sideOffset}
         collisionPadding={8}
         className={cn(
-          "z-50 min-w-[180px] overflow-hidden rounded-2xl border border-line bg-paper p-1.5 shadow-lg shadow-ink/5 animate-scale-in",
+          "z-50 min-w-[180px] overflow-hidden rounded-2xl border border-line bg-paper p-1.5 shadow-lg shadow-ink/5",
+          "origin-[var(--radix-dropdown-menu-content-transform-origin)] data-[state=open]:animate-scale-in data-[state=closed]:animate-scale-out",
           className,
         )}
         {...props}
@@ -39,10 +40,10 @@ export function DropdownItem({
       className={cn(
         "flex cursor-pointer select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none transition-colors",
         destructive
-          ? "text-red-600 data-[highlighted]:bg-red-50"
+          ? "text-tone-red-text data-[highlighted]:bg-tone-red-soft"
           : "text-ink data-[highlighted]:bg-sand-soft",
         "[&_svg]:size-4 [&_svg]:text-ink-faint",
-        destructive && "[&_svg]:text-red-500",
+        destructive && "[&_svg]:text-tone-red-text",
         className,
       )}
       {...props}

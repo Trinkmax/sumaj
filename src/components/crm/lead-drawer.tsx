@@ -5,7 +5,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { toast } from "sonner";
-import { ChevronRight, MessageCircle, ReceiptText, Trophy, Users, X } from "lucide-react";
+import {
+  ArrowRight,
+  ChevronRight,
+  ClipboardList,
+  MessageCircle,
+  Plane,
+  ReceiptText,
+  Trophy,
+  Users,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { ACTIVITY_TYPES, QUOTE_STATUSES, STAGES, STAGE_BY_KEY, TRIP_TYPES } from "@/lib/domain";
@@ -205,11 +215,12 @@ export function LeadDrawer({
   }
 
   const stageMeta = lead ? STAGE_BY_KEY[lead.stage] : null;
+  const StageIcon = stageMeta?.icon;
 
   return (
     <DialogPrimitive.Root open={open && lead != null} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-ink/30 data-[state=open]:animate-fade-in" />
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-overlay data-[state=open]:animate-fade-in" />
         <DialogPrimitive.Content
           onOpenAutoFocus={(e) => e.preventDefault()}
           className={cn(
@@ -223,7 +234,7 @@ export function LeadDrawer({
         >
           <style>{`@keyframes drawer-in{from{transform:translateX(100%)}to{transform:translateX(0)}}`}</style>
 
-          {lead && stageMeta && (
+          {lead && stageMeta && StageIcon && (
             <>
               {/* header */}
               <header className="shrink-0 border-b border-line bg-paper px-4 pb-3 pt-4 md:px-5">
@@ -232,9 +243,15 @@ export function LeadDrawer({
                     <DialogPrimitive.Title className="truncate font-display text-xl font-semibold tracking-tight text-ink">
                       {lead.contact.full_name}
                     </DialogPrimitive.Title>
-                    <DialogPrimitive.Description className="mt-0.5 truncate text-[13px] text-ink-soft">
+                    <DialogPrimitive.Description className="mt-0.5 flex items-center gap-1.5 truncate text-[13px] text-ink-soft">
                       {fmtPhone(lead.contact.phone)}
-                      {lead.destination ? ` · ✈️ ${lead.destination}` : ""}
+                      {lead.destination && (
+                        <>
+                          <span aria-hidden>·</span>
+                          <Plane className="size-3 shrink-0 text-ink-faint" strokeWidth={1.75} />
+                          <span className="truncate">{lead.destination}</span>
+                        </>
+                      )}
                     </DialogPrimitive.Description>
                   </div>
                   <DialogPrimitive.Close className="-mr-1 shrink-0 rounded-full p-2 text-ink-faint transition-colors hover:bg-sand-soft hover:text-ink">
@@ -244,19 +261,26 @@ export function LeadDrawer({
                 </div>
 
                 <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                  <Badge className={stageMeta.chip}>{stageMeta.label}</Badge>
-                  <Select
-                    value={lead.stage}
-                    onChange={(e) => changeStage(e.target.value as LeadStage)}
-                    aria-label="Cambiar etapa"
-                    className="h-8 w-auto rounded-lg px-2.5 pr-8 text-[12px]"
-                  >
-                    {STAGES.map((s) => (
-                      <option key={s.key} value={s.key}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </Select>
+                  <Badge className={stageMeta.chip}>
+                    <StageIcon className="size-3" strokeWidth={2} />
+                    {stageMeta.label}
+                  </Badge>
+                  {/* un lead ganado no vuelve atrás: tiene un file de venta vivo
+                      y reabrirlo lo dejaría imposible de volver a ganar */}
+                  {lead.stage !== "ganado" && (
+                    <Select
+                      value={lead.stage}
+                      onChange={(e) => changeStage(e.target.value as LeadStage)}
+                      aria-label="Cambiar etapa"
+                      className="h-8 w-auto rounded-lg px-2.5 pr-8 text-[12px]"
+                    >
+                      {STAGES.map((s) => (
+                        <option key={s.key} value={s.key}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
                   {isStaff && (
                     <Select
                       value={lead.assigned_to ?? ""}
@@ -275,9 +299,10 @@ export function LeadDrawer({
                   )}
                   <Link
                     href={`/crm/${lead.id}`}
-                    className="ml-auto shrink-0 text-[12px] font-medium text-brand-700 transition-colors hover:text-brand-800 tap-highlight-none"
+                    className="ml-auto inline-flex shrink-0 items-center gap-1 text-[12px] font-medium text-brand-text transition-colors hover:opacity-80 tap-highlight-none"
                   >
-                    Ver ficha completa →
+                    Ver ficha completa
+                    <ArrowRight className="size-3" strokeWidth={2} />
                   </Link>
                 </div>
               </header>
@@ -288,8 +313,24 @@ export function LeadDrawer({
                   value={tab}
                   onChange={setTab}
                   options={[
-                    { value: "chat", label: "💬 Chat" },
-                    { value: "ficha", label: "📋 Ficha" },
+                    {
+                      value: "chat",
+                      label: (
+                        <span className="flex items-center gap-1.5">
+                          <MessageCircle className="size-3.5" strokeWidth={2} />
+                          Chat
+                        </span>
+                      ),
+                    },
+                    {
+                      value: "ficha",
+                      label: (
+                        <span className="flex items-center gap-1.5">
+                          <ClipboardList className="size-3.5" strokeWidth={2} />
+                          Ficha
+                        </span>
+                      ),
+                    },
                   ]}
                 />
               </div>
@@ -314,7 +355,7 @@ export function LeadDrawer({
                   ) : (
                     <div className="flex flex-1 items-center justify-center p-6">
                       <EmptyState
-                        emoji="💬"
+                        icon={MessageCircle}
                         title="Todavía no hay chat"
                         description="Abrí la conversación de WhatsApp y escribile sin salir del tablero."
                         className="w-full"
@@ -345,12 +386,16 @@ export function LeadDrawer({
                         {/* datos del viaje (solo lectura) */}
                         <section className="card p-4 animate-fade-in">
                           <div className="mb-3 flex items-center justify-between gap-2">
-                            <h3 className="text-[15px] font-semibold text-ink">Datos del viaje</h3>
+                            <h3 className="flex items-center gap-2 text-[15px] font-semibold text-ink">
+                              <Plane className="size-4 text-brand-600" strokeWidth={1.75} />
+                              Datos del viaje
+                            </h3>
                             <Link
                               href={`/crm/${lead.id}`}
-                              className="text-[13px] font-medium text-brand-700 transition-colors hover:text-brand-800"
+                              className="inline-flex items-center gap-1 text-[13px] font-medium text-brand-text transition-colors hover:opacity-80 tap-highlight-none"
                             >
-                              Editar →
+                              Editar
+                              <ArrowRight className="size-3" strokeWidth={2} />
                             </Link>
                           </div>
                           <dl className="space-y-2.5 text-sm">
@@ -359,7 +404,7 @@ export function LeadDrawer({
                               label="Fechas"
                               value={
                                 ficha.trip_date_from
-                                  ? `${fmtDate(ficha.trip_date_from)} → ${fmtDate(ficha.trip_date_to)}${
+                                  ? `${fmtDate(ficha.trip_date_from)} — ${fmtDate(ficha.trip_date_to)}${
                                       nightsBetween(ficha.trip_date_from, ficha.trip_date_to)
                                         ? ` · ${nightsBetween(ficha.trip_date_from, ficha.trip_date_to)} noches`
                                         : ""
@@ -372,7 +417,7 @@ export function LeadDrawer({
                               value={
                                 lead.pax_adults + lead.pax_children > 0 ? (
                                   <span className="inline-flex items-center gap-1.5 tabular-nums">
-                                    <Users className="size-3.5 text-ink-faint" />
+                                    <Users className="size-3.5 text-ink-faint" strokeWidth={2} />
                                     {lead.pax_adults} adultos
                                     {lead.pax_children > 0 && ` + ${lead.pax_children} menores`}
                                   </span>
@@ -381,7 +426,7 @@ export function LeadDrawer({
                             />
                             <FichaRow
                               label="Tipo de viaje"
-                              value={ficha.trip_type ? TRIP_TYPES[ficha.trip_type] : null}
+                              value={ficha.trip_type ? TRIP_TYPES[ficha.trip_type].label : null}
                             />
                             <FichaRow
                               label="Presupuesto estimado"
@@ -397,39 +442,46 @@ export function LeadDrawer({
                         {/* presupuestos */}
                         <section className="card p-4 animate-fade-in">
                           <div className="mb-2 flex items-center justify-between gap-2">
-                            <h3 className="text-[15px] font-semibold text-ink">Presupuestos</h3>
+                            <h3 className="flex items-center gap-2 text-[15px] font-semibold text-ink">
+                              <ReceiptText className="size-4 text-brand-600" strokeWidth={1.75} />
+                              Presupuestos
+                            </h3>
                             <button
                               onClick={() => setQuoteOpen(true)}
-                              className="text-[13px] font-medium text-brand-700 transition-colors hover:text-brand-800 tap-highlight-none"
+                              className="text-[13px] font-medium text-brand-text transition-colors hover:opacity-80 tap-highlight-none"
                             >
                               + Nuevo
                             </button>
                           </div>
                           {ficha.quotes.length === 0 ? (
                             <p className="py-3 text-center text-[13px] text-ink-faint">
-                              Sin presupuestos todavía. Armale uno desde acá 🧾
+                              Sin presupuestos todavía. Armale uno desde acá.
                             </p>
                           ) : (
                             <ul className="divide-y divide-line/60">
-                              {ficha.quotes.map((q) => (
-                                <li key={q.id}>
-                                  <Link
-                                    href={`/presupuestos/${q.id}`}
-                                    className="flex min-h-11 items-center justify-between gap-3 py-2 transition-colors hover:bg-sand-soft/50 tap-highlight-none"
-                                  >
-                                    <span className="text-sm font-medium text-ink">{q.code}</span>
-                                    <span className="flex shrink-0 items-center gap-2">
-                                      <span className="text-sm font-semibold tabular-nums text-ink">
-                                        {fmtMoney(q.total_price, q.currency)}
+                              {ficha.quotes.map((q) => {
+                                const qMeta = QUOTE_STATUSES[q.status];
+                                return (
+                                  <li key={q.id}>
+                                    <Link
+                                      href={`/presupuestos/${q.id}`}
+                                      className="flex min-h-11 items-center justify-between gap-3 py-2 transition-colors hover:bg-sand-soft/50 tap-highlight-none"
+                                    >
+                                      <span className="text-sm font-medium text-ink">{q.code}</span>
+                                      <span className="flex shrink-0 items-center gap-2">
+                                        <span className="text-sm font-semibold tabular-nums text-ink">
+                                          {fmtMoney(q.total_price, q.currency)}
+                                        </span>
+                                        <Badge className={qMeta.chip}>
+                                          <qMeta.icon className="size-3" strokeWidth={2} />
+                                          {qMeta.label}
+                                        </Badge>
+                                        <ChevronRight className="size-4 text-ink-faint" />
                                       </span>
-                                      <Badge className={QUOTE_STATUSES[q.status].chip}>
-                                        {QUOTE_STATUSES[q.status].label}
-                                      </Badge>
-                                      <ChevronRight className="size-4 text-ink-faint" />
-                                    </span>
-                                  </Link>
-                                </li>
-                              ))}
+                                    </Link>
+                                  </li>
+                                );
+                              })}
                             </ul>
                           )}
                         </section>
@@ -449,8 +501,8 @@ export function LeadDrawer({
                                 const meta = ACTIVITY_TYPES[a.type] ?? ACTIVITY_TYPES.nota;
                                 return (
                                   <li key={a.id} className="flex items-start gap-2.5">
-                                    <span className="mt-px shrink-0 text-[15px] leading-5">
-                                      {meta.emoji}
+                                    <span className="mt-px flex size-6 shrink-0 items-center justify-center rounded-full bg-sand-soft text-ink-faint">
+                                      <meta.icon className="size-3.5" strokeWidth={1.75} />
                                     </span>
                                     <div className="min-w-0">
                                       <p className="line-clamp-2 text-[13px] leading-snug text-ink">
@@ -476,8 +528,11 @@ export function LeadDrawer({
               {/* footer sticky de acciones */}
               <footer className="shrink-0 border-t border-line bg-paper px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 md:px-5">
                 {lead.stage === "ganado" ? (
-                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 animate-fade-in">
-                    <p className="text-sm font-medium text-emerald-800">🎉 Lead ganado</p>
+                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-tone-emerald-line bg-tone-emerald-soft px-4 py-2.5 animate-fade-in">
+                    <p className="flex items-center gap-2 text-sm font-medium text-tone-emerald-text">
+                      <Trophy className="size-4 shrink-0" strokeWidth={2} />
+                      Lead ganado
+                    </p>
                     {lead.won_file_id ? (
                       <Link
                         href={`/files/${lead.won_file_id}`}
@@ -501,7 +556,7 @@ export function LeadDrawer({
                     </Button>
                     <Button
                       variant="secondary"
-                      className="text-red-600 hover:border-red-200 hover:bg-red-50"
+                      className="text-tone-red-text hover:border-tone-red-line hover:bg-tone-red-soft"
                       onClick={() => setLoseOpen(true)}
                     >
                       <X />

@@ -126,15 +126,15 @@ export function initials(name: string | null | undefined): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/** color estable a partir de un nombre (para avatares) */
+/** color estable a partir de un nombre (para avatares) — tokens tone-*, theme-aware */
 const AVATAR_COLORS = [
-  "bg-brand-100 text-brand-800",
-  "bg-sky-100 text-sky-800",
-  "bg-violet-100 text-violet-800",
-  "bg-emerald-100 text-emerald-800",
-  "bg-rose-100 text-rose-800",
-  "bg-amber-100 text-amber-800",
-  "bg-cyan-100 text-cyan-800",
+  "bg-brand-tint-strong text-brand-text",
+  "bg-tone-sky-soft text-tone-sky-text",
+  "bg-tone-violet-soft text-tone-violet-text",
+  "bg-tone-emerald-soft text-tone-emerald-text",
+  "bg-tone-rose-soft text-tone-rose-text",
+  "bg-tone-amber-soft text-tone-amber-text",
+  "bg-tone-cyan-soft text-tone-cyan-text",
 ];
 export function avatarColor(name: string | null | undefined): string {
   if (!name) return AVATAR_COLORS[0];

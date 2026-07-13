@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { Plus, X } from "lucide-react";
+import { Check, Plus, Tags, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -10,7 +10,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/misc";
 import { ConfirmDialog } from "@/components/config/confirm-dialog";
 import { createTag, deleteTag } from "@/lib/actions/settings";
-import { TAG_CATEGORIES, TAG_COLORS } from "@/lib/domain";
+import { TAG_CATEGORIES, TAG_COLORS, TAG_DOTS } from "@/lib/domain";
 import { cn } from "@/lib/utils";
 
 export type TagWithUsage = {
@@ -49,7 +49,7 @@ export function TagsManager({ tags }: { tags: TagWithUsage[] }) {
 
       {tags.length === 0 ? (
         <EmptyState
-          emoji="🏷️"
+          icon={Tags}
           title="Todavía no hay etiquetas"
           description="Creá la primera para empezar a organizar tus contactos."
           action={
@@ -60,29 +60,41 @@ export function TagsManager({ tags }: { tags: TagWithUsage[] }) {
           }
         />
       ) : (
-        <div className="space-y-4 animate-slide-up">
+        <div className="space-y-4 stagger-children">
           {[...groups, ...(uncategorized.length > 0 ? [{ key: "_otras", label: "Sin categoría", tags: uncategorized }] : [])].map(
             (group) => (
               <section key={group.key} className="card p-5">
-                <h2 className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-                  {group.label}
-                </h2>
+                <div className="flex items-baseline justify-between gap-2">
+                  <h2 className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+                    {group.label}
+                  </h2>
+                  <span className="text-[11px] text-ink-faint tabular-nums">
+                    {group.tags.length}
+                  </span>
+                </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {group.tags.map((tag) => (
                     <span
                       key={tag.id}
                       className={cn(
-                        "group inline-flex items-center gap-1.5 rounded-full border py-1 pl-3 pr-1.5 text-[13px] font-medium leading-5 transition-all",
+                        "group inline-flex items-center gap-1.5 rounded-full border py-1 pl-2.5 pr-1.5 text-[13px] font-medium leading-5 transition-all",
                         TAG_COLORS[tag.color] ?? TAG_COLORS.gray,
                       )}
                     >
+                      <span
+                        className={cn(
+                          "size-1.5 shrink-0 rounded-full",
+                          TAG_DOTS[tag.color] ?? TAG_DOTS.gray,
+                        )}
+                        aria-hidden
+                      />
                       {tag.name}
                       <span className="text-[11px] font-normal opacity-70 tabular-nums">
                         {tag.usage}
                       </span>
                       <button
                         onClick={() => setToDelete(tag)}
-                        className="rounded-full p-0.5 opacity-50 transition-opacity hover:opacity-100 tap-highlight-none"
+                        className="rounded-full p-0.5 opacity-50 transition-all hover:opacity-100 active:scale-90 tap-highlight-none"
                         aria-label={`Eliminar etiqueta ${tag.name}`}
                       >
                         <X className="size-3.5" />
@@ -176,8 +188,8 @@ function CreateTagDialog({
           </div>
           <div>
             <Label>Color</Label>
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(TAG_COLORS).map(([key, classes]) => (
+            <div className="flex flex-wrap gap-2.5">
+              {Object.keys(TAG_COLORS).map((key) => (
                 <button
                   key={key}
                   type="button"
@@ -185,22 +197,30 @@ function CreateTagDialog({
                   aria-label={`Color ${key}`}
                   aria-pressed={color === key}
                   className={cn(
-                    "size-9 rounded-full border-2 transition-all tap-highlight-none active:scale-95",
-                    classes.split(" ")[0], // bg-*
+                    "relative flex size-10 items-center justify-center rounded-full transition-all tap-highlight-none active:scale-90",
+                    TAG_DOTS[key] ?? TAG_DOTS.gray,
                     color === key
-                      ? "border-ink scale-110 shadow-sm"
-                      : "border-transparent ring-1 ring-inset ring-ink/10 hover:scale-105",
+                      ? "scale-110 ring-2 ring-ink ring-offset-2 ring-offset-paper"
+                      : "opacity-85 hover:scale-105 hover:opacity-100",
                   )}
-                />
+                >
+                  {color === key && (
+                    <Check className="size-4 text-white animate-check-pop" strokeWidth={3} />
+                  )}
+                </button>
               ))}
             </div>
           </div>
-          {name.trim() && (
-            <div className="flex items-center gap-2 rounded-xl bg-sand-soft/60 px-3.5 py-2.5">
-              <span className="text-xs text-ink-faint">Así se ve:</span>
-              <Badge color={color}>{name.trim()}</Badge>
-            </div>
-          )}
+          <div className="flex items-center gap-2.5 rounded-xl bg-sand-soft/60 px-3.5 py-2.5">
+            <span className="text-xs text-ink-faint">Así se ve:</span>
+            <Badge key={color} color={color} className="animate-pop">
+              <span
+                className={cn("size-1.5 rounded-full", TAG_DOTS[color] ?? TAG_DOTS.gray)}
+                aria-hidden
+              />
+              {name.trim() || "Tu etiqueta"}
+            </Badge>
+          </div>
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="secondary" onClick={() => onOpenChange(false)} disabled={loading}>
               Cancelar

@@ -3,9 +3,11 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { ArrowUpFromLine } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
+import { ChoiceGrid } from "@/components/ui/misc";
 import { registerSupplierPayment } from "@/lib/actions/payments";
 import { PAYMENT_METHODS } from "@/lib/domain";
 import type { PaymentMethod } from "@/lib/types";
@@ -19,9 +21,21 @@ function todayStr(): string {
 }
 
 function parseAmount(s: string): number {
-  const n = parseFloat(s.replace(/\./g, "").replace(",", "."));
+  const t = s.trim();
+  // sin coma y con un solo punto de 1-2 decimales → es decimal (teclado iOS / valores JS)
+  if (!t.includes(",") && /^\d+\.\d{1,2}$/.test(t)) {
+    const n = parseFloat(t);
+    return isNaN(n) ? 0 : n;
+  }
+  const n = parseFloat(t.replace(/\./g, "").replace(",", "."));
   return isNaN(n) ? 0 : n;
 }
+
+const METHOD_OPTIONS = (Object.keys(PAYMENT_METHODS) as PaymentMethod[]).map((k) => ({
+  value: k,
+  label: PAYMENT_METHODS[k].label,
+  icon: PAYMENT_METHODS[k].icon,
+}));
 
 /** Registrar un pago a proveedor (siempre en la moneda del file). */
 export function SupplierPaymentDialog({
@@ -75,7 +89,7 @@ export function SupplierPaymentDialog({
       toast.error(res.error);
       return;
     }
-    toast.success("📤 Pago a proveedor registrado");
+    toast.success("Pago a proveedor registrado");
     onOpenChange(false);
     router.refresh();
   }
@@ -117,35 +131,41 @@ export function SupplierPaymentDialog({
           </div>
 
           <div>
-            <Label htmlFor="sp-amount">
-              Monto{selectedFile ? ` (${selectedFile.currency})` : ""}
-            </Label>
-            <Input
-              id="sp-amount"
-              inputMode="decimal"
-              autoComplete="off"
-              placeholder="0"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              className="h-12 text-lg font-semibold tabular-nums"
+            <Label htmlFor="sp-amount">Monto</Label>
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-medium text-ink-faint">
+                {selectedFile ? (selectedFile.currency === "ARS" ? "$" : selectedFile.currency) : "—"}
+              </span>
+              <Input
+                id="sp-amount"
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder="0"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+                className="h-12 pl-12 text-lg font-semibold tabular-nums"
+              />
+            </div>
+            {selectedFile && (
+              <p className="mt-1.5 text-xs text-ink-faint animate-fade-in">
+                Siempre en la moneda del file ({selectedFile.currency}).
+              </p>
+            )}
+          </div>
+
+          <div>
+            <Label>Método</Label>
+            <ChoiceGrid<PaymentMethod>
+              options={METHOD_OPTIONS}
+              value={method}
+              onChange={setMethod}
+              columns={3}
+              size="sm"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="sp-method">Método</Label>
-              <Select
-                id="sp-method"
-                value={method}
-                onChange={(e) => setMethod(e.target.value as PaymentMethod)}
-              >
-                {(Object.keys(PAYMENT_METHODS) as PaymentMethod[]).map((k) => (
-                  <option key={k} value={k}>
-                    {PAYMENT_METHODS[k]}
-                  </option>
-                ))}
-              </Select>
-            </div>
             <div>
               <Label htmlFor="sp-date">Fecha</Label>
               <Input
@@ -155,16 +175,15 @@ export function SupplierPaymentDialog({
                 onChange={(e) => setPaidAt(e.target.value)}
               />
             </div>
-          </div>
-
-          <div>
-            <Label htmlFor="sp-note">Nota (opcional)</Label>
-            <Input
-              id="sp-note"
-              placeholder="Ej: pago hotelería Cancún"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
+            <div>
+              <Label htmlFor="sp-note">Nota (opcional)</Label>
+              <Input
+                id="sp-note"
+                placeholder="Ej: hotelería Cancún"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+              />
+            </div>
           </div>
 
           <Button
@@ -174,6 +193,7 @@ export function SupplierPaymentDialog({
             disabled={!canSubmit}
             onClick={handleSubmit}
           >
+            {!loading && <ArrowUpFromLine />}
             Registrar pago
           </Button>
         </div>

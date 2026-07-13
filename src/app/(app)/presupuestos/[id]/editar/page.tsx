@@ -32,7 +32,12 @@ export default async function EditarPresupuestoPage({
       .select("id, name, default_commission_pct")
       .eq("is_active", true)
       .order("name"),
-    supabase.from("contacts").select("id, full_name, phone").order("full_name"),
+    // solo los últimos 30 — el resto se busca server-side desde el picker (igual que /nuevo)
+    supabase
+      .from("contacts")
+      .select("id, full_name, phone")
+      .order("created_at", { ascending: false })
+      .limit(30),
   ]);
 
   const quote = quoteRes.data;
@@ -43,7 +48,18 @@ export default async function EditarPresupuestoPage({
     name: s.name,
     default_commission_pct: Number(s.default_commission_pct),
   }));
-  const contacts: BuilderContact[] = contactsRes.data ?? [];
+
+  const contacts: BuilderContact[] = [...(contactsRes.data ?? [])];
+  // el contacto del presupuesto siempre tiene que estar disponible en el picker
+  if (quote.contact_id && !contacts.some((c) => c.id === quote.contact_id)) {
+    const { data: extra } = await supabase
+      .from("contacts")
+      .select("id, full_name, phone")
+      .eq("id", quote.contact_id)
+      .maybeSingle();
+    if (extra) contacts.unshift(extra);
+  }
+
   const settings = agency.settings as unknown as Partial<AgencySettings>;
 
   const initial: BuilderInitialQuote = {

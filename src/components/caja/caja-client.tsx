@@ -5,21 +5,30 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  ArrowDownLeft,
-  ArrowUpRight,
-  Bell,
+  AlertTriangle,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Banknote,
+  Calculator,
+  Check,
   ChevronLeft,
   ChevronRight,
+  HandCoins,
   Link2,
+  MessageCircle,
+  PartyPopper,
   RotateCcw,
   Trash2,
+  TrendingUp,
+  Wallet,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Segmented, EmptyState, Tooltip } from "@/components/ui/misc";
+import { Segmented, EmptyState, Tooltip, AnimatedNumber } from "@/components/ui/misc";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Avatar } from "@/components/ui/avatar";
 import { PAYMENT_METHODS, waLink } from "@/lib/domain";
-import { fmtMoney, fmtDate } from "@/lib/format";
+import { fmtMoney, fmtDate, fmtNumber } from "@/lib/format";
 import { deletePayment } from "@/lib/actions/payments";
 import { cn } from "@/lib/utils";
 import { PaymentDialog } from "./payment-dialog";
@@ -45,6 +54,11 @@ function shiftMonth(key: string, delta: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function currentMonthKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function currencyOrder(c: string): number {
   return c === "USD" ? 0 : c === "ARS" ? 1 : 2;
 }
@@ -55,7 +69,7 @@ function moneyEntries(m: MoneyByCurrency): [string, number][] {
   return entries;
 }
 
-/** monto multimoneda: la principal grande, las demás chicas abajo */
+/** monto multimoneda compacto: la principal arriba, las demás chicas abajo */
 function MoneyMulti({
   amounts,
   className,
@@ -67,9 +81,7 @@ function MoneyMulti({
 }) {
   const entries = moneyEntries(amounts);
   if (entries.length === 0) {
-    return (
-      <span className={cn("tabular-nums", className)}>{fmtMoney(0, zeroCurrency)}</span>
-    );
+    return <span className={cn("tabular-nums", className)}>{fmtMoney(0, zeroCurrency)}</span>;
   }
   const [first, ...rest] = entries;
   return (
@@ -100,26 +112,81 @@ function appUrl(): string {
   );
 }
 
-const DIRECTION_META = {
+/* dirección del movimiento → icono en círculo tonal + signo + color del monto */
+const DIRECTION_META: Record<
+  Movement["direction"],
+  { icon: LucideIcon; circle: string; sign: string; amount: string }
+> = {
   cobro: {
-    icon: ArrowDownLeft,
-    circle: "bg-money-50 text-money-700",
+    icon: ArrowDownToLine,
+    circle: "bg-money-tint text-money-text",
     sign: "+",
-    amount: "text-money-700",
+    amount: "text-money-text",
   },
   pago_proveedor: {
-    icon: ArrowUpRight,
-    circle: "bg-sand-soft text-ink-soft",
+    icon: ArrowUpFromLine,
+    circle: "bg-tone-orange-soft text-tone-orange-text",
     sign: "−",
     amount: "text-ink",
   },
   reembolso: {
     icon: RotateCcw,
-    circle: "bg-amber-50 text-amber-700",
+    circle: "bg-tone-stone-soft text-tone-stone-text",
     sign: "−",
-    amount: "text-amber-700",
+    amount: "text-tone-stone-text",
   },
-} as const;
+};
+
+/* ── stat tile: número grande que cuenta + icono en círculo tonal ── */
+function StatTile({
+  icon: Icon,
+  circle,
+  label,
+  amounts,
+  numberClass,
+  className,
+}: {
+  icon: LucideIcon;
+  circle: string;
+  label: string;
+  amounts: MoneyByCurrency;
+  numberClass: string;
+  className?: string;
+}) {
+  const entries = moneyEntries(amounts);
+  const [cur, val] = entries[0] ?? (["USD", 0] as [string, number]);
+  const rest = entries.slice(1);
+  const isInt = Math.abs(val % 1) <= 0.004;
+  return (
+    <div className={cn("card flex items-center gap-3.5 p-4", className)}>
+      <div
+        className={cn(
+          "flex size-11 shrink-0 items-center justify-center rounded-full",
+          circle,
+        )}
+      >
+        <Icon className="size-5" strokeWidth={1.9} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-xs text-ink-faint">{label}</p>
+        <AnimatedNumber
+          value={val}
+          from={0}
+          format={(n) => fmtMoney(isInt ? Math.round(n) : n, cur)}
+          className={cn(
+            "block truncate font-display text-xl font-semibold md:text-2xl",
+            numberClass,
+          )}
+        />
+        {rest.map(([c, v]) => (
+          <span key={c} className="block text-xs font-medium tabular-nums text-ink-faint">
+            + {fmtMoney(v, c)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /* ── componente principal ── */
 
@@ -155,6 +222,14 @@ export function CajaClient({
   const [toDelete, setToDelete] = React.useState<Movement | null>(null);
   const [deleting, setDeleting] = React.useState(false);
   const [hidden, setHidden] = React.useState<Set<string>>(new Set());
+  const [copiedId, setCopiedId] = React.useState<string | null>(null);
+  const [barsIn, setBarsIn] = React.useState(false);
+
+  // barras de cobrado: entran desde 0 al montar
+  React.useEffect(() => {
+    const t = requestAnimationFrame(() => setBarsIn(true));
+    return () => cancelAnimationFrame(t);
+  }, []);
 
   function changeTab(t: CajaTab) {
     setTab(t);
@@ -162,8 +237,9 @@ export function CajaClient({
     window.history.replaceState(null, "", `/caja?m=${monthKey}&tab=${t}`);
   }
 
-  function goMonth(delta: number) {
-    router.push(`/caja?m=${shiftMonth(monthKey, delta)}&tab=${tab}`);
+  function goToMonth(key: string) {
+    if (key === monthKey) return;
+    router.push(`/caja?m=${key}&tab=${tab}`);
   }
 
   function openPaymentFor(d: DebtorFile) {
@@ -182,6 +258,8 @@ export function CajaClient({
   async function copyReceipt(m: Movement) {
     try {
       await navigator.clipboard.writeText(`${appUrl()}/r/${m.receipt_token}`);
+      setCopiedId(m.id);
+      setTimeout(() => setCopiedId((prev) => (prev === m.id ? null : prev)), 2000);
       toast.success(`Link del recibo ${m.receipt_code} copiado`);
     } catch {
       toast.error("No se pudo copiar el link.");
@@ -212,62 +290,67 @@ export function CajaClient({
 
   const visibleMovements = movements.filter((m) => !hidden.has(m.id));
   const totalReceivable = moneyEntries(stats.receivable);
+  const hasReceivable = totalReceivable.length > 0;
+
+  // ── filtro de período: Segmented (Este mes / Mes pasado / mes navegado) ──
+  const nowKey = currentMonthKey();
+  const prevKey = shiftMonth(nowKey, -1);
+  const isKnownPeriod = monthKey === nowKey || monthKey === prevKey;
+  const periodOptions: { value: string; label: React.ReactNode }[] = [
+    ...(!isKnownPeriod
+      ? [{ value: monthKey, label: <span className="capitalize">{monthLabel}</span> }]
+      : []),
+    { value: prevKey, label: "Mes pasado" },
+    { value: nowKey, label: "Este mes" },
+  ];
 
   return (
     <div className="flex flex-col gap-4 px-4 md:px-6">
-      {/* ── selector de mes ── */}
+      {/* ── filtro de período ── */}
       <div className="flex items-center justify-center gap-1 animate-fade-in">
         <button
           type="button"
-          onClick={() => goMonth(-1)}
+          onClick={() => goToMonth(shiftMonth(monthKey, -1))}
           aria-label="Mes anterior"
-          className="flex size-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-sand-soft hover:text-ink tap-highlight-none"
+          className="flex size-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-sand-soft hover:text-ink tap-highlight-none active:scale-95"
         >
           <ChevronLeft className="size-5" />
         </button>
-        <span className="min-w-36 text-center font-display text-lg font-semibold capitalize text-ink">
-          {monthLabel}
-        </span>
+        <Segmented options={periodOptions} value={monthKey} onChange={goToMonth} />
         <button
           type="button"
-          onClick={() => goMonth(1)}
+          onClick={() => goToMonth(shiftMonth(monthKey, 1))}
           aria-label="Mes siguiente"
-          className="flex size-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-sand-soft hover:text-ink tap-highlight-none"
+          className="flex size-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-sand-soft hover:text-ink tap-highlight-none active:scale-95"
         >
           <ChevronRight className="size-5" />
         </button>
       </div>
 
-      {/* ── stat tiles ── */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 animate-slide-up">
-        <div className="card p-4">
-          <p className="text-xs text-ink-faint">Cobrado en el mes</p>
-          <MoneyMulti
-            amounts={stats.collected}
-            className="mt-1 block font-display text-xl font-semibold text-money-700 md:text-2xl"
-          />
-        </div>
-        <div className="card p-4">
-          <p className="text-xs text-ink-faint">Pagado a proveedores</p>
-          <MoneyMulti
-            amounts={stats.supplierPaid}
-            className="mt-1 block font-display text-xl font-semibold text-ink md:text-2xl"
-          />
-        </div>
-        <div className="card p-4">
-          <p className="text-xs text-ink-faint">Por cobrar (total)</p>
-          <MoneyMulti
-            amounts={stats.receivable}
-            className="mt-1 block font-display text-xl font-semibold text-brand-700 md:text-2xl"
-          />
-        </div>
-        <div className="card p-4">
-          <p className="text-xs text-ink-faint">Utilidad del mes</p>
-          <MoneyMulti
-            amounts={stats.utility}
-            className="mt-1 block font-display text-xl font-semibold text-ink md:text-2xl"
-          />
-        </div>
+      {/* ── 3 números grandes ── */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 animate-slide-up">
+        <StatTile
+          icon={Banknote}
+          circle="bg-money-tint text-money-text"
+          label="Cobrado del período"
+          amounts={stats.collected}
+          numberClass="text-money-text"
+          className="col-span-2 md:col-span-1"
+        />
+        <StatTile
+          icon={ArrowUpFromLine}
+          circle="bg-tone-orange-soft text-tone-orange-text"
+          label="Pagado a proveedores"
+          amounts={stats.supplierPaid}
+          numberClass="text-ink"
+        />
+        <StatTile
+          icon={HandCoins}
+          circle="bg-tone-amber-soft text-tone-amber-text"
+          label="Por cobrar total"
+          amounts={stats.receivable}
+          numberClass={hasReceivable ? "text-tone-amber-text" : "text-ink"}
+        />
       </div>
 
       {/* ── tabs + acciones ── */}
@@ -283,11 +366,12 @@ export function CajaClient({
         />
         <div className="flex items-center gap-2">
           <Button variant="secondary" size="sm" onClick={() => setSupplierOpen(true)}>
-            <ArrowUpRight />
+            <ArrowUpFromLine />
             Pago a proveedor
           </Button>
           <Button variant="success" size="sm" onClick={() => setPickerOpen(true)}>
-            💵 Registrar cobro
+            <Banknote />
+            Registrar cobro
           </Button>
         </div>
       </div>
@@ -296,20 +380,28 @@ export function CajaClient({
       {tab === "movimientos" &&
         (visibleMovements.length === 0 ? (
           <EmptyState
-            emoji="💤"
+            icon={Wallet}
             title="Sin movimientos este mes"
             description="Cuando registres un cobro o un pago, aparece acá."
             action={
               <Button variant="success" size="sm" onClick={() => setPickerOpen(true)}>
-                💵 Registrar cobro
+                <Banknote />
+                Registrar cobro
               </Button>
             }
           />
         ) : (
-          <div className="card divide-y divide-line animate-fade-in">
+          <div
+            className={cn(
+              "card divide-y divide-line",
+              visibleMovements.length <= 14 ? "stagger-children" : "animate-fade-in",
+            )}
+          >
             {visibleMovements.map((m) => {
               const meta = DIRECTION_META[m.direction];
               const Icon = meta.icon;
+              const MethodIcon = PAYMENT_METHODS[m.method].icon;
+              const isCross = m.currency !== m.file_currency;
               const who =
                 m.direction === "pago_proveedor"
                   ? m.supplier_name ?? "Proveedor"
@@ -322,28 +414,42 @@ export function CajaClient({
                       meta.circle,
                     )}
                   >
-                    <Icon className="size-4" />
+                    <Icon className="size-4" strokeWidth={1.9} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-ink">{who}</p>
-                    <p className="truncate text-xs text-ink-faint">
+                    <p className="flex items-center gap-1.5 truncate text-xs text-ink-faint">
                       <Link
                         href={`/files/${m.file_id}`}
-                        className="font-medium text-ink-soft underline-offset-2 hover:text-brand-700 hover:underline"
+                        className="shrink-0 font-mono font-medium text-ink-soft underline-offset-2 hover:text-brand-text hover:underline"
                       >
                         {m.file_code}
                       </Link>
-                      {" · "}
-                      {PAYMENT_METHODS[m.method]}
-                      {" · "}
-                      {fmtDate(m.paid_at)}
+                      <span aria-hidden>·</span>
+                      <MethodIcon className="size-3.5 shrink-0" strokeWidth={1.9} />
+                      <span className="truncate">
+                        {PAYMENT_METHODS[m.method].label} · {fmtDate(m.paid_at)}
+                      </span>
                     </p>
                   </div>
                   <div className="flex items-center gap-1">
-                    <span
-                      className={cn("text-sm font-semibold tabular-nums", meta.amount)}
-                    >
-                      {meta.sign} {fmtMoney(m.amount, m.currency)}
+                    <span className="text-right">
+                      <span
+                        className={cn(
+                          "block text-sm font-semibold tabular-nums",
+                          meta.amount,
+                        )}
+                      >
+                        {meta.sign} {fmtMoney(m.amount, m.currency)}
+                      </span>
+                      {isCross && (
+                        <span className="block text-[11px] tabular-nums text-ink-faint">
+                          ≈ {fmtMoney(m.amount_in_file_currency, m.file_currency)}
+                          {m.exchange_rate
+                            ? ` · $ ${fmtNumber(m.exchange_rate)}`
+                            : ""}
+                        </span>
+                      )}
                     </span>
                     {m.direction === "cobro" && m.receipt_code && (
                       <Tooltip content={`Copiar recibo ${m.receipt_code}`}>
@@ -353,7 +459,11 @@ export function CajaClient({
                           aria-label={`Copiar link del recibo ${m.receipt_code}`}
                           className="flex size-8 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-sand-soft hover:text-ink tap-highlight-none"
                         >
-                          <Link2 className="size-4" />
+                          {copiedId === m.id ? (
+                            <Check className="size-4 animate-check-pop text-money-text" />
+                          ) : (
+                            <Link2 className="size-4" />
+                          )}
                         </button>
                       </Tooltip>
                     )}
@@ -362,7 +472,7 @@ export function CajaClient({
                         type="button"
                         onClick={() => setToDelete(m)}
                         aria-label="Eliminar movimiento"
-                        className="flex size-8 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-red-50 hover:text-red-600 tap-highlight-none"
+                        className="flex size-8 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-tone-red-soft hover:text-tone-red-text tap-highlight-none"
                       >
                         <Trash2 className="size-4" />
                       </button>
@@ -378,13 +488,18 @@ export function CajaClient({
       {tab === "cuenta" &&
         (debtors.length === 0 ? (
           <EmptyState
-            emoji="🎉"
+            icon={PartyPopper}
             title="Nadie debe nada"
             description="Todos los files están saldados. ¡A vender más viajes!"
           />
         ) : (
           <div className="flex flex-col gap-3 animate-fade-in">
-            <div className="card divide-y divide-line">
+            <div
+              className={cn(
+                "card divide-y divide-line",
+                debtors.length <= 14 && "stagger-children",
+              )}
+            >
               {debtors.map((d) => {
                 const days = daysUntil(d.departure_date);
                 const urgent = days !== null && days < 15;
@@ -409,7 +524,7 @@ export function CajaClient({
                         <p className="truncate text-xs text-ink-faint">
                           <Link
                             href={`/files/${d.id}`}
-                            className="font-medium text-ink-soft underline-offset-2 hover:text-brand-700 hover:underline"
+                            className="font-mono font-medium text-ink-soft underline-offset-2 hover:text-brand-text hover:underline"
                           >
                             {d.code}
                           </Link>
@@ -420,10 +535,17 @@ export function CajaClient({
                               {" · "}
                               <span
                                 className={cn(
-                                  urgent && "font-semibold text-red-600",
+                                  "inline-flex items-center gap-1",
+                                  urgent && "font-semibold text-tone-red-text",
                                 )}
                               >
-                                {urgent && "⚠️ "}
+                                {urgent && (
+                                  <AlertTriangle
+                                    className="size-3"
+                                    strokeWidth={2}
+                                    aria-hidden
+                                  />
+                                )}
                                 {days !== null && days < 0 ? "salió " : "sale "}
                                 {fmtDate(d.departure_date)}
                               </span>
@@ -432,7 +554,7 @@ export function CajaClient({
                         </p>
                       </div>
                       <div className="text-right">
-                        <p className="font-display text-lg font-semibold tabular-nums text-ink">
+                        <p className="font-display text-lg font-semibold tabular-nums text-tone-amber-text">
                           {fmtMoney(d.balance, d.currency)}
                         </p>
                         <p className="text-[11px] text-ink-faint">
@@ -443,8 +565,8 @@ export function CajaClient({
                     {/* mini barra de cobrado */}
                     <div className="h-1.5 overflow-hidden rounded-full bg-sand-soft">
                       <div
-                        className="h-full rounded-full bg-money-600 transition-all"
-                        style={{ width: `${pct}%` }}
+                        className="h-full rounded-full bg-money-600 transition-[width] duration-700 ease-out"
+                        style={{ width: barsIn ? `${pct}%` : "0%" }}
                       />
                     </div>
                     <div className="flex items-center justify-between gap-2">
@@ -454,11 +576,11 @@ export function CajaClient({
                       <div className="flex items-center gap-2">
                         {reminder && (
                           <Button
-                            variant="secondary"
+                            variant="whatsapp"
                             size="sm"
                             onClick={() => window.open(reminder, "_blank")}
                           >
-                            <Bell />
+                            <MessageCircle />
                             Recordar
                           </Button>
                         )}
@@ -467,7 +589,8 @@ export function CajaClient({
                           size="sm"
                           onClick={() => openPaymentFor(d)}
                         >
-                          Cobrar
+                          <Banknote />
+                          Registrar cobro
                         </Button>
                       </div>
                     </div>
@@ -502,12 +625,25 @@ export function CajaClient({
       {tab === "comisiones" &&
         (commissions.length === 0 ? (
           <EmptyState
-            emoji="🧮"
+            icon={Calculator}
             title="Sin ventas este mes"
             description="Las comisiones aparecen cuando se crean files en el mes."
           />
         ) : (
-          <div className="flex flex-col gap-2 animate-fade-in">
+          <div className="flex flex-col gap-3 animate-fade-in">
+            {/* utilidad del período */}
+            <div className="card flex items-center gap-3.5 p-4">
+              <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-money-tint text-money-text">
+                <TrendingUp className="size-5" strokeWidth={1.9} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-ink-faint">Utilidad del período</p>
+                <MoneyMulti
+                  amounts={stats.utility}
+                  className="font-display text-xl font-semibold text-ink"
+                />
+              </div>
+            </div>
             <div className="card overflow-x-auto">
               <table className="w-full min-w-[560px] text-sm">
                 <thead>
@@ -550,7 +686,7 @@ export function CajaClient({
                       <td className="px-4 py-3 text-right">
                         <MoneyMulti
                           amounts={c.commission}
-                          className="font-semibold text-money-700"
+                          className="font-semibold text-money-text"
                         />
                       </td>
                     </tr>

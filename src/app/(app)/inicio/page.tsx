@@ -3,12 +3,10 @@ import { createClient } from "@/lib/supabase/server";
 import { CHANNELS, STAGES, waLink } from "@/lib/domain";
 import { fmtDate } from "@/lib/format";
 import type { LeadChannel, LeadStage } from "@/lib/types";
+import { consejoDelDia } from "@/components/inicio/consejos";
 import { TodaySection, type AgendaItem } from "@/components/inicio/today-section";
-import {
-  MonthSection,
-  type ChartPoint,
-  type MonthStats,
-} from "@/components/inicio/month-section";
+import { KpiBand, type MonthStats } from "@/components/inicio/kpi-band";
+import { InsightsCard, type ChartPoint } from "@/components/inicio/insights-card";
 import { SellerRanking, type RankingRow } from "@/components/inicio/seller-ranking";
 import type { MoneyByCurrency } from "@/components/inicio/money-multi";
 import { CampaignTable, type CampaignRow } from "@/components/inicio/campaign-table";
@@ -74,8 +72,17 @@ export default async function InicioPage() {
     .lte("next_action_at", endToday.toISOString())
     .in("stage", ACTIVE_STAGES)
     .order("next_action_at", { ascending: true })
-    .limit(6);
+    .limit(5);
   if (mineOnly) agendaQ = agendaQ.eq("assigned_to", member.id);
+
+  // vencidos reales (count exacto, no la muestra de 5 de la agenda)
+  let overdueQ = supabase
+    .from("leads")
+    .select("id", { count: "exact", head: true })
+    .not("next_action_at", "is", null)
+    .lt("next_action_at", now.toISOString())
+    .in("stage", ACTIVE_STAGES);
+  if (mineOnly) overdueQ = overdueQ.eq("assigned_to", member.id);
 
   let funnelQ = supabase.from("leads").select("stage").in("stage", ACTIVE_STAGES);
   if (mineOnly) funnelQ = funnelQ.or(`assigned_to.is.null,assigned_to.eq.${member.id}`);
@@ -83,6 +90,7 @@ export default async function InicioPage() {
   const [
     newLeadsRes,
     agendaRes,
+    overdueRes,
     unreadRes,
     filesRes,
     totalsRes,
@@ -96,6 +104,7 @@ export default async function InicioPage() {
   ] = await Promise.all([
     newLeadsQ,
     agendaQ,
+    overdueQ,
     supabase.from("conversations").select("unread_count").gt("unread_count", 0),
     supabase
       .from("files")
@@ -115,7 +124,7 @@ export default async function InicioPage() {
       .gte("departure_date", todayYmd)
       .lte("departure_date", in30)
       .order("departure_date", { ascending: true })
-      .limit(6),
+      .limit(4),
     supabase
       .from("travelers")
       .select("id, full_name, document_type, document_expiry, contact_id")
@@ -123,7 +132,7 @@ export default async function InicioPage() {
       .gte("document_expiry", back180)
       .lte("document_expiry", in90)
       .order("document_expiry", { ascending: true })
-      .limit(6),
+      .limit(4),
     supabase
       .from("contacts")
       .select("id, full_name, birth_date, phone")
@@ -146,7 +155,7 @@ export default async function InicioPage() {
     nextAction: l.next_action,
     nextActionAt: l.next_action_at as string,
   }));
-  const overdueCount = agenda.filter((a) => new Date(a.nextActionAt) < now).length;
+  const overdueCount = overdueRes.count ?? 0;
   const unread = (unreadRes.data ?? []).reduce((acc, c) => acc + (c.unread_count ?? 0), 0);
 
   /* ── EL MES ── */
@@ -224,7 +233,7 @@ export default async function InicioPage() {
   const agencyStats = buildStats(null);
   const mineStats = mineOnly ? buildStats(member.id) : null;
 
-  // el chart usa solo la moneda dominante; si hay mezcla se aclara en el subtítulo
+  // el chart usa solo la moneda dominante; si hay mezcla se aclara en el título
   const chartStart = new Date(now.getFullYear(), now.getMonth() - 5, 1);
   const chartMixed = files.some(
     (f) => f.currency !== currency && new Date(f.created_at) >= chartStart,
@@ -360,47 +369,60 @@ export default async function InicioPage() {
     month: "long",
   });
   const todayLabel = rawToday.charAt(0).toUpperCase() + rawToday.slice(1);
+  const firstName = member.display_name.trim().split(/\s+/)[0];
+  const consejo = consejoDelDia(member.id, now);
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 pb-6 md:px-6">
-      <header className="pt-6 animate-slide-up md:pt-8">
-        <h1 className="font-display text-[28px] font-semibold leading-tight tracking-tight text-ink md:text-[34px]">
-          Hola, {member.display_name} 👋
-        </h1>
-        <p className="mt-1 text-sm text-ink-soft md:text-[15px]">{todayLabel}</p>
-      </header>
+    <div className="mx-auto w-full max-w-6xl px-4 pb-6 md:px-6">
+      <div className="stagger-children">
+        <header className="pt-5 md:pt-6">
+          <p className="text-xs font-medium text-ink-faint">{todayLabel}</p>
+          <h1 className="mt-0.5 font-display text-[30px] font-semibold leading-none tracking-tight text-ink md:text-4xl">
+            Hola, {firstName}
+          </h1>
+          <p className="mt-2 max-w-xl font-display text-[15px] italic leading-snug text-ink-soft md:text-base">
+            {consejo}
+          </p>
+        </header>
 
-      <div className="mt-6 space-y-10 md:mt-8">
-        <TodaySection
-          newLeads={newLeads}
-          followupsCount={followupsCount}
-          overdueCount={overdueCount}
-          unread={unread}
-          agenda={agenda}
-        />
-
-        <div className="animate-fade-in">
-          <MonthSection
+        <div className="mt-4 md:mt-5">
+          <KpiBand
             showToggle={mineOnly}
             mineStats={mineStats}
             agencyStats={agencyStats}
-            chart={chart}
             currency={currency}
-            chartMixed={chartMixed}
-            rankingSlot={
-              isAdmin ? <SellerRanking rows={ranking} currency={currency} /> : undefined
-            }
           />
         </div>
 
-        <CampaignTable rows={campaigns} />
-
-        <RadarSection
-          departures={departures}
-          documents={documents}
-          birthdays={birthdays}
-          funnel={funnel}
-        />
+        <div className="mt-4 grid gap-4 md:mt-5 lg:grid-cols-12 lg:items-start lg:gap-5">
+          <div className="lg:col-span-5">
+            <TodaySection
+              newLeads={newLeads}
+              followupsCount={followupsCount}
+              overdueCount={overdueCount}
+              unread={unread}
+              agenda={agenda}
+            />
+          </div>
+          <div className="space-y-4 lg:col-span-7 lg:space-y-5">
+            <InsightsCard
+              chart={chart}
+              currency={currency}
+              chartMixed={chartMixed}
+              compare={mineOnly}
+              equipoSlot={
+                isAdmin ? <SellerRanking rows={ranking} currency={currency} /> : undefined
+              }
+              pautaSlot={<CampaignTable rows={campaigns} />}
+            />
+            <RadarSection
+              departures={departures}
+              documents={documents}
+              birthdays={birthdays}
+              funnel={funnel}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

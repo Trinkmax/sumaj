@@ -3,16 +3,15 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, Copy } from "lucide-react";
+import { Banknote, Check, CheckCircle2, Copy, MessageCircle } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
-import { Segmented } from "@/components/ui/misc";
+import { Segmented, ChoiceGrid } from "@/components/ui/misc";
 import { createClient } from "@/lib/supabase/client";
 import { registerPayment } from "@/lib/actions/payments";
 import { PAYMENT_METHODS, round2, waLink } from "@/lib/domain";
 import { fmtMoney } from "@/lib/format";
-import { cn } from "@/lib/utils";
 import type { AgencySettings, PaymentMethod } from "@/lib/types";
 
 function todayStr(): string {
@@ -40,6 +39,12 @@ function appUrl(): string {
     (typeof window !== "undefined" ? window.location.origin : "")
   );
 }
+
+const METHOD_OPTIONS = (Object.keys(PAYMENT_METHODS) as PaymentMethod[]).map((k) => ({
+  value: k,
+  label: PAYMENT_METHODS[k].label,
+  icon: PAYMENT_METHODS[k].icon,
+}));
 
 type SuccessInfo = {
   receiptCode: string;
@@ -151,7 +156,7 @@ export function PaymentDialog({
       return;
     }
     setSuccess(res.data);
-    toast.success(`💵 Cobro registrado — recibo ${res.data.receiptCode}`);
+    toast.success(`Cobro registrado — recibo ${res.data.receiptCode}`);
     onSuccess?.();
     router.refresh();
   }
@@ -180,17 +185,22 @@ export function PaymentDialog({
       >
         {success ? (
           /* ── pantalla de éxito ── */
-          <div className="animate-pop flex flex-col items-center gap-1 py-2 text-center">
-            <div className="text-5xl">{settled ? "🎉" : "💵"}</div>
-            <p className="mt-2 font-display text-xl font-semibold text-ink">
+          <div className="flex flex-col items-center gap-1 py-2 text-center">
+            <div className="flex size-16 items-center justify-center rounded-full bg-money-tint text-money-text animate-pop">
+              <CheckCircle2 className="size-8" strokeWidth={1.75} />
+            </div>
+            <p className="mt-3 font-display text-xl font-semibold text-ink">
               {settled ? "¡File saldado!" : "Cobro registrado"}
             </p>
             <p className="text-sm text-ink-soft">
-              Recibo <span className="font-semibold text-ink">{success.receiptCode}</span>
+              Recibo{" "}
+              <span className="rounded-md bg-sand-soft px-1.5 py-0.5 font-mono text-[13px] font-semibold text-ink">
+                {success.receiptCode}
+              </span>
             </p>
             {settled ? (
-              <p className="mt-1 rounded-full bg-money-50 px-3 py-1 text-sm font-medium text-money-700">
-                {file.contact_name} no debe nada más ✨
+              <p className="mt-2 rounded-full border border-money-tint-line bg-money-tint px-3 py-1 text-sm font-medium text-money-text animate-fade-in">
+                {file.contact_name} no debe nada más
               </p>
             ) : (
               <p className="mt-1 text-sm text-ink-soft">
@@ -214,11 +224,12 @@ export function PaymentDialog({
                     )
                   }
                 >
+                  <MessageCircle />
                   Enviar por WhatsApp
                 </Button>
               )}
               <Button variant="secondary" size="lg" className="w-full" onClick={copyLink}>
-                {copied ? <Check /> : <Copy />}
+                {copied ? <Check className="animate-check-pop" /> : <Copy />}
                 {copied ? "Copiado" : "Copiar link del recibo"}
               </Button>
               <Button
@@ -251,13 +262,13 @@ export function PaymentDialog({
                 <button
                   type="button"
                   onClick={fillFullBalance}
-                  className="rounded-full border border-line bg-paper px-2.5 py-1 text-xs font-medium text-brand-700 transition-colors hover:border-brand-300 hover:bg-brand-50 tap-highlight-none"
+                  className="rounded-full border border-line bg-paper px-2.5 py-1 text-xs font-medium text-brand-text transition-colors hover:border-brand-tint-line hover:bg-brand-tint tap-highlight-none active:scale-[0.97]"
                 >
                   Saldo total
                 </button>
               </div>
               <div className="relative">
-                <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm font-medium text-ink-faint">
+                <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base font-medium text-ink-faint">
                   {currency === "ARS" ? "$" : currency}
                 </span>
                 <Input
@@ -269,7 +280,7 @@ export function PaymentDialog({
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-                  className="h-14 pl-14 text-2xl font-semibold tabular-nums"
+                  className="h-16 pl-16 text-3xl font-semibold tabular-nums"
                 />
               </div>
             </div>
@@ -278,23 +289,16 @@ export function PaymentDialog({
             {file.currency !== "ARS" && (
               <div>
                 <Label>Moneda</Label>
-                <div className="flex flex-wrap items-center gap-3">
-                  <Segmented
-                    options={[
-                      { value: file.currency, label: file.currency },
-                      { value: "ARS", label: "ARS" },
-                    ]}
-                    value={currency}
-                    onChange={setCurrency}
-                  />
-                  {isCross && amountNum > 0 && rateNum > 0 && (
-                    <span className="animate-fade-in text-sm font-medium tabular-nums text-money-700">
-                      = {fmtMoney(converted, file.currency)}
-                    </span>
-                  )}
-                </div>
+                <Segmented
+                  options={[
+                    { value: file.currency, label: file.currency },
+                    { value: "ARS", label: "ARS" },
+                  ]}
+                  value={currency}
+                  onChange={setCurrency}
+                />
                 {isCross && (
-                  <div className="mt-3">
+                  <div className="mt-3 rounded-2xl border border-line bg-sand-soft/40 p-3 animate-slide-up">
                     <Label htmlFor="pd-rate">Cotización (ARS por {file.currency})</Label>
                     <Input
                       id="pd-rate"
@@ -305,6 +309,23 @@ export function PaymentDialog({
                       onChange={(e) => setRate(e.target.value)}
                       className="tabular-nums"
                     />
+                    <p
+                      className="mt-2 text-sm font-medium tabular-nums text-ink-soft"
+                      aria-live="polite"
+                    >
+                      {amountNum > 0 && rateNum > 0 ? (
+                        <>
+                          {fmtMoney(amountNum, "ARS")} ={" "}
+                          <span className="font-semibold text-money-text">
+                            {fmtMoney(converted, file.currency)}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-ink-faint">
+                          Se convierte al {file.currency} del file con esta cotización.
+                        </span>
+                      )}
+                    </p>
                   </div>
                 )}
               </div>
@@ -313,23 +334,13 @@ export function PaymentDialog({
             {/* método */}
             <div>
               <Label>Método</Label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {(Object.keys(PAYMENT_METHODS) as PaymentMethod[]).map((k) => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => setMethod(k)}
-                    className={cn(
-                      "flex min-h-11 items-center justify-center rounded-xl border px-2 text-[13px] font-medium transition-all tap-highlight-none active:scale-[0.98]",
-                      method === k
-                        ? "border-ink bg-ink text-cream shadow-sm"
-                        : "border-line bg-paper text-ink-soft hover:border-line-strong",
-                    )}
-                  >
-                    {PAYMENT_METHODS[k]}
-                  </button>
-                ))}
-              </div>
+              <ChoiceGrid<PaymentMethod>
+                options={METHOD_OPTIONS}
+                value={method}
+                onChange={setMethod}
+                columns={3}
+                size="sm"
+              />
             </div>
 
             {/* fecha + nota */}
@@ -362,7 +373,8 @@ export function PaymentDialog({
               disabled={!canSubmit}
               onClick={handleSubmit}
             >
-              💵 Registrar cobro
+              {!loading && <Banknote />}
+              Registrar cobro
               {amountNum > 0 ? ` de ${fmtMoney(amountNum, currency)}` : ""}
             </Button>
           </div>

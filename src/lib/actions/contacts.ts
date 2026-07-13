@@ -126,6 +126,7 @@ const travelerFields = {
   documentNumber: z.string().trim().nullable().optional(),
   documentExpiry: z.string().nullable().optional(),
   birthDate: z.string().nullable().optional(),
+  notes: z.string().trim().nullable().optional(),
 };
 
 const addTravelerSchema = z.object({ contactId: z.uuid(), ...travelerFields });
@@ -149,6 +150,7 @@ export async function addTraveler(
       document_number: d.documentNumber || null,
       document_expiry: d.documentExpiry || null,
       birth_date: d.birthDate || null,
+      notes: d.notes || null,
     })
     .select("id")
     .single();
@@ -183,6 +185,7 @@ export async function updateTraveler(
       document_number: d.documentNumber || null,
       document_expiry: d.documentExpiry || null,
       birth_date: d.birthDate || null,
+      notes: d.notes || null,
     })
     .eq("id", d.travelerId);
 
@@ -191,6 +194,92 @@ export async function updateTraveler(
   revalidatePath(`/clientes/${d.contactId}`);
   revalidatePath("/clientes");
   return succeed(null);
+}
+
+const promoteTravelerSchema = z.object({ travelerId: z.uuid() });
+
+/**
+ * Promueve un pasajero del grupo de viaje a contacto con ficha propia.
+ * Crea el contacto con los datos del traveler, setea linked_contact_id
+ * y deja rastro en el historial de ambas fichas. Idempotente: si ya
+ * tiene ficha vinculada, devuelve esa.
+ */
+export async function promoteTravelerToContact(
+  input: z.input<typeof promoteTravelerSchema>,
+): Promise<ActionResult<{ contactId: string }>> {
+  const parsed = promoteTravelerSchema.safeParse(input);
+  if (!parsed.success) return fail("Datos inválidos.");
+  const { supabase, member, agency } = await requireAction();
+
+  const { data: traveler, error: travelerError } = await supabase
+    .from("travelers")
+    .select("*, owner:contacts!travelers_contact_id_fkey(id, full_name)")
+    .eq("id", parsed.data.travelerId)
+    .maybeSingle();
+
+  if (travelerError || !traveler) return fail("No encontramos al pasajero.");
+  if (traveler.linked_contact_id) {
+    // ya tiene ficha propia: navegamos a esa
+    return succeed({ contactId: traveler.linked_contact_id });
+  }
+
+  const { data: contact, error: contactError } = await supabase
+    .from("contacts")
+    .insert({
+      agency_id: agency.id,
+      full_name: traveler.full_name,
+      birth_date: traveler.birth_date,
+      document_type: traveler.document_type,
+      document_number: traveler.document_number,
+      notes: traveler.notes,
+      source: "manual",
+    })
+    .select("id")
+    .single();
+
+  if (contactError || !contact) return fail("No se pudo crear la ficha. Probá de nuevo.");
+
+  // vínculo condicional: si otra llamada concurrente ya lo linkeó, esta pierde
+  // (0 filas) y borramos la ficha duplicada que acabamos de crear.
+  const { data: linked, error: linkError } = await supabase
+    .from("travelers")
+    .update({ linked_contact_id: contact.id })
+    .eq("id", traveler.id)
+    .is("linked_contact_id", null)
+    .select("id");
+
+  if (linkError || !linked || linked.length === 0) {
+    await supabase.from("contacts").delete().eq("id", contact.id);
+    if (linkError) return fail("No se pudo vincular la ficha. Probá de nuevo.");
+    const { data: again } = await supabase
+      .from("travelers")
+      .select("linked_contact_id")
+      .eq("id", traveler.id)
+      .maybeSingle();
+    if (again?.linked_contact_id) return succeed({ contactId: again.linked_contact_id });
+    return fail("No se pudo vincular la ficha. Probá de nuevo.");
+  }
+
+  const ownerName = traveler.owner?.full_name ?? "otro contacto";
+  await logActivity({
+    agencyId: agency.id,
+    memberId: member.id,
+    contactId: contact.id,
+    type: "sistema",
+    body: `Ficha creada desde el grupo de viaje de ${ownerName}`,
+  });
+  await logActivity({
+    agencyId: agency.id,
+    memberId: member.id,
+    contactId: traveler.contact_id,
+    type: "sistema",
+    body: `${traveler.full_name} ahora tiene ficha propia`,
+  });
+
+  revalidatePath("/clientes");
+  revalidatePath(`/clientes/${traveler.contact_id}`);
+  revalidatePath(`/clientes/${contact.id}`);
+  return succeed({ contactId: contact.id });
 }
 
 const deleteTravelerSchema = z.object({ travelerId: z.uuid(), contactId: z.uuid() });

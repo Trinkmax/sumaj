@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { MessageCircleReply } from "lucide-react";
+import { AlarmClock, MessageCircleOff, MessageCircleReply } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Switch, EmptyState } from "@/components/ui/misc";
 import { updateFollowupRule } from "@/lib/actions/settings";
@@ -83,7 +83,7 @@ export function FollowupRules({ rules }: { rules: Rule[] }) {
   if (state.length === 0) {
     return (
       <EmptyState
-        emoji="⏰"
+        icon={AlarmClock}
         title="No hay reglas de seguimiento"
         description="Las reglas se crean con la agencia. Si no las ves, avisale a soporte."
       />
@@ -96,11 +96,11 @@ export function FollowupRules({ rules }: { rules: Rule[] }) {
 
   return (
     <div className="space-y-4">
-      {/* Cadencia: mini línea de tiempo */}
+      {/* Cadencia: línea de tiempo horizontal */}
       <section className="card p-5 animate-slide-up">
         <div className="flex items-start gap-3">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600">
-            <MessageCircleReply className="size-4.5" />
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-tint text-brand-text">
+            <MessageCircleReply className="size-4.5" strokeWidth={1.75} />
           </div>
           <div>
             <h2 className="font-display text-lg font-semibold text-ink">Cadencia de toques</h2>
@@ -111,21 +111,28 @@ export function FollowupRules({ rules }: { rules: Rule[] }) {
         </div>
 
         {activeSorted.length > 0 ? (
-          <div className="mt-5 overflow-x-auto pb-1">
-            <div className="flex min-w-max items-center px-1">
-              <div className="flex flex-col items-center gap-1.5">
-                <span className="size-2.5 rounded-full bg-ink" />
-                <span className="whitespace-nowrap text-xs font-medium text-ink">Silencio</span>
+          <div className="mt-5 overflow-x-auto pb-1 scrollbar-none">
+            <div className="flex min-w-max items-start px-1 stagger-children">
+              {/* Nodo inicial: el silencio del cliente */}
+              <div className="flex w-[72px] shrink-0 flex-col items-center gap-1.5 text-center">
+                <span className="flex size-9 items-center justify-center rounded-full border border-line bg-sand-soft text-ink-faint">
+                  <MessageCircleOff className="size-4" strokeWidth={1.75} />
+                </span>
+                <span className="text-[11px] font-medium text-ink">Silencio</span>
+                <span className="text-[10px] leading-tight text-ink-faint">del cliente</span>
               </div>
+
               {activeSorted.map((r) => (
                 <React.Fragment key={r.id}>
-                  <span className="mx-1 h-px w-10 shrink-0 bg-line-strong sm:w-16" />
-                  <div className="flex flex-col items-center gap-1.5">
-                    <span className="size-2.5 rounded-full bg-brand-500" />
-                    <span className="whitespace-nowrap text-xs font-medium text-ink tabular-nums">
+                  <div className="mt-[17px] h-px w-8 shrink-0 bg-line-strong sm:w-14" aria-hidden />
+                  <div className="flex w-[76px] shrink-0 flex-col items-center gap-1.5 text-center">
+                    <span className="flex size-9 items-center justify-center rounded-full border border-brand-tint-line bg-brand-tint text-brand-text">
+                      <AlarmClock className="size-4" strokeWidth={1.75} />
+                    </span>
+                    <span className="whitespace-nowrap text-xs font-semibold text-ink tabular-nums">
                       {fmtHours(r.hours_after_silence)}
                     </span>
-                    <span className="whitespace-nowrap text-[11px] text-ink-faint">
+                    <span className="whitespace-nowrap text-[10px] leading-tight text-ink-faint">
                       Toque {r.touch_number}
                     </span>
                   </div>
@@ -141,7 +148,7 @@ export function FollowupRules({ rules }: { rules: Rule[] }) {
       </section>
 
       {/* Reglas editables */}
-      <div className="space-y-3">
+      <div className="space-y-3 stagger-children">
         {[...state]
           .sort((a, b) => a.touch_number - b.touch_number)
           .map((rule) => {
@@ -152,17 +159,29 @@ export function FollowupRules({ rules }: { rules: Rule[] }) {
               <section
                 key={rule.id}
                 className={cn(
-                  "card p-5 transition-opacity animate-fade-in",
+                  "card p-5 transition-opacity",
                   !rule.is_active && "opacity-60",
                 )}
               >
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="font-medium text-ink">
-                    Toque {rule.touch_number}
-                    <span className="ml-2 text-sm font-normal text-ink-faint">
-                      a las {fmtHours(rule.hours_after_silence)} de silencio
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span
+                      className={cn(
+                        "flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
+                        rule.is_active
+                          ? "bg-brand-tint text-brand-text"
+                          : "bg-sand-soft text-ink-faint",
+                      )}
+                    >
+                      <AlarmClock className="size-4" strokeWidth={1.75} />
                     </span>
-                  </h3>
+                    <h3 className="truncate font-medium text-ink">
+                      Toque {rule.touch_number}
+                      <span className="ml-2 text-sm font-normal text-ink-faint">
+                        a las {fmtHours(rule.hours_after_silence)} de silencio
+                      </span>
+                    </h3>
+                  </div>
                   <Switch
                     checked={rule.is_active}
                     onCheckedChange={(v) => toggleActive(rule, v)}

@@ -227,7 +227,7 @@ export async function convertLeadToSale(input: {
     contactId: lead.contact_id,
     fileId: file.id,
     type: "etapa",
-    body: `Lead ganado 🎉 — se creó el file ${file.code}`,
+    body: `Lead ganado — se creó el file ${file.code}`,
   });
 
   return succeed({ fileId: file.id, fileCode: file.code });

@@ -25,6 +25,12 @@ export type Movement = {
   supplier_name: string | null;
   file_id: string;
   file_code: string;
+  /** moneda del file (para mostrar la conversión cuando el pago fue cross-currency) */
+  file_currency: string;
+  /** monto normalizado a la moneda del file */
+  amount_in_file_currency: number;
+  /** cotización usada (ARS por USD) si el pago fue en otra moneda */
+  exchange_rate: number | null;
 };
 
 /** file con saldo pendiente (cuenta corriente + picker de cobro) */

@@ -36,6 +36,9 @@ export type FileDetail = {
   notes: string | null;
   commission_pct: number;
   created_at: string;
+  /** navegación cruzada: lead y presupuesto de origen */
+  lead_id: string | null;
+  quote_id: string | null;
   contact: { id: string; full_name: string; phone: string | null } | null;
   seller: { id: string; display_name: string } | null;
   totals: {
@@ -81,6 +84,8 @@ export type TravelerRow = {
   document_number: string | null;
   document_expiry: string | null;
   birth_date: string | null;
+  /** si el pasajero tiene ficha propia de contacto → link "Ver ficha" */
+  linked_contact_id: string | null;
 };
 
 export type ActivityRow = {

@@ -2,7 +2,15 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, BadgeCheck, Clock3 } from "lucide-react";
+import {
+  BadgeCheck,
+  CheckCheck,
+  Clock3,
+  MessageSquareText,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -30,16 +38,32 @@ const SAMPLE_VARS = {
   fecha: "12 de octubre",
 };
 
-/** Renderiza el body resaltando las {{variables}} */
-function HighlightedBody({ body }: { body: string }) {
+/* ── La plantilla se previsualiza como burbuja saliente de WhatsApp ── */
+
+function WaBubble({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="wa-wallpaper overflow-hidden rounded-xl p-3 pl-8">
+      <div className="relative ml-auto mr-2 w-fit max-w-full rounded-lg rounded-tr-none bg-wa-bubble-out px-2.5 pb-1.5 pt-1.5 shadow-sm bubble-tail-out">
+        {children}
+        <span className="mt-0.5 flex items-center justify-end gap-1 text-[10px] leading-none text-wa-bubble-meta">
+          11:42
+          <CheckCheck className="size-3.5 text-wa-tick" strokeWidth={2} />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Cuerpo del mensaje con las {{variables}} resaltadas (dentro de la burbuja). */
+function BubbleBody({ body }: { body: string }) {
   const parts = body.split(/(\{\{\w+\}\})/g);
   return (
-    <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-soft">
+    <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-wa-bubble-ink">
       {parts.map((p, i) =>
         /^\{\{\w+\}\}$/.test(p) ? (
           <code
             key={i}
-            className="mx-px rounded-md bg-brand-50 px-1.5 py-0.5 font-mono text-[12px] font-medium text-brand-700"
+            className="mx-px rounded-md bg-wa-accent/20 px-1 py-0.5 font-mono text-[11.5px] font-semibold"
           >
             {p}
           </code>
@@ -78,7 +102,7 @@ export function TemplatesManager({ templates }: { templates: Template[] }) {
 
       {sorted.length === 0 ? (
         <EmptyState
-          emoji="💬"
+          icon={MessageSquareText}
           title="Todavía no hay plantillas"
           description="Creá la primera para responder más rápido y activar el seguimiento automático."
           action={
@@ -89,7 +113,7 @@ export function TemplatesManager({ templates }: { templates: Template[] }) {
           }
         />
       ) : (
-        <div className="grid gap-3 md:grid-cols-2 animate-slide-up">
+        <div className="grid gap-3 md:grid-cols-2 stagger-children">
           {sorted.map((t) => (
             <TemplateCard
               key={t.id}
@@ -181,12 +205,12 @@ function TemplateCard({
               <Badge>Genérica</Badge>
             )}
             {approved ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium leading-4 text-emerald-700">
+              <span className="inline-flex items-center gap-1 rounded-full border border-tone-emerald-line bg-tone-emerald-soft px-2 py-0.5 text-[11px] font-medium leading-4 text-tone-emerald-text">
                 <BadgeCheck className="size-3" />
                 Aprobada por Meta
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium leading-4 text-amber-700">
+              <span className="inline-flex items-center gap-1 rounded-full border border-tone-amber-line bg-tone-amber-soft px-2 py-0.5 text-[11px] font-medium leading-4 text-tone-amber-text">
                 <Clock3 className="size-3" />
                 Pendiente
               </span>
@@ -206,7 +230,7 @@ function TemplateCard({
               variant="ghost"
               onClick={onDelete}
               aria-label={`Eliminar ${template.name}`}
-              className="text-red-500 hover:bg-red-50 hover:text-red-600"
+              className="text-tone-red-text hover:bg-tone-red-soft hover:text-tone-red-text"
             >
               <Trash2 />
             </Button>
@@ -214,8 +238,10 @@ function TemplateCard({
         </div>
       </div>
 
-      <div className="mt-3 flex-1 rounded-xl bg-sand-soft/50 p-3.5">
-        <HighlightedBody body={template.body} />
+      <div className="mt-3 flex-1">
+        <WaBubble>
+          <BubbleBody body={template.body} />
+        </WaBubble>
       </div>
 
       <div className="mt-3 flex items-center justify-between gap-3">
@@ -280,7 +306,7 @@ function TemplateDialog({
       toast.error(res.error);
       return;
     }
-    toast.success(template ? "Plantilla guardada." : "Plantilla creada 💬");
+    toast.success(template ? "Plantilla guardada." : "Plantilla creada.");
     onOpenChange(false);
   }
 
@@ -355,7 +381,7 @@ function TemplateDialog({
                   <button
                     type="button"
                     onClick={() => insertVariable(v.key)}
-                    className="rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 font-mono text-[11px] font-medium text-brand-700 transition-all hover:bg-brand-100 active:scale-95 tap-highlight-none"
+                    className="rounded-full border border-brand-tint-line bg-brand-tint px-2 py-0.5 font-mono text-[11px] font-medium text-brand-text transition-all hover:bg-brand-tint-strong active:scale-95 tap-highlight-none"
                   >
                     {`{{${v.key}}}`}
                   </button>
@@ -365,11 +391,15 @@ function TemplateDialog({
           </div>
 
           {body.trim() && (
-            <div className="rounded-xl border border-line bg-sand-soft/50 p-3.5">
+            <div className="animate-fade-in">
               <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
                 Así lo recibe el cliente
               </p>
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{preview}</p>
+              <WaBubble>
+                <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-wa-bubble-ink">
+                  {preview}
+                </p>
+              </WaBubble>
             </div>
           )}
 

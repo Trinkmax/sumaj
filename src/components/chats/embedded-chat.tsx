@@ -1,15 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReceiptText, Send, TriangleAlert } from "lucide-react";
+import { Clock, ReceiptText, Send, StickyNote } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-import { Skeleton, Tooltip } from "@/components/ui/misc";
+import { Tooltip } from "@/components/ui/misc";
 import { markConversationRead, sendMessage, sendTemplate } from "@/lib/actions/messages";
+import { sendInternalNote } from "@/lib/actions/crm-panel";
 import { fmtDate } from "@/lib/format";
 import type { Tables } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Bubble, DayChip, groupMessagesByDay, WINDOW_MS } from "./bubble";
+import { Bubble, DayChip, groupMessagesIntoDayGroups, startsStreak, WINDOW_MS } from "./bubble";
 import { TemplatePicker } from "./template-picker";
 import type { ActiveLead, MessageRow, TemplateRow } from "./types";
 
@@ -26,6 +27,7 @@ type EmbeddedConversation = Pick<
  * Chat autocontenido para embeber en cualquier lado (drawer del CRM, etc.).
  * Carga todo client-side, escucha realtime, envía optimista y respeta la
  * ventana de 24 hs con plantillas. El padre define la altura (h-full min-h-0).
+ * Visual: clon de WhatsApp Web (wallpaper oficial + tokens wa-*).
  */
 export function EmbeddedChat({
   conversationId,
@@ -49,10 +51,22 @@ export function EmbeddedChat({
   const [quoteValidUntil, setQuoteValidUntil] = useState<string | null>(null);
   const [lastInboundAt, setLastInboundAt] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [noteMode, setNoteMode] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+
+  // ids presentes en la carga inicial: los que lleguen después animan con msg-in
+  const [initialIds, setInitialIds] = useState<Set<string>>(() => new Set());
 
   const listRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // reset del composer al cambiar de conversación (ajuste de estado durante el render)
+  const [prevConversationId, setPrevConversationId] = useState(conversationId);
+  if (prevConversationId !== conversationId) {
+    setPrevConversationId(conversationId);
+    setNoteMode(false);
+    setDraft("");
+  }
 
   const loading = loadedId !== conversationId;
   const windowOpen =
@@ -122,8 +136,10 @@ export function EmbeddedChat({
       }
 
       if (cancelled) return;
+      const initialMsgs = (msgsRes.data ?? []).reverse();
+      setInitialIds(new Set(initialMsgs.map((m) => m.id)));
       setConversation(conv);
-      setMessages((msgsRes.data ?? []).reverse());
+      setMessages(initialMsgs);
       setTemplates(tplRes.data ?? []);
       setMeName(meRes.data?.display_name ?? "");
       setLead(activeLead);
@@ -248,12 +264,22 @@ export function EmbeddedChat({
     return true;
   }
 
-  async function handleSend() {
-    const text = draft.trim();
-    if (!text) return;
+  function resetComposer() {
     setDraft("");
     const ta = textareaRef.current;
     if (ta) ta.style.height = "auto";
+  }
+
+  async function handleSend() {
+    const text = draft.trim();
+    if (!text) return;
+    resetComposer();
+    if (noteMode) {
+      const tempId = makeOptimistic(text, "nota_interna", null);
+      const res = await sendInternalNote({ conversationId, body: text });
+      if (reconcile(tempId, res)) setNoteMode(false);
+      return;
+    }
     const tempId = makeOptimistic(text, "texto", null);
     const res = await sendMessage({ conversationId, body: text });
     reconcile(tempId, res);
@@ -263,7 +289,7 @@ export function EmbeddedChat({
     const tempId = makeOptimistic(body, "plantilla", template.meta_name);
     const res = await sendTemplate({ conversationId, templateId: template.id, body });
     const ok = reconcile(tempId, res);
-    if (ok) toast.success("Plantilla enviada 📨");
+    if (ok) toast.success("Plantilla enviada");
     return ok;
   }
 
@@ -278,33 +304,119 @@ export function EmbeddedChat({
     [conversation, meName, lead, quoteValidUntil],
   );
 
-  const items = useMemo(() => groupMessagesByDay(messages), [messages]);
+  const dayGroups = useMemo(() => groupMessagesIntoDayGroups(messages), [messages]);
 
-  const quoteButton = onQuoteRequest && (
-    <Tooltip content="Armar presupuesto">
+  /* ── botones auxiliares del composer ── */
+
+  const noteToggle = (
+    <Tooltip content={noteMode ? "Volver al mensaje" : "Nota interna (no la ve el cliente)"}>
       <button
-        onClick={onQuoteRequest}
-        className="flex size-11 shrink-0 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-sand-soft hover:text-brand-700 active:scale-[0.95] tap-highlight-none"
-        aria-label="Armar presupuesto"
+        type="button"
+        onClick={() => setNoteMode((v) => !v)}
+        aria-pressed={noteMode}
+        aria-label="Nota interna"
+        className={cn(
+          "flex size-11 shrink-0 items-center justify-center rounded-full transition-colors active:scale-95 tap-highlight-none",
+          noteMode
+            ? "bg-tone-amber-soft text-tone-amber-text"
+            : "text-wa-ink-soft hover:bg-wa-hover",
+        )}
       >
-        <ReceiptText className="size-5" />
+        <StickyNote className="size-5" strokeWidth={1.9} />
       </button>
     </Tooltip>
   );
 
-  /* ── loading: skeletons de burbujas ── */
+  const quoteButton = onQuoteRequest && (
+    <Tooltip content="Armar presupuesto">
+      <button
+        type="button"
+        onClick={onQuoteRequest}
+        className="flex size-11 shrink-0 items-center justify-center rounded-full text-wa-ink-soft transition-colors hover:bg-wa-hover active:scale-95 tap-highlight-none"
+        aria-label="Armar presupuesto"
+      >
+        <ReceiptText className="size-5" strokeWidth={1.9} />
+      </button>
+    </Tooltip>
+  );
+
+  const composerBar = (
+    <div className="shrink-0 bg-wa-panel-alt px-2.5 py-2 md:px-4">
+      <div className="flex items-end gap-1">
+        {noteToggle}
+        {quoteButton}
+        <div
+          className={cn(
+            "flex min-w-0 flex-1 items-end rounded-lg transition-colors",
+            noteMode
+              ? "bg-tone-amber-soft ring-1 ring-tone-amber-line"
+              : "bg-wa-panel focus-within:ring-1 focus-within:ring-wa-ink-faint/25",
+          )}
+        >
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              const el = e.currentTarget;
+              el.style.height = "auto";
+              el.style.height = Math.min(el.scrollHeight, MAX_COMPOSER_HEIGHT) + "px";
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            rows={1}
+            placeholder={
+              noteMode
+                ? "Escribí una nota interna…"
+                : waConnected
+                  ? "Escribí un mensaje"
+                  : "Escribí un mensaje (envío simulado)"
+            }
+            aria-label={noteMode ? "Nota interna" : "Mensaje"}
+            className="max-h-[132px] min-h-[44px] w-full resize-none bg-transparent px-3.5 py-[11px] text-[15px] leading-snug text-wa-ink outline-none placeholder:text-wa-ink-faint"
+          />
+        </div>
+        <button
+          onClick={handleSend}
+          disabled={draft.trim().length === 0}
+          className={cn(
+            "flex size-11 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition-all hover:brightness-110 active:scale-95 disabled:opacity-40 tap-highlight-none",
+            noteMode ? "bg-amber-500" : "bg-wa-accent",
+          )}
+          aria-label={noteMode ? "Guardar nota interna" : "Enviar mensaje"}
+        >
+          {noteMode ? (
+            <StickyNote className="size-5" />
+          ) : (
+            <Send className="size-5 -translate-x-px translate-y-px" />
+          )}
+        </button>
+      </div>
+      {noteMode && (
+        <p className="mt-1 pl-1 text-[11px] text-tone-amber-text animate-fade-in">
+          Nota interna — el cliente no la ve, queda en el hilo y en el historial.
+        </p>
+      )}
+    </div>
+  );
+
+  /* ── loading: skeletons de burbujas sobre el wallpaper ── */
   if (loading) {
     return (
       <div className={cn("flex h-full min-h-0 flex-col", className)}>
-        <div className="min-h-0 flex-1 space-y-3 overflow-hidden chat-bg px-3 py-4">
-          <Skeleton className="ml-auto h-12 w-3/5 rounded-2xl rounded-br-md" />
-          <Skeleton className="h-16 w-2/3 rounded-2xl rounded-bl-md" />
-          <Skeleton className="ml-auto h-10 w-1/2 rounded-2xl rounded-br-md" />
-          <Skeleton className="h-12 w-3/5 rounded-2xl rounded-bl-md" />
-          <Skeleton className="ml-auto h-14 w-2/3 rounded-2xl rounded-br-md" />
+        <div className="min-h-0 flex-1 space-y-2.5 overflow-hidden wa-wallpaper px-[6%] py-4">
+          <div className="ml-auto h-12 w-3/5 animate-pulse rounded-lg bg-wa-bubble-out/70" />
+          <div className="h-16 w-2/3 animate-pulse rounded-lg bg-wa-bubble-in/70" />
+          <div className="ml-auto h-10 w-1/2 animate-pulse rounded-lg bg-wa-bubble-out/70" />
+          <div className="h-12 w-3/5 animate-pulse rounded-lg bg-wa-bubble-in/70" />
+          <div className="ml-auto h-14 w-2/3 animate-pulse rounded-lg bg-wa-bubble-out/70" />
         </div>
-        <div className="shrink-0 border-t border-line bg-paper px-3 py-2.5">
-          <Skeleton className="h-11 w-full rounded-2xl" />
+        <div className="shrink-0 bg-wa-panel-alt px-3 py-2.5">
+          <div className="h-11 w-full animate-pulse rounded-lg bg-wa-panel/80" />
         </div>
       </div>
     );
@@ -312,8 +424,13 @@ export function EmbeddedChat({
 
   if (!conversation) {
     return (
-      <div className={cn("flex h-full min-h-0 flex-col items-center justify-center chat-bg", className)}>
-        <p className="rounded-full border border-line bg-paper/90 px-4 py-2 text-[13px] text-ink-faint shadow-sm">
+      <div
+        className={cn(
+          "flex h-full min-h-0 flex-col items-center justify-center wa-wallpaper",
+          className,
+        )}
+      >
+        <p className="rounded-lg bg-wa-panel-alt/95 px-4 py-2 text-[13px] text-wa-ink-soft shadow-sm">
           No pudimos cargar la conversación. Probá de nuevo.
         </p>
       </div>
@@ -322,26 +439,34 @@ export function EmbeddedChat({
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col", className)}>
-      {/* mensajes */}
+      {/* hilo sobre el wallpaper oficial */}
       <div
         ref={listRef}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain chat-bg px-3 py-4"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain wa-wallpaper px-[5%] py-2 md:px-[7%]"
       >
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center">
-            <p className="rounded-full border border-line bg-paper/90 px-4 py-2 text-[13px] text-ink-faint shadow-sm">
+            <p className="rounded-lg bg-wa-panel-alt/95 px-4 py-2 text-[13px] text-wa-ink-soft shadow-sm">
               Todavía no hay mensajes en este chat
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-1 animate-fade-in">
-            {items.map((item) =>
-              item.type === "day" ? (
-                <DayChip key={item.key} label={item.label} />
-              ) : (
-                <Bubble key={item.msg.id} m={item.msg} />
-              ),
-            )}
+          <div className="animate-fade-in">
+            {dayGroups.map((g) => (
+              <div key={g.key}>
+                <DayChip label={g.label} />
+                <div className="flex flex-col">
+                  {g.msgs.map((m, i) => (
+                    <Bubble
+                      key={m.id}
+                      m={m}
+                      tail={startsStreak(g.msgs[i - 1], m)}
+                      fresh={!initialIds.has(m.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -349,65 +474,47 @@ export function EmbeddedChat({
       {/* footer: composer o plantillas según la ventana de 24 hs */}
       <div className="shrink-0">
         {conversation.status === "cerrada" && (
-          <p className="border-t border-line bg-sand-soft/70 px-4 py-1.5 text-center text-[12px] text-ink-faint">
+          <p className="border-b border-wa-line bg-wa-panel-alt px-4 py-1.5 text-center text-[12px] text-wa-ink-faint">
             Esta conversación está cerrada
           </p>
         )}
         {windowOpen ? (
-          <div className="border-t border-line bg-paper px-3 py-2.5">
-            <div className="flex items-end gap-2">
-              {quoteButton}
-              <textarea
-                ref={textareaRef}
-                value={draft}
-                onChange={(e) => {
-                  setDraft(e.target.value);
-                  const el = e.currentTarget;
-                  el.style.height = "auto";
-                  el.style.height = Math.min(el.scrollHeight, MAX_COMPOSER_HEIGHT) + "px";
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-                rows={1}
-                placeholder={waConnected ? "Escribí un mensaje…" : "Escribí un mensaje… (envío simulado)"}
-                aria-label="Mensaje"
-                className="max-h-[132px] min-h-[44px] flex-1 resize-none rounded-2xl border border-line bg-cream px-3.5 py-2.5 text-[15px] leading-snug text-ink transition-colors placeholder:text-ink-faint focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15"
-              />
-              <button
-                onClick={handleSend}
-                disabled={draft.trim().length === 0}
-                className="flex size-11 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white shadow-sm transition-all hover:bg-brand-700 active:scale-[0.95] disabled:opacity-40 tap-highlight-none"
-                aria-label="Enviar mensaje"
-              >
-                <Send className="size-5 -translate-x-px translate-y-px" />
-              </button>
-            </div>
-          </div>
+          composerBar
+        ) : noteMode ? (
+          composerBar
         ) : (
           <>
-            <div className="flex items-start gap-2 border-t border-amber-200 bg-amber-50 px-4 py-2 text-[12.5px] leading-snug text-amber-800">
-              <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+            <div className="flex items-start gap-2.5 bg-wa-panel-alt px-4 py-2.5 text-[12.5px] leading-snug text-wa-ink-soft">
+              <Clock className="mt-0.5 size-4 shrink-0 text-wa-ink-faint" />
               <p className="flex-1">
-                <span className="font-semibold">Fuera de la ventana de 24 hs</span> — solo se
-                pueden enviar plantillas aprobadas.
+                <span className="font-semibold text-wa-ink">Ventana de 24 hs cerrada</span> —
+                respondé con una plantilla aprobada; el chat se reabre cuando el cliente
+                escribe.
               </p>
+              <Tooltip content="Nota interna (no la ve el cliente)">
+                <button
+                  type="button"
+                  onClick={() => setNoteMode(true)}
+                  className="-my-1 flex size-9 shrink-0 items-center justify-center rounded-full text-wa-ink-soft transition-colors hover:bg-wa-hover active:scale-95 tap-highlight-none"
+                  aria-label="Nota interna"
+                >
+                  <StickyNote className="size-4.5" strokeWidth={1.9} />
+                </button>
+              </Tooltip>
               {onQuoteRequest && (
                 <Tooltip content="Armar presupuesto">
                   <button
+                    type="button"
                     onClick={onQuoteRequest}
-                    className="-my-1 flex size-9 shrink-0 items-center justify-center rounded-full text-amber-800 transition-colors hover:bg-amber-100 active:scale-[0.95] tap-highlight-none"
+                    className="-my-1 flex size-9 shrink-0 items-center justify-center rounded-full text-wa-ink-soft transition-colors hover:bg-wa-hover active:scale-95 tap-highlight-none"
                     aria-label="Armar presupuesto"
                   >
-                    <ReceiptText className="size-4.5" />
+                    <ReceiptText className="size-4.5" strokeWidth={1.9} />
                   </button>
                 </Tooltip>
               )}
             </div>
-            <div className="border-t border-line bg-paper px-3 py-3">
+            <div className="border-t border-wa-line bg-wa-panel-alt px-3 py-3 md:px-4">
               <TemplatePicker
                 templates={templates}
                 vars={templateVars}

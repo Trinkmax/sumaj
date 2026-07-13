@@ -1,12 +1,23 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { toast } from "sonner";
-import { AlertTriangle, Plus, UserPlus, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  BookUser,
+  CircleHelp,
+  IdCard,
+  Plus,
+  Stamp,
+  UserPlus,
+  X,
+} from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
-import { Checkbox, EmptyState, Tooltip } from "@/components/ui/misc";
+import { Input, Label } from "@/components/ui/input";
+import { Checkbox, EmptyState, Tooltip, ChoiceGrid } from "@/components/ui/misc";
 import { Avatar } from "@/components/ui/avatar";
 import { createTravelerForFile, linkTraveler, unlinkTraveler } from "@/lib/actions/files";
 import { fmtDate } from "@/lib/format";
@@ -15,11 +26,11 @@ import type { Enums } from "@/lib/types";
 import { docExpiresBeforeTrip } from "./helpers";
 import type { TravelerRow } from "./types";
 
-const DOC_TYPES: { value: Enums<"document_type">; label: string }[] = [
-  { value: "dni", label: "DNI" },
-  { value: "pasaporte", label: "Pasaporte" },
-  { value: "visa", label: "Visa" },
-  { value: "otro", label: "Otro" },
+const DOC_TYPES: { value: Enums<"document_type">; label: string; icon: typeof IdCard }[] = [
+  { value: "dni", label: "DNI", icon: IdCard },
+  { value: "pasaporte", label: "Pasaporte", icon: BookUser },
+  { value: "visa", label: "Visa", icon: Stamp },
+  { value: "otro", label: "Otro", icon: CircleHelp },
 ];
 
 function docLabel(t: TravelerRow): string | null {
@@ -85,7 +96,7 @@ export function TravelersCard({
 
       {local.length === 0 ? (
         <EmptyState
-          emoji="🛂"
+          icon={IdCard}
           title="Sin pasajeros todavía"
           description="Agregá quiénes viajan para tener los documentos a mano."
           action={
@@ -95,7 +106,9 @@ export function TravelersCard({
           }
         />
       ) : (
-        <div className="divide-y divide-line">
+        <div
+          className={cn("divide-y divide-line", local.length <= 14 && "stagger-children")}
+        >
           {local.map((t) => {
             const doc = docLabel(t);
             const expiresBad = docExpiresBeforeTrip(t.document_expiry, returnDate);
@@ -103,17 +116,28 @@ export function TravelersCard({
               <div key={t.id} className="flex min-h-14 items-center gap-3 py-2.5">
                 <Avatar name={t.full_name} className="size-9" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-ink">{t.full_name}</p>
+                  <p className="flex items-center gap-2 text-sm font-medium text-ink">
+                    <span className="truncate">{t.full_name}</span>
+                    {t.linked_contact_id && (
+                      <Link
+                        href={`/clientes/${t.linked_contact_id}`}
+                        className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-brand-tint px-2 py-0.5 text-[11px] font-medium text-brand-text transition-all tap-highlight-none hover:shadow-sm active:scale-[0.97]"
+                      >
+                        Ver ficha
+                        <ArrowUpRight className="size-3" strokeWidth={2} />
+                      </Link>
+                    )}
+                  </p>
                   <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-ink-faint">
                     {doc ? <span className="tabular-nums">{doc}</span> : <span>Sin documento</span>}
                     {t.document_expiry && (
                       <span
                         className={cn(
                           "inline-flex items-center gap-1 tabular-nums",
-                          expiresBad && "font-semibold text-red-600",
+                          expiresBad && "font-semibold text-tone-red-text",
                         )}
                       >
-                        {expiresBad && <AlertTriangle className="size-3" />}
+                        {expiresBad && <AlertTriangle className="size-3" strokeWidth={2} />}
                         vence {fmtDate(t.document_expiry)}
                       </span>
                     )}
@@ -193,7 +217,7 @@ function AddTravelerDialog({
       toast.error(res.error);
       return;
     }
-    toast.success("Pasajero agregado ✅");
+    toast.success("Pasajero agregado");
     setFullName("");
     setDocNumber("");
     setDocExpiry("");
@@ -209,7 +233,7 @@ function AddTravelerDialog({
       >
         <div className="space-y-4">
           {available.length > 0 && (
-            <div className="space-y-0.5">
+            <div className="space-y-0.5 stagger-children">
               {available.map((t) => {
                 const doc = docLabel(t);
                 const expiresBad = docExpiresBeforeTrip(t.document_expiry, returnDate);
@@ -225,7 +249,7 @@ function AddTravelerDialog({
                       <p className="truncate text-xs text-ink-faint">
                         {doc ?? "Sin documento"}
                         {t.document_expiry && (
-                          <span className={cn(expiresBad && "font-semibold text-red-600")}>
+                          <span className={cn(expiresBad && "font-semibold text-tone-red-text")}>
                             {" "}
                             · vence {fmtDate(t.document_expiry)}
                           </span>
@@ -245,7 +269,7 @@ function AddTravelerDialog({
           )}
 
           {showForm ? (
-            <div className="space-y-3 rounded-xl border border-line bg-paper p-3.5">
+            <div className="space-y-3 rounded-xl border border-line bg-paper p-3.5 animate-slide-up">
               <p className="text-[13px] font-semibold text-ink">Nuevo pasajero</p>
               <div>
                 <Label htmlFor="tv-name">Nombre completo</Label>
@@ -257,21 +281,21 @@ function AddTravelerDialog({
                   autoFocus
                 />
               </div>
-              <div className="grid grid-cols-[100px_1fr] gap-3">
-                <div>
-                  <Label htmlFor="tv-doctype">Documento</Label>
-                  <Select
-                    id="tv-doctype"
-                    value={docType}
-                    onChange={(e) => setDocType(e.target.value as Enums<"document_type">)}
-                  >
-                    {DOC_TYPES.map((d) => (
-                      <option key={d.value} value={d.value}>
-                        {d.label}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
+              <div>
+                <Label>Documento</Label>
+                <ChoiceGrid<Enums<"document_type">>
+                  options={DOC_TYPES.map((d) => ({
+                    value: d.value,
+                    label: d.label,
+                    icon: d.icon,
+                  }))}
+                  value={docType}
+                  onChange={setDocType}
+                  columns={4}
+                  size="sm"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label htmlFor="tv-docnum">Número</Label>
                   <Input
@@ -281,15 +305,15 @@ function AddTravelerDialog({
                     placeholder="Ej: 32.456.789"
                   />
                 </div>
-              </div>
-              <div>
-                <Label htmlFor="tv-expiry">Vencimiento del documento</Label>
-                <Input
-                  id="tv-expiry"
-                  type="date"
-                  value={docExpiry}
-                  onChange={(e) => setDocExpiry(e.target.value)}
-                />
+                <div>
+                  <Label htmlFor="tv-expiry">Vencimiento</Label>
+                  <Input
+                    id="tv-expiry"
+                    type="date"
+                    value={docExpiry}
+                    onChange={(e) => setDocExpiry(e.target.value)}
+                  />
+                </div>
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setShowForm(false)}>

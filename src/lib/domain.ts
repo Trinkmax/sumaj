@@ -1,3 +1,50 @@
+import {
+  ArrowRightLeft,
+  BadgeCheck,
+  Banknote,
+  BedDouble,
+  Briefcase,
+  Bus,
+  CarFront,
+  CheckCircle2,
+  CircleDollarSign,
+  ClipboardList,
+  Clock,
+  Cog,
+  Coins,
+  CreditCard,
+  Flag,
+  Globe,
+  Camera,
+  Handshake,
+  Heart,
+  Landmark,
+  Luggage,
+  Mail,
+  MessageCircle,
+  MessageSquare,
+  PencilLine,
+  Phone,
+  PiggyBank,
+  Plane,
+  PlaneTakeoff,
+  ReceiptText,
+  Route,
+  Send,
+  Ship,
+  ShieldCheck,
+  Smartphone,
+  Sparkles,
+  StickyNote,
+  Trophy,
+  User,
+  UserPlus,
+  Users,
+  UsersRound,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react";
+
 import type {
   ActivityType,
   FileStatus,
@@ -11,10 +58,13 @@ import type {
 
 /* ───────────────────────────────────────────
    Pipeline / etapas del CRM
+   Los chips usan tokens `tone-*` (flipean solos en modo oscuro);
+   dot/headerBar usan el color vivo 500 (funciona en ambos temas).
    ─────────────────────────────────────────── */
 export type StageMeta = {
   key: LeadStage;
   label: string;
+  icon: LucideIcon;
   /** clases para el chip/columna del kanban */
   dot: string;
   chip: string;
@@ -27,48 +77,54 @@ export const STAGES: StageMeta[] = [
   {
     key: "nuevo",
     label: "Nuevo",
+    icon: Sparkles,
     dot: "bg-sky-500",
-    chip: "bg-sky-50 text-sky-700 border-sky-200",
+    chip: "bg-tone-sky-soft text-tone-sky-text border-tone-sky-line",
     headerBar: "bg-sky-500",
     active: true,
   },
   {
     key: "contactado",
     label: "Contactado",
+    icon: MessageCircle,
     dot: "bg-amber-500",
-    chip: "bg-amber-50 text-amber-700 border-amber-200",
+    chip: "bg-tone-amber-soft text-tone-amber-text border-tone-amber-line",
     headerBar: "bg-amber-500",
     active: true,
   },
   {
     key: "presupuestado",
     label: "Presupuestado",
+    icon: ReceiptText,
     dot: "bg-violet-500",
-    chip: "bg-violet-50 text-violet-700 border-violet-200",
+    chip: "bg-tone-violet-soft text-tone-violet-text border-tone-violet-line",
     headerBar: "bg-violet-500",
     active: true,
   },
   {
     key: "negociacion",
     label: "En negociación",
+    icon: Handshake,
     dot: "bg-brand-500",
-    chip: "bg-brand-50 text-brand-700 border-brand-200",
+    chip: "bg-brand-tint text-brand-text border-brand-tint-line",
     headerBar: "bg-brand-500",
     active: true,
   },
   {
     key: "ganado",
     label: "Ganado",
+    icon: Trophy,
     dot: "bg-emerald-500",
-    chip: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    chip: "bg-tone-emerald-soft text-tone-emerald-text border-tone-emerald-line",
     headerBar: "bg-emerald-500",
     active: false,
   },
   {
     key: "perdido",
     label: "Perdido",
+    icon: XCircle,
     dot: "bg-stone-400",
-    chip: "bg-stone-100 text-stone-600 border-stone-200",
+    chip: "bg-tone-stone-soft text-tone-stone-text border-tone-stone-line",
     headerBar: "bg-stone-400",
     active: false,
   },
@@ -82,22 +138,25 @@ export const STAGE_BY_KEY = Object.fromEntries(STAGES.map((s) => [s.key, s])) as
 /* ───────────────────────────────────────────
    Canales de origen
    ─────────────────────────────────────────── */
-export const CHANNELS: Record<LeadChannel, { label: string; short: string }> = {
-  whatsapp: { label: "WhatsApp", short: "WA" },
-  instagram: { label: "Instagram", short: "IG" },
-  messenger: { label: "Messenger", short: "MS" },
-  lead_form: { label: "Formulario Meta", short: "Form" },
-  web: { label: "Web", short: "Web" },
-  referido: { label: "Referido", short: "Ref" },
-  manual: { label: "Carga manual", short: "Manual" },
+export const CHANNELS: Record<
+  LeadChannel,
+  { label: string; short: string; icon: LucideIcon }
+> = {
+  whatsapp: { label: "WhatsApp", short: "WA", icon: MessageCircle },
+  instagram: { label: "Instagram", short: "IG", icon: Camera },
+  messenger: { label: "Messenger", short: "MS", icon: MessageSquare },
+  lead_form: { label: "Formulario Meta", short: "Form", icon: ClipboardList },
+  web: { label: "Web", short: "Web", icon: Globe },
+  referido: { label: "Referido", short: "Ref", icon: UserPlus },
+  manual: { label: "Carga manual", short: "Manual", icon: PencilLine },
 };
 
-export const TRIP_TYPES: Record<TripType, string> = {
-  familiar: "Familiar",
-  pareja: "Pareja",
-  grupal: "Grupal",
-  corporativo: "Corporativo",
-  solo: "Solo/a",
+export const TRIP_TYPES: Record<TripType, { label: string; icon: LucideIcon }> = {
+  familiar: { label: "Familiar", icon: Users },
+  pareja: { label: "Pareja", icon: Heart },
+  grupal: { label: "Grupal", icon: UsersRound },
+  corporativo: { label: "Corporativo", icon: Briefcase },
+  solo: { label: "Solo/a", icon: User },
 };
 
 /* ───────────────────────────────────────────
@@ -105,17 +164,17 @@ export const TRIP_TYPES: Record<TripType, string> = {
    ─────────────────────────────────────────── */
 export const SERVICE_TYPES: Record<
   ServiceType,
-  { label: string; plural: string; emoji: string }
+  { label: string; plural: string; icon: LucideIcon }
 > = {
-  aereo: { label: "Aéreo", plural: "Aéreos", emoji: "✈️" },
-  hotel: { label: "Hotelería", plural: "Hotelería", emoji: "🏨" },
-  paquete: { label: "Paquete", plural: "Paquetes", emoji: "🧳" },
-  excursion: { label: "Excursión", plural: "Excursiones", emoji: "🚌" },
-  traslado: { label: "Traslado", plural: "Traslados", emoji: "🚐" },
-  asistencia: { label: "Asistencia", plural: "Asistencia", emoji: "🛡️" },
-  circuito: { label: "Circuito", plural: "Circuitos", emoji: "🗺️" },
-  crucero: { label: "Crucero", plural: "Cruceros", emoji: "🛳️" },
-  otro: { label: "Otro", plural: "Otros", emoji: "📎" },
+  aereo: { label: "Aéreo", plural: "Aéreos", icon: Plane },
+  hotel: { label: "Hotelería", plural: "Hotelería", icon: BedDouble },
+  paquete: { label: "Paquete", plural: "Paquetes", icon: Luggage },
+  excursion: { label: "Excursión", plural: "Excursiones", icon: Bus },
+  traslado: { label: "Traslado", plural: "Traslados", icon: CarFront },
+  asistencia: { label: "Asistencia", plural: "Asistencia", icon: ShieldCheck },
+  circuito: { label: "Circuito", plural: "Circuitos", icon: Route },
+  crucero: { label: "Crucero", plural: "Cruceros", icon: Ship },
+  otro: { label: "Otro", plural: "Otros", icon: Coins },
 };
 
 /** Orden de la planilla: aéreos primero, después terrestres */
@@ -134,61 +193,131 @@ export const SERVICE_ORDER: ServiceType[] = [
 /* ───────────────────────────────────────────
    Estados de file / presupuesto / cobros
    ─────────────────────────────────────────── */
-export const FILE_STATUSES: Record<FileStatus, { label: string; chip: string }> = {
-  vendido: { label: "Vendido", chip: "bg-sky-50 text-sky-700 border-sky-200" },
-  pagado: { label: "Pagado", chip: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  en_curso: { label: "En curso", chip: "bg-violet-50 text-violet-700 border-violet-200" },
-  finalizado: { label: "Finalizado", chip: "bg-stone-100 text-stone-600 border-stone-200" },
-  cancelado: { label: "Cancelado", chip: "bg-red-50 text-red-700 border-red-200" },
+export const FILE_STATUSES: Record<
+  FileStatus,
+  { label: string; chip: string; icon: LucideIcon }
+> = {
+  vendido: {
+    label: "Vendido",
+    chip: "bg-tone-sky-soft text-tone-sky-text border-tone-sky-line",
+    icon: BadgeCheck,
+  },
+  pagado: {
+    label: "Pagado",
+    chip: "bg-tone-emerald-soft text-tone-emerald-text border-tone-emerald-line",
+    icon: CircleDollarSign,
+  },
+  en_curso: {
+    label: "En curso",
+    chip: "bg-tone-violet-soft text-tone-violet-text border-tone-violet-line",
+    icon: PlaneTakeoff,
+  },
+  finalizado: {
+    label: "Finalizado",
+    chip: "bg-tone-stone-soft text-tone-stone-text border-tone-stone-line",
+    icon: Flag,
+  },
+  cancelado: {
+    label: "Cancelado",
+    chip: "bg-tone-red-soft text-tone-red-text border-tone-red-line",
+    icon: XCircle,
+  },
 };
 
-export const QUOTE_STATUSES: Record<QuoteStatus, { label: string; chip: string }> = {
-  borrador: { label: "Borrador", chip: "bg-stone-100 text-stone-600 border-stone-200" },
-  enviado: { label: "Enviado", chip: "bg-sky-50 text-sky-700 border-sky-200" },
-  aceptado: { label: "Aceptado", chip: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  rechazado: { label: "Rechazado", chip: "bg-red-50 text-red-700 border-red-200" },
-  vencido: { label: "Vencido", chip: "bg-amber-50 text-amber-700 border-amber-200" },
+export const QUOTE_STATUSES: Record<
+  QuoteStatus,
+  { label: string; chip: string; icon: LucideIcon }
+> = {
+  borrador: {
+    label: "Borrador",
+    chip: "bg-tone-stone-soft text-tone-stone-text border-tone-stone-line",
+    icon: PencilLine,
+  },
+  enviado: {
+    label: "Enviado",
+    chip: "bg-tone-sky-soft text-tone-sky-text border-tone-sky-line",
+    icon: Send,
+  },
+  aceptado: {
+    label: "Aceptado",
+    chip: "bg-tone-emerald-soft text-tone-emerald-text border-tone-emerald-line",
+    icon: CheckCircle2,
+  },
+  rechazado: {
+    label: "Rechazado",
+    chip: "bg-tone-red-soft text-tone-red-text border-tone-red-line",
+    icon: XCircle,
+  },
+  vencido: {
+    label: "Vencido",
+    chip: "bg-tone-amber-soft text-tone-amber-text border-tone-amber-line",
+    icon: Clock,
+  },
 };
 
-export const PAYMENT_METHODS: Record<PaymentMethod, string> = {
-  efectivo: "Efectivo",
-  transferencia: "Transferencia",
-  tarjeta: "Tarjeta",
-  mercado_pago: "Mercado Pago",
-  deposito: "Depósito",
-  otro: "Otro",
+export const PAYMENT_METHODS: Record<
+  PaymentMethod,
+  { label: string; icon: LucideIcon }
+> = {
+  efectivo: { label: "Efectivo", icon: Banknote },
+  transferencia: { label: "Transferencia", icon: Landmark },
+  tarjeta: { label: "Tarjeta", icon: CreditCard },
+  mercado_pago: { label: "Mercado Pago", icon: Smartphone },
+  deposito: { label: "Depósito", icon: PiggyBank },
+  otro: { label: "Otro", icon: Coins },
 };
 
-export const ACTIVITY_TYPES: Record<ActivityType, { label: string; emoji: string }> = {
-  nota: { label: "Nota", emoji: "📝" },
-  llamada: { label: "Llamada", emoji: "📞" },
-  whatsapp: { label: "WhatsApp", emoji: "💬" },
-  email: { label: "Email", emoji: "✉️" },
-  etapa: { label: "Cambio de etapa", emoji: "🔀" },
-  presupuesto: { label: "Presupuesto", emoji: "🧾" },
-  sistema: { label: "Sistema", emoji: "⚙️" },
+export const ACTIVITY_TYPES: Record<ActivityType, { label: string; icon: LucideIcon }> = {
+  nota: { label: "Nota", icon: StickyNote },
+  llamada: { label: "Llamada", icon: Phone },
+  whatsapp: { label: "WhatsApp", icon: MessageCircle },
+  email: { label: "Email", icon: Mail },
+  etapa: { label: "Cambio de etapa", icon: ArrowRightLeft },
+  presupuesto: { label: "Presupuesto", icon: ReceiptText },
+  sistema: { label: "Sistema", icon: Cog },
 };
 
 /* ───────────────────────────────────────────
    Colores de etiquetas (tags.color → clases)
+   Tokens tone-*: flipean solos en modo oscuro.
    ─────────────────────────────────────────── */
 export const TAG_COLORS: Record<string, string> = {
-  gray: "bg-stone-100 text-stone-700 border-stone-200",
-  red: "bg-red-50 text-red-700 border-red-200",
-  orange: "bg-orange-50 text-orange-700 border-orange-200",
-  amber: "bg-amber-50 text-amber-700 border-amber-200",
-  yellow: "bg-yellow-50 text-yellow-700 border-yellow-200",
-  green: "bg-green-50 text-green-700 border-green-200",
-  emerald: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  teal: "bg-teal-50 text-teal-700 border-teal-200",
-  cyan: "bg-cyan-50 text-cyan-700 border-cyan-200",
-  sky: "bg-sky-50 text-sky-700 border-sky-200",
-  blue: "bg-blue-50 text-blue-700 border-blue-200",
-  indigo: "bg-indigo-50 text-indigo-700 border-indigo-200",
-  violet: "bg-violet-50 text-violet-700 border-violet-200",
-  fuchsia: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200",
-  pink: "bg-pink-50 text-pink-700 border-pink-200",
-  rose: "bg-rose-50 text-rose-700 border-rose-200",
+  gray: "bg-tone-stone-soft text-tone-stone-text border-tone-stone-line",
+  red: "bg-tone-red-soft text-tone-red-text border-tone-red-line",
+  orange: "bg-tone-orange-soft text-tone-orange-text border-tone-orange-line",
+  amber: "bg-tone-amber-soft text-tone-amber-text border-tone-amber-line",
+  yellow: "bg-tone-yellow-soft text-tone-yellow-text border-tone-yellow-line",
+  green: "bg-tone-green-soft text-tone-green-text border-tone-green-line",
+  emerald: "bg-tone-emerald-soft text-tone-emerald-text border-tone-emerald-line",
+  teal: "bg-tone-teal-soft text-tone-teal-text border-tone-teal-line",
+  cyan: "bg-tone-cyan-soft text-tone-cyan-text border-tone-cyan-line",
+  sky: "bg-tone-sky-soft text-tone-sky-text border-tone-sky-line",
+  blue: "bg-tone-blue-soft text-tone-blue-text border-tone-blue-line",
+  indigo: "bg-tone-indigo-soft text-tone-indigo-text border-tone-indigo-line",
+  violet: "bg-tone-violet-soft text-tone-violet-text border-tone-violet-line",
+  fuchsia: "bg-tone-fuchsia-soft text-tone-fuchsia-text border-tone-fuchsia-line",
+  pink: "bg-tone-pink-soft text-tone-pink-text border-tone-pink-line",
+  rose: "bg-tone-rose-soft text-tone-rose-text border-tone-rose-line",
+};
+
+/** Punto de color vivo por etiqueta (swatches de pickers; legible en ambos temas). */
+export const TAG_DOTS: Record<string, string> = {
+  gray: "bg-stone-400",
+  red: "bg-red-500",
+  orange: "bg-orange-500",
+  amber: "bg-amber-500",
+  yellow: "bg-yellow-400",
+  green: "bg-green-500",
+  emerald: "bg-emerald-500",
+  teal: "bg-teal-500",
+  cyan: "bg-cyan-500",
+  sky: "bg-sky-500",
+  blue: "bg-blue-500",
+  indigo: "bg-indigo-500",
+  violet: "bg-violet-500",
+  fuchsia: "bg-fuchsia-500",
+  pink: "bg-pink-500",
+  rose: "bg-rose-500",
 };
 
 export const TAG_CATEGORIES = [

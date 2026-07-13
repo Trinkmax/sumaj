@@ -10,6 +10,8 @@ import { Avatar } from "@/components/ui/avatar";
 import { createClient } from "@/lib/supabase/client";
 import { Tooltip } from "@/components/ui/misc";
 import { openCommandPalette, useSearchShortcutLabel } from "./command-palette";
+import { ThemeToggle, ThemeToggleCompact } from "./theme";
+import { NotificationsBell } from "./notifications-bell";
 
 /** Botón de lupa para el header mobile (mismo estilo que la campana). */
 export function MobileSearchButton() {
@@ -29,11 +31,13 @@ export function Sidebar({
   agencyLogoUrl,
   memberName,
   roleLabel,
+  memberId,
 }: {
   agencyName: string;
   agencyLogoUrl: string | null;
   memberName: string;
   roleLabel: string;
+  memberId: string;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -86,7 +90,7 @@ export function Sidebar({
               <img
                 src={agencyLogoUrl}
                 alt={agencyName}
-                className="h-7 w-auto max-w-[44px] object-contain"
+                className="h-7 w-auto max-w-[44px] object-contain dark:rounded-md dark:bg-white/90 dark:p-0.5"
               />
             ) : (
               <span className="font-display text-xl font-semibold text-ink">
@@ -94,6 +98,7 @@ export function Sidebar({
               </span>
             )}
           </Link>
+          <NotificationsBell memberId={memberId} />
         </div>
       ) : (
         <div className="flex items-start justify-between gap-2 px-4 pt-5">
@@ -102,7 +107,7 @@ export function Sidebar({
               <img
                 src={agencyLogoUrl}
                 alt={agencyName}
-                className="h-9 w-auto max-w-[160px] object-contain"
+                className="h-9 w-auto max-w-[160px] object-contain dark:rounded-lg dark:bg-white/90 dark:p-1"
               />
             ) : (
               <span className="block truncate font-display text-[22px] font-semibold tracking-tight text-ink">
@@ -110,15 +115,18 @@ export function Sidebar({
               </span>
             )}
           </Link>
-          <Tooltip content="Modo foco">
-            <button
-              onClick={toggleCollapsed}
-              aria-label="Modo foco"
-              className="shrink-0 rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-sand-soft hover:text-ink tap-highlight-none"
-            >
-              <PanelLeftClose className="size-[18px]" />
-            </button>
-          </Tooltip>
+          <div className="flex shrink-0 items-center">
+            <NotificationsBell memberId={memberId} />
+            <Tooltip content="Modo foco">
+              <button
+                onClick={toggleCollapsed}
+                aria-label="Modo foco"
+                className="shrink-0 rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-sand-soft hover:text-ink tap-highlight-none"
+              >
+                <PanelLeftClose className="size-[18px]" />
+              </button>
+            </Tooltip>
+          </div>
         </div>
       )}
 
@@ -220,6 +228,7 @@ export function Sidebar({
               <Avatar name={memberName} className="size-8 text-[11px]" />
             </div>
           </Tooltip>
+          <ThemeToggleCompact />
           <Tooltip content="Cerrar sesión" side="right">
             <button
               onClick={logout}
@@ -260,9 +269,10 @@ export function Sidebar({
               </button>
             </Tooltip>
           </div>
-          <p className="pb-1 pt-3 text-center text-[10px] tracking-wide text-ink-faint">
-            hecho con viajerOS
-          </p>
+          <div className="flex items-center justify-between pb-1 pt-3">
+            <p className="text-[10px] tracking-wide text-ink-faint">hecho con viajerOS</p>
+            <ThemeToggle />
+          </div>
         </div>
       )}
     </aside>

@@ -4,6 +4,7 @@ import * as React from "react";
 import { toast } from "sonner";
 import { Check, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TAG_DOTS } from "@/lib/domain";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/misc";
 import { toggleContactTag } from "@/lib/actions/leads";
@@ -64,7 +65,7 @@ export function ContactTags({
           <button
             type="button"
             aria-label="Editar etiquetas"
-            className="inline-flex items-center gap-1 rounded-full border border-dashed border-line-strong px-2 py-0.5 text-[11px] font-medium text-ink-faint transition-colors hover:border-brand-300 hover:text-brand-700 tap-highlight-none"
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-line-strong px-2 py-0.5 text-[11px] font-medium text-ink-faint transition-colors hover:border-brand-300 hover:text-brand-text tap-highlight-none"
           >
             <Plus className="size-3" />
             Etiqueta
@@ -89,10 +90,17 @@ export function ContactTags({
                       on && "bg-sand-soft/60",
                     )}
                   >
+                    <span
+                      className={cn(
+                        "size-2 shrink-0 rounded-full",
+                        TAG_DOTS[t.color] ?? TAG_DOTS.gray,
+                      )}
+                      aria-hidden
+                    />
                     <span className="min-w-0 flex-1">
                       <Badge color={t.color}>{t.name}</Badge>
                     </span>
-                    {on && <Check className="size-4 shrink-0 text-brand-600" />}
+                    {on && <Check className="size-4 shrink-0 text-brand-600 animate-check-pop" />}
                   </button>
                 );
               })}

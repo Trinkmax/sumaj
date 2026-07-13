@@ -2,7 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell } from "lucide-react";
+import {
+  AlarmClock,
+  Banknote,
+  Bell,
+  BellRing,
+  Cake,
+  CheckCheck,
+  IdCard,
+  PlaneTakeoff,
+  Sparkles,
+  type LucideIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/misc";
@@ -12,14 +23,14 @@ import type { Tables } from "@/lib/types";
 
 type Notification = Tables<"notifications">;
 
-const TYPE_EMOJI: Record<string, string> = {
-  lead_nuevo: "✨",
-  seguimiento: "⏰",
-  documento: "🛂",
-  salida: "✈️",
-  pago: "💵",
-  cumpleanos: "🎂",
-  general: "🔔",
+const TYPE_META: Record<string, { icon: LucideIcon; tone: string }> = {
+  lead_nuevo: { icon: Sparkles, tone: "bg-tone-sky-soft text-tone-sky-text" },
+  seguimiento: { icon: AlarmClock, tone: "bg-tone-amber-soft text-tone-amber-text" },
+  documento: { icon: IdCard, tone: "bg-tone-violet-soft text-tone-violet-text" },
+  salida: { icon: PlaneTakeoff, tone: "bg-brand-tint text-brand-text" },
+  pago: { icon: Banknote, tone: "bg-money-tint text-money-text" },
+  cumpleanos: { icon: Cake, tone: "bg-tone-rose-soft text-tone-rose-text" },
+  general: { icon: BellRing, tone: "bg-sand-soft text-ink-soft" },
 };
 
 // La campana se monta dos veces (header mobile + flotante desktop):
@@ -62,9 +73,7 @@ export function NotificationsBell({ memberId }: { memberId: string }) {
           setItems((prev) => (prev.some((p) => p.id === n.id) ? prev : [n, ...prev].slice(0, 15)));
           if (!toastedIds.has(n.id)) {
             toastedIds.add(n.id);
-            toast(`${TYPE_EMOJI[n.type] ?? "🔔"} ${n.title}`, {
-              description: n.body ?? undefined,
-            });
+            toast(n.title, { description: n.body ?? undefined });
           }
         },
       )
@@ -113,51 +122,62 @@ export function NotificationsBell({ memberId }: { memberId: string }) {
         <div className="flex items-center justify-between px-4 py-3">
           <p className="text-sm font-semibold text-ink">Notificaciones</p>
           {unread > 0 && (
-            <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">
+            <span className="rounded-full bg-brand-tint px-2 py-0.5 text-[11px] font-medium text-brand-text">
               {unread} sin leer
             </span>
           )}
         </div>
         <div className="max-h-[400px] overflow-y-auto border-t border-line">
           {items.length === 0 ? (
-            <p className="px-4 py-10 text-center text-sm text-ink-faint">
-              Todo al día ✨
-            </p>
+            <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+              <span className="flex size-10 items-center justify-center rounded-full bg-money-tint text-money-text">
+                <CheckCheck className="size-5" />
+              </span>
+              <p className="text-sm text-ink-faint">Todo al día</p>
+            </div>
           ) : (
-            items.map((n) => (
-              <button
-                key={n.id}
-                onClick={() => {
-                  setOpen(false);
-                  markAllRead();
-                  if (n.link) router.push(n.link);
-                }}
-                className={cn(
-                  "flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-sand-soft/60 tap-highlight-none",
-                  !n.read_at && "bg-brand-50/40",
-                )}
-              >
-                <span className="mt-0.5 text-lg leading-none">
-                  {TYPE_EMOJI[n.type] ?? "🔔"}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] font-medium leading-snug text-ink">
-                    {n.title}
-                  </span>
-                  {n.body && (
-                    <span className="mt-0.5 block text-xs leading-snug text-ink-soft">
-                      {n.body}
-                    </span>
+            items.map((n) => {
+              const meta = TYPE_META[n.type] ?? TYPE_META.general;
+              return (
+                <button
+                  key={n.id}
+                  onClick={() => {
+                    setOpen(false);
+                    markAllRead();
+                    if (n.link) router.push(n.link);
+                  }}
+                  className={cn(
+                    "flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-sand-soft/60 tap-highlight-none",
+                    !n.read_at && "bg-brand-tint/40",
                   )}
-                  <span className="mt-1 block text-[11px] text-ink-faint">
-                    {fmtRelative(n.created_at)}
+                >
+                  <span
+                    className={cn(
+                      "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full",
+                      meta.tone,
+                    )}
+                  >
+                    <meta.icon className="size-4" strokeWidth={1.9} />
                   </span>
-                </span>
-                {!n.read_at && (
-                  <span className="mt-1.5 size-2 shrink-0 rounded-full bg-brand-500" />
-                )}
-              </button>
-            ))
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13px] font-medium leading-snug text-ink">
+                      {n.title}
+                    </span>
+                    {n.body && (
+                      <span className="mt-0.5 block text-xs leading-snug text-ink-soft">
+                        {n.body}
+                      </span>
+                    )}
+                    <span className="mt-1 block text-[11px] text-ink-faint">
+                      {fmtRelative(n.created_at)}
+                    </span>
+                  </span>
+                  {!n.read_at && (
+                    <span className="mt-1.5 size-2 shrink-0 rounded-full bg-brand-500" />
+                  )}
+                </button>
+              );
+            })
           )}
         </div>
       </PopoverContent>

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { CheckCircle2 } from "lucide-react";
 import { createAnonClient } from "@/lib/supabase/server";
 import { PAYMENT_METHODS, quoteColor, quoteFont, round2 } from "@/lib/domain";
 import { fmtDateLong, fmtMoney, fmtNumber, fmtPhone } from "@/lib/format";
@@ -50,6 +51,11 @@ function Divider({ color }: { color: string }) {
   );
 }
 
+/**
+ * Recibo público que ve el cliente.
+ * Papelería fina SIEMPRE clara: colores inline del tema de la agencia
+ * (quoteColor/quoteFont), independiente del modo claro/oscuro de la app.
+ */
 export default async function PublicReceiptPage({
   params,
 }: {
@@ -87,7 +93,15 @@ export default async function PublicReceiptPage({
             alt={r.agency.name}
             className="mx-auto mb-3 h-14 w-14 rounded-full object-cover"
           />
-        ) : null}
+        ) : (
+          <div
+            className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full border text-xl font-semibold"
+            style={{ borderColor: `${color.accent}66`, color: color.accent }}
+            aria-hidden
+          >
+            {r.agency.name.trim().charAt(0).toUpperCase()}
+          </div>
+        )}
         <p className="text-lg font-semibold tracking-tight">{r.agency.name}</p>
 
         <div className="my-6">
@@ -101,7 +115,7 @@ export default async function PublicReceiptPage({
         >
           Recibo
         </p>
-        <p className="mt-1 text-3xl font-semibold tracking-tight">{r.code}</p>
+        <p className="mt-1 text-3xl font-semibold tracking-tight tabular-nums">{r.code}</p>
         <p className="mt-2 text-sm" style={{ opacity: 0.7 }}>
           {fmtDateLong(r.paid_at)}
         </p>
@@ -130,7 +144,7 @@ export default async function PublicReceiptPage({
           </p>
         )}
         <p className="mt-3 text-sm" style={{ opacity: 0.75 }}>
-          {PAYMENT_METHODS[r.method] ?? r.method}
+          {PAYMENT_METHODS[r.method]?.label ?? r.method}
         </p>
         <p className="mt-1 text-sm" style={{ opacity: 0.75 }}>
           por el file {r.file_code} — {r.destination}
@@ -167,10 +181,19 @@ export default async function PublicReceiptPage({
           </div>
           {settled ? (
             <p
-              className="mt-3 text-base font-semibold uppercase"
-              style={{ color: color.accent, letterSpacing: "0.2em" }}
+              className="mx-auto mt-3 inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-semibold uppercase"
+              style={{
+                color: color.accent,
+                borderColor: `${color.accent}55`,
+                letterSpacing: "0.2em",
+              }}
             >
-              Saldado ✅
+              <CheckCircle2
+                className="size-4 shrink-0"
+                strokeWidth={1.5}
+                aria-hidden
+              />
+              Saldado
             </p>
           ) : (
             <div className="flex items-baseline justify-between text-base font-semibold">
