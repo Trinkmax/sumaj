@@ -3,22 +3,17 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import {
-  MoreHorizontal,
-  Users,
-  Wallet,
-  Settings,
-  LogOut,
-} from "lucide-react";
+import { LogOut, MoreHorizontal } from "lucide-react";
+import { IconCaja, IconClientes, IconConfig } from "./nav-icons";
 import { cn } from "@/lib/utils";
 import { NAV_MOBILE } from "./nav";
 import { createClient } from "@/lib/supabase/client";
 import { ThemeToggle } from "./theme";
 
 const MORE_ITEMS = [
-  { href: "/clientes", label: "Clientes", icon: Users },
-  { href: "/caja", label: "Caja", icon: Wallet },
-  { href: "/config", label: "Configuración", icon: Settings },
+  { href: "/clientes", label: "Clientes", icon: IconClientes },
+  { href: "/caja", label: "Caja", icon: IconCaja },
+  { href: "/config", label: "Configuración", icon: IconConfig },
 ];
 
 export function MobileTabs() {
@@ -51,7 +46,7 @@ export function MobileTabs() {
                 href={item.href}
                 onClick={() => setMoreOpen(false)}
                 className={cn(
-                  "flex items-center gap-3 rounded-2xl px-4 py-3.5 text-[15px] font-medium transition-colors tap-highlight-none",
+                  "group flex items-center gap-3 rounded-2xl px-4 py-3.5 text-[15px] font-medium transition-colors tap-highlight-none",
                   pathname.startsWith(item.href)
                     ? "bg-sand-soft text-ink"
                     : "text-ink-soft active:bg-sand-soft",
@@ -87,7 +82,7 @@ export function MobileTabs() {
                 key={item.href}
                 href={item.href}
                 onClick={() => setMoreOpen(false)}
-                className="flex flex-col items-center justify-center gap-1 tap-highlight-none"
+                className="group flex flex-col items-center justify-center gap-1 tap-highlight-none"
               >
                 <item.icon
                   className={cn(

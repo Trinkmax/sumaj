@@ -59,14 +59,14 @@ export function RadarSection({
 }) {
   return (
     <section>
-      <div className="grid gap-2 sm:grid-cols-2 md:gap-3 stagger-children">
+      <div className="grid items-stretch gap-2 sm:grid-cols-2 md:gap-3 xl:grid-cols-4 stagger-children">
         {/* próximas salidas */}
         <RadarCard icon={PlaneTakeoff} tone="bg-tone-sky-soft text-tone-sky-text" title="Próximas salidas">
           {departures.length === 0 ? (
             <RadarEmpty text="Sin salidas en los próximos 30 días." />
           ) : (
             <div className="divide-y divide-line">
-              {departures.map((d) => (
+              {departures.slice(0, 3).map((d) => (
                 <Link
                   key={d.id}
                   href={`/files/${d.id}`}
@@ -92,6 +92,14 @@ export function RadarSection({
                   </div>
                 </Link>
               ))}
+              {departures.length > 3 && (
+                <Link
+                  href="/files"
+                  className="block py-2 text-[11px] font-medium text-brand-text transition-colors hover:text-brand-600 tap-highlight-none"
+                >
+                  Ver todas las salidas
+                </Link>
+              )}
             </div>
           )}
         </RadarCard>
@@ -102,7 +110,7 @@ export function RadarSection({
             <RadarEmpty text="Toda la documentación al día. Nada por vencer en 90 días." />
           ) : (
             <div className="divide-y divide-line">
-              {documents.map((doc) => (
+              {documents.slice(0, 3).map((doc) => (
                 <Link
                   key={doc.id}
                   href={`/clientes/${doc.contactId}`}
@@ -126,6 +134,14 @@ export function RadarSection({
                   </span>
                 </Link>
               ))}
+              {documents.length > 3 && (
+                <Link
+                  href="/clientes"
+                  className="block py-2 text-[11px] font-medium text-brand-text transition-colors hover:text-brand-600 tap-highlight-none"
+                >
+                  Ver todos los documentos
+                </Link>
+              )}
             </div>
           )}
         </RadarCard>
@@ -136,7 +152,7 @@ export function RadarSection({
             <RadarEmpty text="Nadie cumple años este mes." />
           ) : (
             <div className="divide-y divide-line">
-              {birthdays.slice(0, 4).map((b) => (
+              {birthdays.slice(0, 3).map((b) => (
                 <div key={b.id} className="flex min-h-11 items-center gap-2 py-1.5">
                   <Link
                     href={`/clientes/${b.id}`}
@@ -165,9 +181,9 @@ export function RadarSection({
                   )}
                 </div>
               ))}
-              {birthdays.length > 4 && (
+              {birthdays.length > 3 && (
                 <p className="pt-2 text-[11px] text-ink-faint">
-                  y {birthdays.length - 4} más este mes
+                  y {birthdays.length - 3} más este mes
                 </p>
               )}
             </div>
@@ -213,7 +229,7 @@ function RadarCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="card flex flex-col p-3.5">
+    <div className="card flex h-full min-h-[176px] flex-col p-3.5">
       <div className="flex items-center gap-2">
         <span
           className={cn(
@@ -228,11 +244,15 @@ function RadarCard({
         </p>
         {action}
       </div>
-      <div className="mt-1.5 flex-1">{children}</div>
+      <div className="mt-1.5 min-h-0 flex-1">{children}</div>
     </div>
   );
 }
 
 function RadarEmpty({ text }: { text: string }) {
-  return <p className="py-3 text-xs leading-relaxed text-ink-faint">{text}</p>;
+  return (
+    <div className="flex h-full items-center justify-center px-2 py-3 text-center">
+      <p className="max-w-[24ch] text-xs leading-relaxed text-ink-faint">{text}</p>
+    </div>
+  );
 }

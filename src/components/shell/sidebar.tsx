@@ -172,7 +172,7 @@ export function Sidebar({
                   href={item.href}
                   aria-label={item.label}
                   className={cn(
-                    "flex size-10 items-center justify-center rounded-xl transition-all duration-150 tap-highlight-none",
+                    "group flex size-10 items-center justify-center rounded-xl transition-all duration-150 tap-highlight-none",
                     active
                       ? "bg-ink text-cream shadow-sm"
                       : "text-ink-soft hover:bg-sand-soft hover:text-ink",
@@ -194,12 +194,7 @@ export function Sidebar({
                   : "text-ink-soft hover:bg-sand-soft hover:text-ink",
               )}
             >
-              <item.icon
-                className={cn(
-                  "size-[18px] shrink-0 transition-transform duration-150",
-                  !active && "group-hover:scale-110",
-                )}
-              />
+              <item.icon className="size-[18px] shrink-0" />
               {item.label}
             </Link>
           );
@@ -214,7 +209,7 @@ export function Sidebar({
               href={NAV_CONFIG.href}
               aria-label={NAV_CONFIG.label}
               className={cn(
-                "flex size-10 items-center justify-center rounded-xl transition-colors tap-highlight-none",
+                "group flex size-10 items-center justify-center rounded-xl transition-colors tap-highlight-none",
                 configActive
                   ? "bg-ink text-cream shadow-sm"
                   : "text-ink-soft hover:bg-sand-soft hover:text-ink",
@@ -244,7 +239,7 @@ export function Sidebar({
           <Link
             href={NAV_CONFIG.href}
             className={cn(
-              "flex items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl px-3 py-2.5 text-sm font-medium transition-colors tap-highlight-none",
+              "group flex items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl px-3 py-2.5 text-sm font-medium transition-colors tap-highlight-none",
               configActive
                 ? "bg-ink text-cream shadow-sm"
                 : "text-ink-soft hover:bg-sand-soft hover:text-ink",

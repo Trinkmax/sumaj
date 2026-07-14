@@ -394,7 +394,7 @@ export default async function InicioPage() {
           />
         </div>
 
-        <div className="mt-4 grid gap-4 md:mt-5 lg:grid-cols-12 lg:items-start lg:gap-5">
+        <div className="mt-4 grid gap-4 md:mt-5 lg:grid-cols-12 lg:items-stretch lg:gap-5">
           <div className="lg:col-span-5">
             <TodaySection
               newLeads={newLeads}
@@ -404,7 +404,7 @@ export default async function InicioPage() {
               agenda={agenda}
             />
           </div>
-          <div className="space-y-4 lg:col-span-7 lg:space-y-5">
+          <div className="lg:col-span-7">
             <InsightsCard
               chart={chart}
               currency={currency}
@@ -415,13 +415,16 @@ export default async function InicioPage() {
               }
               pautaSlot={<CampaignTable rows={campaigns} />}
             />
-            <RadarSection
-              departures={departures}
-              documents={documents}
-              birthdays={birthdays}
-              funnel={funnel}
-            />
           </div>
+        </div>
+
+        <div className="mt-4 md:mt-5">
+          <RadarSection
+            departures={departures}
+            documents={documents}
+            birthdays={birthdays}
+            funnel={funnel}
+          />
         </div>
       </div>
     </div>

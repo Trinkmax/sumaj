@@ -61,7 +61,7 @@ export function InsightsCard({
         : "Campañas del mes";
 
   return (
-    <section className="card flex flex-col p-4">
+    <section className="card flex h-full min-h-[440px] flex-col p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium text-ink-soft">{title}</p>
         <Segmented value={tab} onChange={setTab} options={options} />
@@ -69,10 +69,12 @@ export function InsightsCard({
 
       <div className="mt-3 min-h-0 flex-1">
         {tab === "ventas" && (
-          <div className="animate-fade-in">
-            <SalesChart data={chart} currency={currency} compare={compare} />
+          <div className="flex h-full flex-col animate-fade-in">
+            <div className="min-h-0 flex-1">
+              <SalesChart data={chart} currency={currency} compare={compare} />
+            </div>
             {compare && (
-              <div className="mt-2 flex items-center gap-4 text-[11px] text-ink-faint">
+              <div className="mt-2 flex shrink-0 items-center gap-4 text-[11px] text-ink-faint">
                 <span className="inline-flex items-center gap-1.5">
                   <span className="size-2 rounded-full bg-brand-500" />
                   Mis ventas
@@ -86,9 +88,11 @@ export function InsightsCard({
           </div>
         )}
         {tab === "equipo" && equipoSlot && (
-          <div className="animate-fade-in">{equipoSlot}</div>
+          <div className="h-full overflow-y-auto pr-1 animate-fade-in">{equipoSlot}</div>
         )}
-        {tab === "pauta" && <div className="animate-fade-in">{pautaSlot}</div>}
+        {tab === "pauta" && (
+          <div className="h-full overflow-y-auto pr-1 animate-fade-in">{pautaSlot}</div>
+        )}
       </div>
     </section>
   );

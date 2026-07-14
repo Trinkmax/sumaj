@@ -27,7 +27,7 @@ export function SalesChart({
   compare: boolean;
 }) {
   return (
-    <div className="h-40 w-full md:h-44">
+    <div className="h-full min-h-[200px] w-full">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 4, left: 4, bottom: 0 }} barGap={3}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-line)" vertical={false} />

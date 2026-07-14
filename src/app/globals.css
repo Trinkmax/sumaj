@@ -492,6 +492,62 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 .stagger-children > *:nth-child(13) { animation-delay: 420ms; }
 .stagger-children > *:nth-child(14) { animation-delay: 455ms; }
 
+/* ── micro-animaciones de navegación (iconos de shell/nav-icons.tsx) ──
+   Se disparan con el hover del .group que envuelve cada item de nav. */
+.ni-door,
+.ni-line,
+.ni-dot,
+.ni-user-back,
+.ni-coin {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.ni-flap {
+  transform-box: view-box;
+  transform-origin: 4px 19px;
+}
+
+@keyframes ni-door-peek {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.6px); }
+}
+.group:hover .ni-door { animation: ni-door-peek 0.45s ease; }
+
+@keyframes ni-dot-bounce {
+  0%, 100% { transform: translateY(0); opacity: 0.6; }
+  40% { transform: translateY(-1.7px); opacity: 1; }
+}
+.group:hover .ni-dot-1 { animation: ni-dot-bounce 0.7s ease infinite; }
+.group:hover .ni-dot-2 { animation: ni-dot-bounce 0.7s ease 0.12s infinite; }
+.group:hover .ni-dot-3 { animation: ni-dot-bounce 0.7s ease 0.24s infinite; }
+
+@keyframes ni-line-slide {
+  0%, 100% { transform: translateX(0); }
+  35% { transform: translateX(1.7px); }
+  70% { transform: translateX(-1px); }
+}
+.group:hover .ni-line-1 { animation: ni-line-slide 0.55s ease; }
+.group:hover .ni-line-2 { animation: ni-line-slide 0.55s ease 0.08s; }
+.group:hover .ni-line-3 { animation: ni-line-slide 0.55s ease 0.16s; }
+
+@keyframes ni-user-peek {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(-1.5px); }
+}
+.group:hover .ni-user-back { animation: ni-user-peek 0.5s ease; }
+
+@keyframes ni-flap-open {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-5deg); }
+}
+.group:hover .ni-flap { animation: ni-flap-open 0.5s ease; }
+
+@keyframes ni-coin-pop {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.4); }
+}
+.group:hover .ni-coin { animation: ni-coin-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
 /* reduced motion: todo instantáneo, nada se rompe */
 @media (prefers-reduced-motion: reduce) {
   *,

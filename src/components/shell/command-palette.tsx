@@ -6,7 +6,6 @@ import {
   Search,
   SearchX,
   Home,
-  KanbanSquare,
   MessagesSquare,
   ReceiptText,
   Users,
@@ -60,7 +59,7 @@ export function openCommandPalette(): void {
 /* ── accesos rápidos (input vacío) ── */
 const QUICK_LINKS: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/inicio", label: "Ir a Inicio", icon: Home },
-  { href: "/crm", label: "Ir al CRM", icon: KanbanSquare },
+  { href: "/crm", label: "Ir al CRM", icon: MessagesSquare },
   { href: "/crm?vista=chats", label: "Ir a Chats", icon: MessagesSquare },
   { href: "/presupuestos", label: "Ir a Presupuestos", icon: ReceiptText },
   { href: "/clientes", label: "Ir a Clientes", icon: Users },

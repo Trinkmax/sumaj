@@ -257,9 +257,11 @@ export function KanbanBoard({
       >
         <div
           className={cn(
-            "flex gap-3 overflow-x-auto px-4 pb-2 md:px-6",
+            "flex gap-3 overflow-x-auto px-4 pb-3 md:px-6",
             "snap-x snap-mandatory scroll-px-4 md:snap-none",
-            "h-[max(440px,calc(100dvh-350px))] md:h-[max(460px,calc(100dvh-250px))]",
+            // llena todo el alto disponible: barra del CRM (57px) + pt-3 (12px);
+            // el -mb-8 absorbe el padding inferior del main en desktop
+            "h-[max(440px,calc(100dvh-280px))] md:-mb-8 md:h-[calc(100dvh-69px)]",
           )}
         >
           {STAGES.map((meta) => (
@@ -346,23 +348,15 @@ function KanbanColumn({
       <div className={cn("h-1 shrink-0", meta.headerBar, muted && "opacity-50")} />
       <header className="shrink-0 px-3 pb-2 pt-2.5">
         <div className="flex items-center justify-between">
-          <div className="flex min-w-0 items-center gap-2">
-            <span
-              className={cn(
-                "flex size-5 shrink-0 items-center justify-center rounded-md border",
-                meta.chip,
-              )}
-            >
-              <StageIcon className="size-3" strokeWidth={2} />
-            </span>
-            <h2 className="truncate text-[13px] font-semibold text-ink">{meta.label}</h2>
-          </div>
+          <h2 className="min-w-0 truncate text-[13px] font-semibold text-ink">
+            {meta.label}
+          </h2>
           <span className="rounded-full bg-paper px-2 py-0.5 text-[11px] font-semibold tabular-nums text-ink-soft shadow-sm">
             {leads.length}
           </span>
         </div>
         {budget && (
-          <p className="mt-1 truncate pl-7 text-[10px] font-medium tabular-nums text-ink-faint">
+          <p className="mt-1 truncate text-[10px] font-medium tabular-nums text-ink-faint">
             {budget} est.
           </p>
         )}

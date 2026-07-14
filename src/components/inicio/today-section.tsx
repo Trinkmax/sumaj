@@ -79,14 +79,14 @@ export function TodaySection({
             icon={Sun}
             title="Día despejado"
             description="No tenés seguimientos pendientes. ¿Un toque a los presupuestados?"
-            className="flex-1 py-6"
+            className="h-full flex-1 py-6"
           />
         ) : (
-          <div className="card overflow-hidden">
-            <p className="border-b border-line px-3.5 py-2 text-[13px] font-medium text-ink-soft">
+          <div className="card flex min-h-0 flex-1 flex-col overflow-hidden">
+            <p className="shrink-0 border-b border-line px-3.5 py-2 text-[13px] font-medium text-ink-soft">
               Agenda de hoy
             </p>
-            <div className="divide-y divide-line stagger-children">
+            <div className="min-h-0 flex-1 divide-y divide-line overflow-y-auto stagger-children">
               {agenda.slice(0, 5).map((item) => {
                 const due = fmtDue(item.nextActionAt);
                 return (
