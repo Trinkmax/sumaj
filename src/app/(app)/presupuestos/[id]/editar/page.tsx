@@ -8,6 +8,7 @@ import {
   type BuilderInitialQuote,
   type BuilderSupplier,
 } from "@/components/quotes/quote-builder";
+import { DEFAULT_QUOTE_FEES, DEFAULT_SELLER_MARKUP_PCT } from "@/lib/domain";
 import type { AgencySettings, QuoteTheme } from "@/lib/types";
 
 export const metadata = { title: "Editar presupuesto" };
@@ -18,13 +19,13 @@ export default async function EditarPresupuestoPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { member, agency } = await requireMember();
+  const { member, agency, isAdmin } = await requireMember();
   const supabase = await createClient();
 
   const [quoteRes, suppliersRes, contactsRes] = await Promise.all([
     supabase
       .from("quotes")
-      .select("*, items:quote_items(*)")
+      .select("*, items:quote_items(*), options:quote_options!quote_options_quote_id_fkey(*)")
       .eq("id", id)
       .maybeSingle(),
     supabase
@@ -73,7 +74,12 @@ export default async function EditarPresupuestoPage({
     title: quote.title,
     trip_date_from: quote.trip_date_from,
     trip_date_to: quote.trip_date_to,
-    pax: quote.pax,
+    pax_adults: quote.pax_adults || Math.max(1, quote.pax),
+    pax_children: quote.pax_children,
+    pax_infants: quote.pax_infants,
+    children_ages: Array.isArray(quote.children_ages)
+      ? (quote.children_ages as number[]).map((a) => Number(a) || 0)
+      : [],
     currency: quote.currency,
     valid_until: quote.valid_until,
     markup_type: quote.markup_type,
@@ -82,10 +88,18 @@ export default async function EditarPresupuestoPage({
     notes: quote.notes,
     internal_notes: quote.internal_notes,
     theme: (quote.theme ?? {}) as QuoteTheme,
+    options: (quote.options ?? []).map((o) => ({
+      id: o.id,
+      name: o.name,
+      subtitle: o.subtitle,
+      is_recommended: o.is_recommended,
+      position: o.position,
+    })),
     items: quote.items.map((i) => ({
       type: i.type,
       description: i.description,
       supplier_id: i.supplier_id,
+      option_id: i.option_id,
       cost: Number(i.cost),
       gross: i.gross != null ? Number(i.gross) : null,
       commission_pct: Number(i.commission_pct),
@@ -108,6 +122,11 @@ export default async function EditarPresupuestoPage({
         defaultTheme={settings.quote_theme ?? { color: "sand", font: "editorial" }}
         agency={{ name: agency.name, logoUrl: agency.logo_url, phone: agency.phone }}
         sellerName={member.display_name}
+        isAdmin={isAdmin}
+        fees={settings.quote_fees ?? DEFAULT_QUOTE_FEES}
+        sellerCommissionPct={
+          settings.quote_seller_commission_pct ?? DEFAULT_SELLER_MARKUP_PCT
+        }
       />
     </>
   );

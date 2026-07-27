@@ -4,8 +4,18 @@ import { notFound } from "next/navigation";
 import { createAnonClient } from "@/lib/supabase/server";
 import { QuoteSheet, type QuoteSheetData } from "@/components/quotes/quote-sheet";
 import { WhatsAppIcon } from "@/components/quotes/wa-icon";
-import { waLink } from "@/lib/domain";
+import { INFANT_FACTOR, round2, waLink, type QuotePax } from "@/lib/domain";
 import type { ServiceType } from "@/lib/types";
+
+type QuotePublicOption = {
+  id: string;
+  name: string;
+  subtitle: string | null;
+  is_recommended: boolean;
+  total_price: number;
+  per_person: number;
+  items: { type: ServiceType; description: string }[];
+};
 
 type QuotePublic = {
   code: string;
@@ -13,6 +23,10 @@ type QuotePublic = {
   destination: string;
   currency: string;
   pax: number;
+  pax_adults: number;
+  pax_children: number;
+  pax_infants: number;
+  children_ages: number[] | null;
   nights: number | null;
   trip_date_from: string | null;
   trip_date_to: string | null;
@@ -29,6 +43,7 @@ type QuotePublic = {
   agency: { name: string; logo_url: string | null; phone: string | null; email: string | null };
   seller_name: string | null;
   items: { type: ServiceType; description: string }[];
+  options: QuotePublicOption[] | null;
 };
 
 // cache(): un solo fetch por request compartido entre generateMetadata y la página
@@ -73,18 +88,30 @@ export default async function PresupuestoPublicoPage({
   const quote = await fetchQuote(token);
   if (!quote) notFound();
 
+  const pax: QuotePax = {
+    adults: quote.pax_adults ?? Math.max(1, quote.pax),
+    children: quote.pax_children ?? 0,
+    infants: quote.pax_infants ?? 0,
+    childrenAges: (quote.children_ages ?? []).map((a) => Number(a) || 0),
+  };
+  const options = quote.options ?? [];
+  const headline = options.find((o) => o.is_recommended) ?? options[0] ?? null;
+  const perPerson = Number(headline ? headline.per_person : quote.per_person);
+  const totalPrice = Number(headline ? headline.total_price : quote.total_price);
+
   const data: QuoteSheetData = {
     code: quote.code,
     title: quote.title,
     destination: quote.destination,
     currency: quote.currency,
-    pax: quote.pax,
+    pax,
     nights: quote.nights,
     tripDateFrom: quote.trip_date_from,
     tripDateTo: quote.trip_date_to,
     validUntil: quote.valid_until,
-    totalPrice: Number(quote.total_price),
-    perPerson: Number(quote.per_person),
+    totalPrice,
+    perPerson,
+    perInfant: round2(perPerson * INFANT_FACTOR),
     discount: Number(quote.discount),
     notes: quote.notes,
     createdAt: quote.created_at,
@@ -95,6 +122,15 @@ export default async function PresupuestoPublicoPage({
     agencyPhone: quote.agency.phone,
     sellerName: quote.seller_name,
     items: quote.items,
+    options: options.map((o) => ({
+      name: o.name,
+      subtitle: o.subtitle,
+      isRecommended: o.is_recommended,
+      totalPrice: Number(o.total_price),
+      perPerson: Number(o.per_person),
+      perInfant: round2(Number(o.per_person) * INFANT_FACTOR),
+      items: o.items ?? [],
+    })),
     theme: quote.theme ?? {},
   };
 

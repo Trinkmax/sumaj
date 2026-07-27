@@ -7,6 +7,7 @@ import {
   type BuilderLead,
   type BuilderSupplier,
 } from "@/components/quotes/quote-builder";
+import { DEFAULT_QUOTE_FEES, DEFAULT_SELLER_MARKUP_PCT } from "@/lib/domain";
 import type { AgencySettings } from "@/lib/types";
 
 export const metadata = { title: "Nuevo presupuesto" };
@@ -17,7 +18,7 @@ export default async function NuevoPresupuestoPage({
   searchParams: Promise<{ lead?: string }>;
 }) {
   const { lead: leadId } = await searchParams;
-  const { member, agency } = await requireMember();
+  const { member, agency, isAdmin } = await requireMember();
   const supabase = await createClient();
 
   const [suppliersRes, contactsRes, leadRes] = await Promise.all([
@@ -85,6 +86,11 @@ export default async function NuevoPresupuestoPage({
         defaultTheme={settings.quote_theme ?? { color: "sand", font: "editorial" }}
         agency={{ name: agency.name, logoUrl: agency.logo_url, phone: agency.phone }}
         sellerName={member.display_name}
+        isAdmin={isAdmin}
+        fees={settings.quote_fees ?? DEFAULT_QUOTE_FEES}
+        sellerCommissionPct={
+          settings.quote_seller_commission_pct ?? DEFAULT_SELLER_MARKUP_PCT
+        }
       />
     </>
   );

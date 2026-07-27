@@ -16,6 +16,7 @@ export type ServiceType = Enums<"service_type">;
 export type FileStatus = Enums<"file_status">;
 export type QuoteStatus = Enums<"quote_status">;
 export type PaymentMethod = Enums<"payment_method">;
+export type PaymentDirection = Enums<"payment_direction">;
 export type MemberRole = Enums<"member_role">;
 export type MessageDirection = Enums<"message_direction">;
 export type MessageStatus = Enums<"message_status">;
@@ -26,12 +27,23 @@ export type DocumentType = Enums<"document_type">;
 export type AgencySettings = {
   quote_theme: QuoteTheme;
   quote_saved_notes: string[];
+  /** fees que el cotizador le suma al bruto para llegar al final */
+  quote_fees: { aereo_pct: number; terrestre_pct: number };
+  /** % del markup que se lleva el vendedor (estimado en el presupuesto) */
+  quote_seller_commission_pct: number;
   whatsapp: {
     phone_number_id: string | null;
     display_number: string | null;
     connected: boolean;
   };
   usd_rate: number | null;
+};
+
+/** imagen adjunta a un servicio del file (voucher, comprobante de reserva) */
+export type ServiceImage = {
+  /** path dentro del bucket privado `attachments` */
+  path: string;
+  name: string;
 };
 
 export type QuoteTheme = {

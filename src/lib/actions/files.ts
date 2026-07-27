@@ -9,11 +9,14 @@ import {
   logActivity,
   type ActionResult,
 } from "@/lib/actions/core";
-import { FILE_STATUSES } from "@/lib/domain";
-import type { TablesUpdate } from "@/lib/types";
+import { COMMISSION_TYPES, FILE_STATUSES } from "@/lib/domain";
+import type { TablesInsert, TablesUpdate } from "@/lib/types";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const dateField = z.string().regex(DATE_RE).nullable().optional();
+
+/** jsonb de file_services.images — el cast evita pelear con el tipo Json generado */
+type ImagesColumn = TablesInsert<"file_services">["images"];
 
 const FILE_STATUS_KEYS = [
   "vendido",
@@ -36,6 +39,14 @@ const SERVICE_TYPE_KEYS = [
 ] as const;
 
 const DOCUMENT_TYPE_KEYS = ["dni", "pasaporte", "visa", "otro"] as const;
+
+const COMMISSION_TYPE_KEYS = ["utilidad_pct", "monto_fijo"] as const;
+
+/** imagen del servicio (voucher / comprobante) ya subida al bucket privado */
+const serviceImageSchema = z.object({
+  path: z.string().trim().min(1).max(400),
+  name: z.string().trim().max(160),
+});
 
 function revalidateFile(fileId: string) {
   revalidatePath("/files");
@@ -179,6 +190,69 @@ export async function updateFileStatus(
 }
 
 /* ───────────────────────────────────────────
+   Esquema de comisión del vendedor sobre esta venta.
+   · utilidad_pct → % sobre la utilidad del file (lo de siempre)
+   · monto_fijo   → monto plano por venta (enlatados: "Grupal Europa, USD 100")
+   Solo un admin de la agencia lo define.
+   ─────────────────────────────────────────── */
+const commissionSchema = z.object({
+  fileId: z.string().uuid(),
+  commissionType: z.enum(COMMISSION_TYPE_KEYS),
+  commissionPct: z.number().min(0).max(100),
+  commissionAmount: z.number().min(0).max(99_000_000),
+  commissionLabel: z.string().trim().max(40).nullable().optional(),
+});
+
+export async function updateFileCommission(
+  input: z.infer<typeof commissionSchema>,
+): Promise<ActionResult<null>> {
+  const parsed = commissionSchema.safeParse(input);
+  if (!parsed.success) return fail("Datos inválidos. Revisá el porcentaje y el monto.");
+  const { supabase, member, agency, isAdmin } = await requireAction();
+  if (!isAdmin) return fail("Esto lo maneja un admin de la agencia.");
+
+  const label = parsed.data.commissionLabel?.trim() || null;
+
+  const { data: file, error } = await supabase
+    .from("files")
+    .update({
+      commission_type: parsed.data.commissionType,
+      commission_pct: parsed.data.commissionPct,
+      commission_amount: parsed.data.commissionAmount,
+      commission_label: label,
+    })
+    .eq("id", parsed.data.fileId)
+    .select("id, code, currency, contact_id")
+    .single();
+
+  if (error || !file) return fail("No se pudo guardar la comisión.");
+
+  const detalle =
+    parsed.data.commissionType === "monto_fijo"
+      ? `${file.currency} ${parsed.data.commissionAmount}${label ? ` (${label})` : ""}`
+      : `${parsed.data.commissionPct}% de la utilidad`;
+
+  await logActivity({
+    agencyId: agency.id,
+    memberId: member.id,
+    contactId: file.contact_id,
+    fileId: file.id,
+    type: "sistema",
+    body: `Comisión del vendedor: ${COMMISSION_TYPES[parsed.data.commissionType].label} — ${detalle}`,
+    metadata: {
+      commission_type: parsed.data.commissionType,
+      commission_pct: parsed.data.commissionPct,
+      commission_amount: parsed.data.commissionAmount,
+      commission_label: label,
+    },
+  });
+
+  revalidateFile(parsed.data.fileId);
+  revalidatePath("/caja");
+  return succeed(null);
+}
+
+/* ───────────────────────────────────────────
    Servicios del file
    ─────────────────────────────────────────── */
 const serviceFields = {
@@ -188,6 +262,9 @@ const serviceFields = {
   reservationCode: z.string().trim().max(60).nullable().optional(),
   dateFrom: dateField,
   dateTo: dateField,
+  /** hasta cuándo hay tiempo de pagarle al proveedor: si se pasa, se cae la reserva */
+  deadlineDate: dateField,
+  images: z.array(serviceImageSchema).max(6).optional(),
   cost: z.number().min(0).max(99_000_000),
   price: z.number().min(0).max(99_000_000),
 };
@@ -220,6 +297,8 @@ export async function addService(
       reservation_code: parsed.data.reservationCode || null,
       date_from: parsed.data.dateFrom ?? null,
       date_to: parsed.data.dateTo ?? null,
+      deadline_date: parsed.data.deadlineDate ?? null,
+      images: (parsed.data.images ?? []) as unknown as ImagesColumn,
       cost: parsed.data.cost,
       price: parsed.data.price,
       position: (last?.position ?? 0) + 1,
@@ -246,18 +325,25 @@ export async function updateService(
   if (!parsed.success) return fail("Datos inválidos. Revisá la descripción y los montos.");
   const { supabase } = await requireAction();
 
+  const patch: TablesUpdate<"file_services"> = {
+    type: parsed.data.type,
+    description: parsed.data.description,
+    supplier_id: parsed.data.supplierId ?? null,
+    reservation_code: parsed.data.reservationCode || null,
+    date_from: parsed.data.dateFrom ?? null,
+    date_to: parsed.data.dateTo ?? null,
+    deadline_date: parsed.data.deadlineDate ?? null,
+    cost: parsed.data.cost,
+    price: parsed.data.price,
+  };
+  // si el caller no manda imágenes, no las tocamos (no las borra por omisión)
+  if (parsed.data.images !== undefined) {
+    patch.images = parsed.data.images as unknown as ImagesColumn;
+  }
+
   const { error } = await supabase
     .from("file_services")
-    .update({
-      type: parsed.data.type,
-      description: parsed.data.description,
-      supplier_id: parsed.data.supplierId ?? null,
-      reservation_code: parsed.data.reservationCode || null,
-      date_from: parsed.data.dateFrom ?? null,
-      date_to: parsed.data.dateTo ?? null,
-      cost: parsed.data.cost,
-      price: parsed.data.price,
-    })
+    .update(patch)
     .eq("id", parsed.data.serviceId);
 
   if (error) return fail("No se pudo guardar el servicio.");

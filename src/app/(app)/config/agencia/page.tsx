@@ -3,6 +3,7 @@ import { requireMember } from "@/lib/auth";
 import { PageHeader } from "@/components/shell/page-header";
 import { ConfigNav } from "@/components/config/config-nav";
 import { AgencyForm } from "@/components/config/agency-form";
+import { DEFAULT_QUOTE_FEES, DEFAULT_SELLER_MARKUP_PCT } from "@/lib/domain";
 import type { AgencySettings } from "@/lib/types";
 
 export default async function AgenciaPage() {
@@ -30,6 +31,13 @@ export default async function AgenciaPage() {
               color: settings.quote_theme?.color ?? "sand",
               font: settings.quote_theme?.font ?? "editorial",
             },
+            quote_fees: {
+              aereo_pct: settings.quote_fees?.aereo_pct ?? DEFAULT_QUOTE_FEES.aereo_pct,
+              terrestre_pct:
+                settings.quote_fees?.terrestre_pct ?? DEFAULT_QUOTE_FEES.terrestre_pct,
+            },
+            quote_seller_commission_pct:
+              settings.quote_seller_commission_pct ?? DEFAULT_SELLER_MARKUP_PCT,
           }}
         />
       </div>

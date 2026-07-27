@@ -1,11 +1,19 @@
 import {
+  ArrowDownToLine,
   ArrowRightLeft,
+  ArrowUpFromLine,
+  Baby,
   BadgeCheck,
   Banknote,
   BedDouble,
   Briefcase,
   Bus,
   CarFront,
+  HandCoins,
+  Percent,
+  RotateCcw,
+  User2,
+  Users2,
   CheckCircle2,
   CircleDollarSign,
   ClipboardList,
@@ -50,6 +58,7 @@ import type {
   FileStatus,
   LeadChannel,
   LeadStage,
+  PaymentDirection,
   PaymentMethod,
   QuoteStatus,
   ServiceType,
@@ -267,6 +276,80 @@ export const PAYMENT_METHODS: Record<
   otro: { label: "Otro", icon: Coins },
 };
 
+/* ───────────────────────────────────────────
+   Direcciones de movimiento de caja
+   (entra plata / sale plata; chips con tokens tone-*)
+   ─────────────────────────────────────────── */
+export const PAYMENT_DIRECTIONS: Record<
+  PaymentDirection,
+  { label: string; short: string; icon: LucideIcon; circle: string; sign: "+" | "−" }
+> = {
+  cobro: {
+    label: "Cobro",
+    short: "Cobro",
+    icon: ArrowDownToLine,
+    circle: "bg-money-tint text-money-text",
+    sign: "+",
+  },
+  pago_proveedor: {
+    label: "Pago a proveedor",
+    short: "Proveedor",
+    icon: ArrowUpFromLine,
+    circle: "bg-tone-orange-soft text-tone-orange-text",
+    sign: "−",
+  },
+  pago_comision: {
+    label: "Pago de comisión",
+    short: "Comisión",
+    icon: HandCoins,
+    circle: "bg-tone-violet-soft text-tone-violet-text",
+    sign: "−",
+  },
+  reembolso: {
+    label: "Reembolso",
+    short: "Reembolso",
+    icon: RotateCcw,
+    circle: "bg-tone-stone-soft text-tone-stone-text",
+    sign: "−",
+  },
+};
+
+/* ───────────────────────────────────────────
+   Esquema de comisión del vendedor sobre una venta.
+   · utilidad_pct → % sobre la utilidad del file (lo de siempre)
+   · monto_fijo   → monto plano por venta (enlatados: "Grupal Europa, USD 100")
+   ─────────────────────────────────────────── */
+export type CommissionType = "utilidad_pct" | "monto_fijo";
+
+export const COMMISSION_TYPES: Record<
+  CommissionType,
+  { label: string; short: string; icon: LucideIcon; hint: string }
+> = {
+  utilidad_pct: {
+    label: "% de la utilidad",
+    short: "Porcentaje",
+    icon: Percent,
+    hint: "Se calcula sobre la utilidad del file",
+  },
+  monto_fijo: {
+    label: "Monto fijo",
+    short: "Fija",
+    icon: Coins,
+    hint: "Un monto plano por venta, sin importar la utilidad",
+  },
+};
+
+/** Comisión del vendedor por una venta, según el esquema del file. */
+export function fileCommission(input: {
+  commission_type: string | null;
+  commission_pct: number;
+  commission_amount: number;
+  utility: number;
+}): number {
+  if (input.commission_type === "monto_fijo") return round2(input.commission_amount || 0);
+  return round2(((input.utility || 0) * (input.commission_pct || 0)) / 100);
+}
+
 export const ACTIVITY_TYPES: Record<ActivityType, { label: string; icon: LucideIcon }> = {
   nota: { label: "Nota", icon: StickyNote },
   llamada: { label: "Llamada", icon: Phone },
@@ -330,10 +413,100 @@ export const TAG_CATEGORIES = [
 ] as const;
 
 /* ───────────────────────────────────────────
+   Pasajeros del presupuesto.
+   El infante paga el 30% del precio por persona (70% menos).
+   Los menores pagan como un adulto: la edad se pide para la reserva.
+   ─────────────────────────────────────────── */
+export const INFANT_FACTOR = 0.3;
+
+export type QuotePax = {
+  adults: number;
+  children: number;
+  infants: number;
+  /** edades de los menores, en orden de carga */
+  childrenAges: number[];
+};
+
+export const EMPTY_PAX: QuotePax = { adults: 2, children: 0, infants: 0, childrenAges: [] };
+
+export const PAX_KINDS = [
+  {
+    key: "adults" as const,
+    label: "Adultos",
+    singular: "adulto",
+    icon: User2,
+    hint: null as string | null,
+  },
+  {
+    key: "children" as const,
+    label: "Menores",
+    singular: "menor",
+    icon: Users2,
+    hint: "Pedimos la edad de cada uno",
+  },
+  {
+    key: "infants" as const,
+    label: "Infantes",
+    singular: "infante",
+    icon: Baby,
+    hint: "Paga el 30% (70% menos)",
+  },
+];
+
+/** Cantidad real de personas que viajan. */
+export function paxCount(p: QuotePax): number {
+  return Math.max(0, p.adults) + Math.max(0, p.children) + Math.max(0, p.infants);
+}
+
+/** "Unidades de precio": el infante cuenta 0,3. Nunca menos de 1. */
+export function paxUnits(p: QuotePax): number {
+  const units =
+    Math.max(0, p.adults) + Math.max(0, p.children) + Math.max(0, p.infants) * INFANT_FACTOR;
+  return units > 0 ? round2(units) : 1;
+}
+
+/** "2 adultos · 1 menor (8) · 1 infante" */
+export function paxLabel(p: QuotePax, withAges = true): string {
+  const parts: string[] = [];
+  if (p.adults > 0) parts.push(`${p.adults} ${p.adults === 1 ? "adulto" : "adultos"}`);
+  if (p.children > 0) {
+    const ages = withAges && p.childrenAges.length > 0 ? ` (${p.childrenAges.join(", ")})` : "";
+    parts.push(`${p.children} ${p.children === 1 ? "menor" : "menores"}${ages}`);
+  }
+  if (p.infants > 0) parts.push(`${p.infants} ${p.infants === 1 ? "infante" : "infantes"}`);
+  return parts.join(" · ") || "1 pasajero";
+}
+
+/* ───────────────────────────────────────────
+   Fees automáticos del cotizador: se carga el BRUTO
+   y el FINAL sale solo (aéreos +2%, terrestres +4% por defecto).
+   ─────────────────────────────────────────── */
+export type QuoteFees = { aereo_pct: number; terrestre_pct: number };
+
+export const DEFAULT_QUOTE_FEES: QuoteFees = { aereo_pct: 2, terrestre_pct: 4 };
+
+/** % que se le suma al bruto según el grupo del servicio. */
+export function feePct(type: ServiceType, fees: QuoteFees = DEFAULT_QUOTE_FEES): number {
+  return type === "aereo" ? (fees.aereo_pct ?? 0) : (fees.terrestre_pct ?? 0);
+}
+
+/** Final (lo que se paga) a partir del bruto comisionable. */
+export function finalFromGross(
+  gross: number,
+  type: ServiceType,
+  fees: QuoteFees = DEFAULT_QUOTE_FEES,
+): number {
+  return round2((gross || 0) * (1 + feePct(type, fees) / 100));
+}
+
+/** % del markup que se lleva el vendedor (estimado que ve en el presupuesto). */
+export const DEFAULT_SELLER_MARKUP_PCT = 30;
+
+/* ───────────────────────────────────────────
    Matemática del cotizador — ÚNICA fuente de verdad.
    Replica la planilla "Cotizador Paquetes":
-   · cost (Final)  = lo que se paga al proveedor (con impuestos)
-   · gross (Bruto) = tarifa comisionable del mayorista
+   · gross (Bruto) = tarifa comisionable del mayorista (lo que se carga a mano)
+   · cost (Final)  = lo que se paga al proveedor = bruto + fee del grupo
    · comisión mayorista = gross × pct/100
    · Total Paquete = Σ cost
    · Precio Cliente = Total + markup − descuento
@@ -351,7 +524,7 @@ export type QuoteCalcInput = {
   markup_type: "monto" | "porcentaje";
   markup_value: number;
   discount: number;
-  pax: number;
+  pax: QuotePax;
 };
 
 export type QuoteTotals = {
@@ -360,7 +533,11 @@ export type QuoteTotals = {
   markupPct: number; // % sobre el total
   discount: number;
   totalPrice: number; // Precio Cliente
-  perPerson: number; // Por persona
+  perPerson: number; // Por adulto (protagonista de la interfaz)
+  perChild: number; // Por menor (hoy = adulto)
+  perInfant: number; // Por infante (30%)
+  paxCount: number;
+  paxUnits: number;
   supplierCommission: number; // Σ comisión mayorista
   commissionTotal: number; // comisión mayorista + markup − descuento
   byGroup: { aereos: number; terrestres: number }; // costos por grupo (como la planilla)
@@ -375,7 +552,9 @@ export function computeQuoteTotals(input: QuoteCalcInput): QuoteTotals {
       : round2(input.markup_value || 0);
   const discount = round2(input.discount || 0);
   const totalPrice = round2(totalCost + markupAmount - discount);
-  const pax = Math.max(1, input.pax || 1);
+
+  const units = paxUnits(input.pax);
+  const perPerson = round2(totalPrice / units);
 
   const supplierCommission = round2(
     input.items.reduce((acc, i) => acc + ((i.gross || 0) * (i.commission_pct || 0)) / 100, 0),
@@ -396,7 +575,11 @@ export function computeQuoteTotals(input: QuoteCalcInput): QuoteTotals {
     markupPct: totalCost > 0 ? round2((markupAmount / totalCost) * 100) : 0,
     discount,
     totalPrice,
-    perPerson: round2(totalPrice / pax),
+    perPerson,
+    perChild: perPerson,
+    perInfant: round2(perPerson * INFANT_FACTOR),
+    paxCount: paxCount(input.pax),
+    paxUnits: units,
     supplierCommission,
     commissionTotal: round2(supplierCommission + markupAmount - discount),
     byGroup: { aereos, terrestres: round2(totalCost - aereos) },
@@ -405,6 +588,50 @@ export function computeQuoteTotals(input: QuoteCalcInput): QuoteTotals {
       terrestres: round2(supplierCommission - commissionAereos),
     },
   };
+}
+
+/* ───────────────────────────────────────────
+   Opciones comparables dentro de un mismo presupuesto:
+   "con este hotel vale 10, con este otro 15".
+   Los ítems comunes (aéreo, traslados) entran en TODAS las opciones.
+   ─────────────────────────────────────────── */
+export type QuoteOptionInput = {
+  key: string;
+  name: string;
+  subtitle?: string | null;
+  isRecommended?: boolean;
+  items: QuoteItemInput[];
+};
+
+export type QuoteOptionTotals = {
+  key: string;
+  name: string;
+  subtitle: string | null;
+  isRecommended: boolean;
+  totals: QuoteTotals;
+};
+
+/** Totales de cada opción = ítems comunes + ítems propios de la opción. */
+export function computeOptionTotals(
+  common: QuoteItemInput[],
+  options: QuoteOptionInput[],
+  calc: Omit<QuoteCalcInput, "items">,
+): QuoteOptionTotals[] {
+  return options.map((o) => ({
+    key: o.key,
+    name: o.name,
+    subtitle: o.subtitle ?? null,
+    isRecommended: !!o.isRecommended,
+    totals: computeQuoteTotals({ ...calc, items: [...common, ...o.items] }),
+  }));
+}
+
+/** Comisión estimada del vendedor sobre el markup del presupuesto. */
+export function sellerMarkupCommission(
+  markupAmount: number,
+  pct: number = DEFAULT_SELLER_MARKUP_PCT,
+): number {
+  return round2((markupAmount * (pct || 0)) / 100);
 }
 
 export function round2(n: number): number {

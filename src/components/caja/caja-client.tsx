@@ -6,18 +6,20 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   AlertTriangle,
-  ArrowDownToLine,
   ArrowUpFromLine,
   Banknote,
   Calculator,
   Check,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Clock,
   HandCoins,
+  Hourglass,
   Link2,
   MessageCircle,
   PartyPopper,
-  RotateCcw,
+  Shuffle,
   Trash2,
   TrendingUp,
   Wallet,
@@ -27,13 +29,18 @@ import { Button } from "@/components/ui/button";
 import { Segmented, EmptyState, Tooltip, AnimatedNumber } from "@/components/ui/misc";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Avatar } from "@/components/ui/avatar";
-import { PAYMENT_METHODS, waLink } from "@/lib/domain";
-import { fmtMoney, fmtDate, fmtNumber } from "@/lib/format";
+import { COMMISSION_TYPES, PAYMENT_DIRECTIONS, PAYMENT_METHODS, waLink } from "@/lib/domain";
+import { fmtMoney, fmtDate, fmtNumber, daysUntil } from "@/lib/format";
 import { deletePayment } from "@/lib/actions/payments";
+import type { PaymentDirection } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { PaymentDialog } from "./payment-dialog";
 import { FilePickerDialog } from "./file-picker-dialog";
 import { SupplierPaymentDialog } from "./supplier-payment-dialog";
+import {
+  CommissionPaymentDialog,
+  type CommissionPreset,
+} from "./commission-payment-dialog";
 import type {
   CajaStats,
   CajaTab,
@@ -43,6 +50,7 @@ import type {
   Movement,
   MoneyByCurrency,
   PaymentFile,
+  SellerOption,
   SupplierOption,
 } from "./types";
 
@@ -96,15 +104,6 @@ function MoneyMulti({
   );
 }
 
-function daysUntil(dateStr: string | null): number | null {
-  if (!dateStr) return null;
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const target = new Date(y, m - 1, d);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.round((target.getTime() - today.getTime()) / 86400000);
-}
-
 function appUrl(): string {
   return (
     process.env.NEXT_PUBLIC_APP_URL ||
@@ -112,30 +111,12 @@ function appUrl(): string {
   );
 }
 
-/* dirección del movimiento → icono en círculo tonal + signo + color del monto */
-const DIRECTION_META: Record<
-  Movement["direction"],
-  { icon: LucideIcon; circle: string; sign: string; amount: string }
-> = {
-  cobro: {
-    icon: ArrowDownToLine,
-    circle: "bg-money-tint text-money-text",
-    sign: "+",
-    amount: "text-money-text",
-  },
-  pago_proveedor: {
-    icon: ArrowUpFromLine,
-    circle: "bg-tone-orange-soft text-tone-orange-text",
-    sign: "−",
-    amount: "text-ink",
-  },
-  reembolso: {
-    icon: RotateCcw,
-    circle: "bg-tone-stone-soft text-tone-stone-text",
-    sign: "−",
-    amount: "text-tone-stone-text",
-  },
-};
+/** color del monto según entre o salga plata */
+function amountClass(direction: PaymentDirection): string {
+  if (direction === "cobro") return "text-money-text";
+  if (direction === "reembolso") return "text-tone-stone-text";
+  return "text-ink";
+}
 
 /* ── stat tile: número grande que cuenta + icono en círculo tonal ── */
 function StatTile({
@@ -144,6 +125,7 @@ function StatTile({
   label,
   amounts,
   numberClass,
+  compact = false,
   className,
 }: {
   icon: LucideIcon;
@@ -151,6 +133,8 @@ function StatTile({
   label: string;
   amounts: MoneyByCurrency;
   numberClass: string;
+  /** para grillas de 4 en mobile: círculo y número más chicos, la plata no se corta */
+  compact?: boolean;
   className?: string;
 }) {
   const entries = moneyEntries(amounts);
@@ -158,14 +142,21 @@ function StatTile({
   const rest = entries.slice(1);
   const isInt = Math.abs(val % 1) <= 0.004;
   return (
-    <div className={cn("card flex items-center gap-3.5 p-4", className)}>
+    <div
+      className={cn(
+        "card flex items-center gap-3.5 p-4",
+        compact && "gap-2.5 p-3 md:gap-3.5 md:p-4",
+        className,
+      )}
+    >
       <div
         className={cn(
           "flex size-11 shrink-0 items-center justify-center rounded-full",
+          compact && "size-9 md:size-11",
           circle,
         )}
       >
-        <Icon className="size-5" strokeWidth={1.9} />
+        <Icon className={cn("size-5", compact && "size-4.5 md:size-5")} strokeWidth={1.9} />
       </div>
       <div className="min-w-0">
         <p className="text-xs text-ink-faint">{label}</p>
@@ -175,6 +166,7 @@ function StatTile({
           format={(n) => fmtMoney(isInt ? Math.round(n) : n, cur)}
           className={cn(
             "block truncate font-display text-xl font-semibold md:text-2xl",
+            compact && "text-lg md:text-2xl",
             numberClass,
           )}
         />
@@ -185,6 +177,40 @@ function StatTile({
         ))}
       </div>
     </div>
+  );
+}
+
+/** chip que explica de dónde sale la comisión del vendedor */
+function SchemeChip({ row }: { row: CommissionRow }) {
+  if (row.filesCount === 0) {
+    return <span className="text-ink-faint">—</span>;
+  }
+  const mixed = row.scheme.fixedFiles > 0 && row.scheme.pctFiles > 0;
+  const Icon = mixed
+    ? Shuffle
+    : row.scheme.fixedFiles > 0
+      ? COMMISSION_TYPES.monto_fijo.icon
+      : COMMISSION_TYPES.utilidad_pct.icon;
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-line bg-sand-soft px-2 py-0.5 text-[11px] font-medium text-ink-soft">
+      <Icon className="size-3" strokeWidth={2} aria-hidden />
+      {row.schemeLabel}
+    </span>
+  );
+}
+
+/** "Al día": el vendedor no tiene nada pendiente */
+function SettledChip({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-money-tint-line bg-money-tint px-2.5 py-1 text-xs font-medium text-money-text",
+        className,
+      )}
+    >
+      <Check className="size-3.5" strokeWidth={2.5} aria-hidden />
+      Al día
+    </span>
   );
 }
 
@@ -199,6 +225,7 @@ export function CajaClient({
   debtors,
   commissions,
   suppliers,
+  sellers,
   fileOptions,
   isAdmin,
 }: {
@@ -210,6 +237,7 @@ export function CajaClient({
   debtors: DebtorFile[];
   commissions: CommissionRow[];
   suppliers: SupplierOption[];
+  sellers: SellerOption[];
   fileOptions: FileOption[];
   isAdmin: boolean;
 }) {
@@ -217,6 +245,10 @@ export function CajaClient({
   const [tab, setTab] = React.useState<CajaTab>(initialTab);
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [supplierOpen, setSupplierOpen] = React.useState(false);
+  const [commissionOpen, setCommissionOpen] = React.useState(false);
+  const [commissionPreset, setCommissionPreset] = React.useState<CommissionPreset | null>(
+    null,
+  );
   const [paymentFile, setPaymentFile] = React.useState<PaymentFile | null>(null);
   const [paymentOpen, setPaymentOpen] = React.useState(false);
   const [toDelete, setToDelete] = React.useState<Movement | null>(null);
@@ -255,6 +287,22 @@ export function CajaClient({
     setPaymentOpen(true);
   }
 
+  /** sin fila: liquidación libre · con fila: vendedor + pendiente precargados */
+  function openCommission(row?: CommissionRow) {
+    if (row) {
+      const [cur, amt] = moneyEntries(row.pending)[0] ?? (["USD", 0] as [string, number]);
+      setCommissionPreset({
+        memberId: row.memberId,
+        name: row.name,
+        amount: amt,
+        currency: cur,
+      });
+    } else {
+      setCommissionPreset(null);
+    }
+    setCommissionOpen(true);
+  }
+
   async function copyReceipt(m: Movement) {
     try {
       await navigator.clipboard.writeText(`${appUrl()}/r/${m.receipt_token}`);
@@ -291,6 +339,18 @@ export function CajaClient({
   const visibleMovements = movements.filter((m) => !hidden.has(m.id));
   const totalReceivable = moneyEntries(stats.receivable);
   const hasReceivable = totalReceivable.length > 0;
+
+  // lo que falta liquidar en el período (suma de las filas visibles)
+  const commissionsPending = React.useMemo(() => {
+    const acc: MoneyByCurrency = {};
+    for (const c of commissions) {
+      for (const [cur, v] of Object.entries(c.pending)) {
+        acc[cur] = Math.round(((acc[cur] ?? 0) + v) * 100) / 100;
+      }
+    }
+    return acc;
+  }, [commissions]);
+  const hasPendingCommissions = moneyEntries(commissionsPending).length > 0;
 
   // ── filtro de período: Segmented (Este mes / Mes pasado / mes navegado) ──
   const nowKey = currentMonthKey();
@@ -345,7 +405,7 @@ export function CajaClient({
           numberClass="text-ink"
         />
         <StatTile
-          icon={HandCoins}
+          icon={Hourglass}
           circle="bg-tone-amber-soft text-tone-amber-text"
           label="Por cobrar total"
           amounts={stats.receivable}
@@ -364,14 +424,38 @@ export function CajaClient({
           value={tab}
           onChange={changeTab}
         />
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={() => setSupplierOpen(true)}>
+        <div className="flex w-full items-center gap-2 md:w-auto">
+          {isAdmin && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-11 flex-1 md:h-8 md:flex-none"
+              onClick={() => openCommission()}
+            >
+              <HandCoins />
+              <span className="min-w-0 truncate md:hidden">Comisión</span>
+              <span className="hidden md:inline">Pagar comisión</span>
+            </Button>
+          )}
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-11 flex-1 md:h-8 md:flex-none"
+            onClick={() => setSupplierOpen(true)}
+          >
             <ArrowUpFromLine />
-            Pago a proveedor
+            <span className="min-w-0 truncate md:hidden">Proveedor</span>
+            <span className="hidden md:inline">Pago a proveedor</span>
           </Button>
-          <Button variant="success" size="sm" onClick={() => setPickerOpen(true)}>
+          <Button
+            variant="success"
+            size="sm"
+            className="h-11 flex-1 md:h-8 md:flex-none"
+            onClick={() => setPickerOpen(true)}
+          >
             <Banknote />
-            Registrar cobro
+            <span className="min-w-0 truncate md:hidden">Cobro</span>
+            <span className="hidden md:inline">Registrar cobro</span>
           </Button>
         </div>
       </div>
@@ -398,14 +482,36 @@ export function CajaClient({
             )}
           >
             {visibleMovements.map((m) => {
-              const meta = DIRECTION_META[m.direction];
+              const meta = PAYMENT_DIRECTIONS[m.direction];
               const Icon = meta.icon;
               const MethodIcon = PAYMENT_METHODS[m.method].icon;
               const isCross = m.currency !== m.file_currency;
-              const who =
-                m.direction === "pago_proveedor"
-                  ? m.supplier_name ?? "Proveedor"
-                  : m.contact_name ?? "Cliente";
+              const isCommission = m.direction === "pago_comision";
+              const who = isCommission
+                ? (m.member_name ?? "Vendedor")
+                : m.direction === "pago_proveedor"
+                  ? (m.supplier_name ?? "Proveedor")
+                  : (m.contact_name ?? "Cliente");
+              // prefijo del subtítulo: "Comisión" y/o el file, separados por ·
+              const lead: React.ReactNode[] = [];
+              if (isCommission) {
+                lead.push(
+                  <span key="tipo" className="shrink-0 font-medium text-ink-soft">
+                    Comisión
+                  </span>,
+                );
+              }
+              if (m.file_id && m.file_code) {
+                lead.push(
+                  <Link
+                    key="file"
+                    href={`/files/${m.file_id}`}
+                    className="shrink-0 font-mono font-medium text-ink-soft underline-offset-2 hover:text-brand-text hover:underline"
+                  >
+                    {m.file_code}
+                  </Link>,
+                );
+              }
               return (
                 <div key={m.id} className="flex min-h-16 items-center gap-3 px-3.5 py-2.5">
                   <div
@@ -419,13 +525,12 @@ export function CajaClient({
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-ink">{who}</p>
                     <p className="flex items-center gap-1.5 truncate text-xs text-ink-faint">
-                      <Link
-                        href={`/files/${m.file_id}`}
-                        className="shrink-0 font-mono font-medium text-ink-soft underline-offset-2 hover:text-brand-text hover:underline"
-                      >
-                        {m.file_code}
-                      </Link>
-                      <span aria-hidden>·</span>
+                      {lead.map((node, i) => (
+                        <React.Fragment key={i}>
+                          {node}
+                          <span aria-hidden>·</span>
+                        </React.Fragment>
+                      ))}
                       <MethodIcon className="size-3.5 shrink-0" strokeWidth={1.9} />
                       <span className="truncate">
                         {PAYMENT_METHODS[m.method].label} · {fmtDate(m.paid_at)}
@@ -437,7 +542,7 @@ export function CajaClient({
                       <span
                         className={cn(
                           "block text-sm font-semibold tabular-nums",
-                          meta.amount,
+                          amountClass(m.direction),
                         )}
                       >
                         {meta.sign} {fmtMoney(m.amount, m.currency)}
@@ -631,71 +736,211 @@ export function CajaClient({
           />
         ) : (
           <div className="flex flex-col gap-3 animate-fade-in">
-            {/* utilidad del período */}
-            <div className="card flex items-center gap-3.5 p-4">
-              <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-money-tint text-money-text">
-                <TrendingUp className="size-5" strokeWidth={1.9} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs text-ink-faint">Utilidad del período</p>
-                <MoneyMulti
-                  amounts={stats.utility}
-                  className="font-display text-xl font-semibold text-ink"
-                />
-              </div>
+            {/* cierre del período: lo que se generó, lo que se pagó, lo que falta */}
+            <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4 md:gap-3">
+              <StatTile
+                compact
+                icon={TrendingUp}
+                circle="bg-money-tint text-money-text"
+                label="Utilidad"
+                amounts={stats.utility}
+                numberClass="text-ink"
+              />
+              <StatTile
+                compact
+                icon={HandCoins}
+                circle="bg-tone-violet-soft text-tone-violet-text"
+                label="Comisiones"
+                amounts={stats.commissionsDue}
+                numberClass="text-ink"
+              />
+              <StatTile
+                compact
+                icon={CheckCircle2}
+                circle="bg-money-tint text-money-text"
+                label="Pagadas"
+                amounts={stats.commissionsPaid}
+                numberClass="text-money-text"
+              />
+              <StatTile
+                compact
+                icon={Clock}
+                circle="bg-tone-amber-soft text-tone-amber-text"
+                label="Pendiente"
+                amounts={commissionsPending}
+                numberClass={hasPendingCommissions ? "text-tone-amber-text" : "text-ink"}
+              />
             </div>
-            <div className="card overflow-x-auto">
-              <table className="w-full min-w-[560px] text-sm">
+
+            {/* ── mobile: una tarjeta por vendedor ── */}
+            <div
+              className={cn(
+                "flex flex-col gap-2.5 md:hidden",
+                commissions.length <= 14 && "stagger-children",
+              )}
+            >
+              {commissions.map((c) => {
+                const pending = moneyEntries(c.pending);
+                const paid = moneyEntries(c.paid);
+                const hasMoney = moneyEntries(c.commission).length > 0 || paid.length > 0;
+                return (
+                  <div key={c.memberId} className="card flex flex-col gap-3 p-3.5">
+                    <div className="flex items-start gap-3">
+                      <Avatar name={c.name} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-ink">{c.name}</p>
+                        <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-ink-faint">
+                          <span className="shrink-0">
+                            {c.filesCount} {c.filesCount === 1 ? "file" : "files"}
+                          </span>
+                          <span aria-hidden>·</span>
+                          <SchemeChip row={c} />
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[11px] text-ink-faint">Comisión</p>
+                        <MoneyMulti
+                          amounts={c.commission}
+                          className="font-display text-lg font-semibold text-ink"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 rounded-xl bg-sand-soft/70 px-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-[11px] text-ink-faint">Utilidad</p>
+                        <MoneyMulti
+                          amounts={c.utility}
+                          className="text-[13px] font-medium text-ink-soft"
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[11px] text-ink-faint">Pagado</p>
+                        <MoneyMulti
+                          amounts={c.paid}
+                          className={cn(
+                            "text-[13px] font-medium",
+                            paid.length > 0 ? "text-money-text" : "text-ink-faint",
+                          )}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[11px] text-ink-faint">Pendiente</p>
+                        <MoneyMulti
+                          amounts={c.pending}
+                          className={cn(
+                            "text-[13px] font-semibold",
+                            pending.length > 0 ? "text-tone-amber-text" : "text-ink-soft",
+                          )}
+                        />
+                      </div>
+                    </div>
+                    {isAdmin &&
+                      c.payable &&
+                      (pending.length > 0 ? (
+                        <Button
+                          variant="secondary"
+                          size="lg"
+                          className="w-full"
+                          onClick={() => openCommission(c)}
+                        >
+                          <HandCoins />
+                          Pagar {fmtMoney(pending[0][1], pending[0][0])}
+                        </Button>
+                      ) : hasMoney ? (
+                        <SettledChip className="self-center" />
+                      ) : null)}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ── desktop: tabla del cierre ── */}
+            <div className="card hidden overflow-x-auto md:block">
+              <table className="w-full min-w-[760px] text-sm">
                 <thead>
                   <tr className="border-b border-line text-left text-xs text-ink-faint">
                     <th className="px-4 py-3 font-medium">Vendedor</th>
                     <th className="px-3 py-3 text-right font-medium">Files</th>
-                    <th className="px-3 py-3 text-right font-medium">Venta</th>
                     <th className="px-3 py-3 text-right font-medium">Utilidad</th>
-                    <th className="px-3 py-3 text-right font-medium">%</th>
-                    <th className="px-4 py-3 text-right font-medium">Comisión</th>
+                    <th className="px-3 py-3 font-medium">Esquema</th>
+                    <th className="px-3 py-3 text-right font-medium">Comisión</th>
+                    <th className="px-3 py-3 text-right font-medium">Pagado</th>
+                    <th className="px-3 py-3 text-right font-medium">Pendiente</th>
+                    {isAdmin && <th className="px-4 py-3 text-right font-medium">Acción</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
-                  {commissions.map((c) => (
-                    <tr key={c.memberId}>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <Avatar name={c.name} className="size-8 text-[11px]" />
-                          <span className="font-medium text-ink">{c.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-ink-soft">
-                        {c.filesCount}
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        <MoneyMulti amounts={c.sale} className="text-ink-soft" />
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        <MoneyMulti amounts={c.utility} className="text-ink-soft" />
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-ink-soft">
-                        {c.pct !== null ? (
-                          `${c.pct}%`
-                        ) : (
-                          <Tooltip content="Según % de cada file">
-                            <span className="cursor-default">—</span>
-                          </Tooltip>
+                  {commissions.map((c) => {
+                    const pending = moneyEntries(c.pending);
+                    const paid = moneyEntries(c.paid);
+                    const hasMoney = moneyEntries(c.commission).length > 0 || paid.length > 0;
+                    return (
+                      <tr key={c.memberId}>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2.5">
+                            <Avatar name={c.name} className="size-8 text-[11px]" />
+                            <span className="font-medium text-ink">{c.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3 text-right tabular-nums text-ink-soft">
+                          {c.filesCount}
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <MoneyMulti amounts={c.utility} className="text-ink-soft" />
+                        </td>
+                        <td className="px-3 py-3">
+                          <SchemeChip row={c} />
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <MoneyMulti
+                            amounts={c.commission}
+                            className="font-semibold text-ink"
+                          />
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <MoneyMulti
+                            amounts={c.paid}
+                            className={paid.length > 0 ? "text-money-text" : "text-ink-faint"}
+                          />
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <MoneyMulti
+                            amounts={c.pending}
+                            className={cn(
+                              "font-semibold",
+                              pending.length > 0 ? "text-tone-amber-text" : "text-ink-faint",
+                            )}
+                          />
+                        </td>
+                        {isAdmin && (
+                          <td className="px-4 py-3 text-right">
+                            {c.payable &&
+                              (pending.length > 0 ? (
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => openCommission(c)}
+                                >
+                                  <HandCoins />
+                                  Pagar
+                                </Button>
+                              ) : hasMoney ? (
+                                <SettledChip />
+                              ) : null)}
+                          </td>
                         )}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <MoneyMulti
-                          amounts={c.commission}
-                          className="font-semibold text-money-text"
-                        />
-                      </td>
-                    </tr>
-                  ))}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
+
             <p className="px-1 text-xs text-ink-faint">
-              La comisión se calcula sobre la utilidad de los files creados en el mes.
+              La comisión sale del esquema de cada file: un porcentaje de la utilidad o un
+              monto fijo por venta. Se cuentan los files creados en el mes y lo que
+              liquidaste dentro de ese mismo mes.
+              {isAdmin ? " Cada pago que registres queda como movimiento de caja." : ""}
             </p>
           </div>
         ))}
@@ -713,6 +958,14 @@ export function CajaClient({
         suppliers={suppliers}
         files={fileOptions}
       />
+      {isAdmin && (
+        <CommissionPaymentDialog
+          open={commissionOpen}
+          onOpenChange={setCommissionOpen}
+          sellers={sellers}
+          preset={commissionPreset}
+        />
+      )}
       {paymentFile && (
         <PaymentDialog
           open={paymentOpen}
@@ -727,15 +980,21 @@ export function CajaClient({
           title="¿Eliminar este movimiento?"
           description={
             toDelete
-              ? `${fmtMoney(toDelete.amount, toDelete.currency)}${
-                  toDelete.receipt_code ? ` · recibo ${toDelete.receipt_code}` : ""
-                } · file ${toDelete.file_code}`
+              ? [
+                  fmtMoney(toDelete.amount, toDelete.currency),
+                  toDelete.receipt_code ? `recibo ${toDelete.receipt_code}` : null,
+                  toDelete.file_code ? `file ${toDelete.file_code}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
               : undefined
           }
           size="md"
         >
           <p className="text-sm text-ink-soft">
-            Se recalcula el saldo del file. Esta acción no se puede deshacer.
+            {toDelete?.file_id
+              ? "Se recalcula el saldo del file. Esta acción no se puede deshacer."
+              : "Esta acción no se puede deshacer."}
           </p>
           <div className="mt-5 flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setToDelete(null)}>

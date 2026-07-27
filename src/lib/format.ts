@@ -143,6 +143,36 @@ export function avatarColor(name: string | null | undefined): string {
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
 
+/** Días que faltan para una fecha YYYY-MM-DD (negativo = ya pasó). */
+export function daysUntil(date: string | null | undefined): number | null {
+  if (!date) return null;
+  const target = parseDate(date);
+  target.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86400000);
+}
+
+/** "vence hoy" / "faltan 3 días" / "venció hace 2 días" — para fechas de caída */
+export function fmtDeadline(date: string | null | undefined): {
+  label: string;
+  days: number;
+  tone: "red" | "amber" | "stone";
+} | null {
+  const days = daysUntil(date);
+  if (days === null) return null;
+  if (days < 0)
+    return {
+      label: days === -1 ? "venció ayer" : `venció hace ${Math.abs(days)} días`,
+      days,
+      tone: "red",
+    };
+  if (days === 0) return { label: "vence hoy", days, tone: "red" };
+  if (days === 1) return { label: "vence mañana", days, tone: "red" };
+  if (days <= 7) return { label: `faltan ${days} días`, days, tone: "amber" };
+  return { label: `vence ${fmtDate(date!)}`, days, tone: "stone" };
+}
+
 /** "7 noches" a partir de dos fechas */
 export function nightsBetween(from: string | null, to: string | null): number | null {
   if (!from || !to) return null;

@@ -4,19 +4,24 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
+  ArrowLeftRight,
   Bus,
   Check,
   ChevronDown,
   ChevronUp,
+  Columns2,
   MapPin,
   Palette,
   Plane,
   Plus,
+  RotateCcw,
   Search,
   Send,
+  Sparkles,
   StickyNote,
   Trash2,
   UserRound,
+  Users,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -29,16 +34,36 @@ import {
   PopoverContent,
   PopoverTrigger,
   Segmented,
+  Tooltip,
 } from "@/components/ui/misc";
+import {
+  Dropdown,
+  DropdownContent,
+  DropdownItem,
+  DropdownTrigger,
+} from "@/components/ui/dropdown";
 import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import {
+  computeOptionTotals,
   computeQuoteTotals,
+  DEFAULT_QUOTE_FEES,
+  DEFAULT_SELLER_MARKUP_PCT,
+  feePct,
+  finalFromGross,
+  INFANT_FACTOR,
+  PAX_KINDS,
+  paxCount,
+  paxLabel,
   QUOTE_COLORS,
   QUOTE_FONTS,
   round2,
+  sellerMarkupCommission,
   SERVICE_ORDER,
   SERVICE_TYPES,
+  type QuoteFees,
+  type QuoteOptionTotals,
+  type QuotePax,
   type QuoteTotals,
 } from "@/lib/domain";
 import { fmtMoney, fmtNumber, fmtPhone, nightsBetween } from "@/lib/format";
@@ -78,7 +103,10 @@ export type BuilderInitialQuote = {
   title: string | null;
   trip_date_from: string | null;
   trip_date_to: string | null;
-  pax: number;
+  pax_adults: number;
+  pax_children: number;
+  pax_infants: number;
+  children_ages: number[];
   currency: string;
   valid_until: string | null;
   markup_type: string;
@@ -87,10 +115,18 @@ export type BuilderInitialQuote = {
   notes: string | null;
   internal_notes: string | null;
   theme: { color?: string; font?: string };
+  options: {
+    id: string;
+    name: string;
+    subtitle: string | null;
+    is_recommended: boolean;
+    position: number;
+  }[];
   items: {
     type: ServiceType;
     description: string;
     supplier_id: string | null;
+    option_id: string | null;
     cost: number;
     gross: number | null;
     commission_pct: number;
@@ -114,31 +150,45 @@ type ItemRow = {
   type: ServiceType;
   description: string;
   supplierId: string;
-  cost: string;
+  /** Bruto: la tarifa comisionable, lo que se carga a mano */
   gross: string;
+  /** Final: sale solo del bruto + fee, salvo que lo pisen a mano */
+  cost: string;
+  costManual: boolean;
   commissionPct: string;
+  /** null = servicio común a todas las opciones */
+  optionKey: string | null;
   /** filas agregadas por el usuario entran con slide-up */
   fresh: boolean;
+};
+
+type OptionRow = {
+  key: string;
+  name: string;
+  subtitle: string;
+  recommended: boolean;
 };
 
 /* ───────────────────────── helpers ───────────────────────── */
 
 let rowSeq = 0;
-function newRow(type: ServiceType, fresh = false): ItemRow {
+function newRow(type: ServiceType, optionKey: string | null, fresh = false): ItemRow {
   return {
     key: `row-${++rowSeq}-${Date.now()}`,
     type,
     description: "",
     supplierId: "",
-    cost: "",
     gross: "",
-    commissionPct: type === "aereo" ? "0" : "",
+    cost: "",
+    costManual: false,
+    commissionPct: "",
+    optionKey,
     fresh,
   };
 }
 
 function parseNum(s: string): number {
-  const n = parseFloat(s.replace(",", "."));
+  const n = parseFloat(String(s).replace(",", "."));
   return isNaN(n) ? 0 : n;
 }
 
@@ -171,10 +221,20 @@ const ROW_PLACEHOLDERS: Record<ServiceType, string> = {
   otro: "Ej: Visado, seguro, upgrade…",
 };
 
-/* grillas tipo planilla (container queries del card de ítems) */
-const GRID_WITH_TYPE =
-  "@2xl:grid-cols-[118px_minmax(0,1fr)_132px_88px_88px_56px_28px]";
-const GRID_NO_TYPE = "@2xl:grid-cols-[minmax(0,1fr)_132px_88px_88px_56px_28px]";
+const OPTION_LETTERS = ["A", "B", "C", "D"];
+
+/* grillas tipo planilla (container queries del card de ítems).
+   Clases estáticas: Tailwind necesita verlas escritas tal cual. */
+const GRIDS = {
+  "type-com": "@2xl:grid-cols-[118px_minmax(0,1fr)_132px_92px_92px_56px_28px]",
+  "type-nocom": "@2xl:grid-cols-[118px_minmax(0,1fr)_132px_92px_92px_28px]",
+  "notype-com": "@2xl:grid-cols-[minmax(0,1fr)_132px_92px_92px_56px_28px]",
+  "notype-nocom": "@2xl:grid-cols-[minmax(0,1fr)_132px_92px_92px_28px]",
+} as const;
+
+function gridFor(withType: boolean, withCommission: boolean): string {
+  return GRIDS[`${withType ? "type" : "notype"}-${withCommission ? "com" : "nocom"}`];
+}
 
 /* ───────────────────────── componente ───────────────────────── */
 
@@ -187,6 +247,9 @@ export function QuoteBuilder({
   defaultTheme,
   agency,
   sellerName,
+  isAdmin,
+  fees = DEFAULT_QUOTE_FEES,
+  sellerCommissionPct = DEFAULT_SELLER_MARKUP_PCT,
   variant = "page",
   onSaved,
 }: {
@@ -198,6 +261,12 @@ export function QuoteBuilder({
   defaultTheme: { color: string; font: string };
   agency: { name: string; logoUrl: string | null; phone: string | null };
   sellerName: string;
+  /** la comisión solo la ve el administrador; el vendedor ve un estimado */
+  isAdmin: boolean;
+  /** fees que se le suman al bruto para llegar al final */
+  fees?: QuoteFees;
+  /** % del markup que se lleva el vendedor */
+  sellerCommissionPct?: number;
   /** "dialog": compacto, dentro de un popup — al guardar NO navega, llama onSaved */
   variant?: "page" | "dialog";
   onSaved?: (r: QuoteSavedResult) => void;
@@ -225,31 +294,71 @@ export function QuoteBuilder({
     initial?.trip_date_from ?? lead?.trip_date_from ?? "",
   );
   const [dateTo, setDateTo] = React.useState(initial?.trip_date_to ?? lead?.trip_date_to ?? "");
-  const [pax, setPax] = React.useState(
-    String(initial?.pax ?? (lead ? lead.pax_adults + lead.pax_children : 2)),
-  );
   const [currency, setCurrency] = React.useState<"USD" | "ARS">(
     initial?.currency === "ARS" ? "ARS" : "USD",
   );
   const [validUntil, setValidUntil] = React.useState(initial?.valid_until ?? isoPlusDays(15));
+
+  /* pasajeros: adultos / menores (con edad) / infantes */
+  const [pax, setPax] = React.useState<QuotePax>(() => {
+    if (initial) {
+      return {
+        adults: initial.pax_adults,
+        children: initial.pax_children,
+        infants: initial.pax_infants,
+        childrenAges: initial.children_ages ?? [],
+      };
+    }
+    if (lead) {
+      return {
+        adults: Math.max(1, lead.pax_adults),
+        children: lead.pax_children,
+        infants: 0,
+        childrenAges: Array.from({ length: lead.pax_children }, () => 0),
+      };
+    }
+    return { adults: 2, children: 0, infants: 0, childrenAges: [] };
+  });
+
+  /* opciones comparables (2 hoteles en un mismo presupuesto) */
+  const [options, setOptions] = React.useState<OptionRow[]>(() =>
+    (initial?.options ?? [])
+      .slice()
+      .sort((a, b) => a.position - b.position)
+      .map((o) => ({
+        key: o.id,
+        name: o.name,
+        subtitle: o.subtitle ?? "",
+        recommended: o.is_recommended,
+      })),
+  );
+  const [activeOption, setActiveOption] = React.useState<string | null>(
+    initial?.options?.[0]?.id ?? null,
+  );
 
   /* ítems */
   const [rows, setRows] = React.useState<ItemRow[]>(() => {
     if (initial && initial.items.length > 0) {
       return [...initial.items]
         .sort((a, b) => a.position - b.position)
-        .map((i) => ({
-          key: `row-${++rowSeq}`,
-          type: i.type,
-          description: i.description,
-          supplierId: i.supplier_id ?? "",
-          cost: i.cost ? String(i.cost) : "",
-          gross: i.gross != null ? String(i.gross) : "",
-          commissionPct: String(i.commission_pct ?? 0),
-          fresh: false,
-        }));
+        .map((i) => {
+          const gross = i.gross != null ? i.gross : i.cost;
+          const auto = finalFromGross(gross, i.type, fees);
+          return {
+            key: `row-${++rowSeq}`,
+            type: i.type,
+            description: i.description,
+            supplierId: i.supplier_id ?? "",
+            gross: gross ? String(gross) : "",
+            cost: i.cost ? String(i.cost) : "",
+            costManual: Math.abs((i.cost || 0) - auto) > 0.01,
+            commissionPct: i.commission_pct ? String(i.commission_pct) : "",
+            optionKey: i.option_id,
+            fresh: false,
+          };
+        });
     }
-    return [newRow("aereo"), newRow("hotel")];
+    return [newRow("aereo", null), newRow("hotel", null)];
   });
   const [removingKeys, setRemovingKeys] = React.useState<ReadonlySet<string>>(new Set());
   const pendingFocusRef = React.useRef<string | null>(null);
@@ -287,39 +396,81 @@ export function QuoteBuilder({
   const [shareOpen, setShareOpen] = React.useState(false);
 
   /* ── cálculo en vivo (única fuente: computeQuoteTotals) ── */
-  const paxNum = Math.max(1, Math.round(parseNum(pax)) || 1);
+  const toInput = React.useCallback(
+    (r: ItemRow) => {
+      const gross = parseNum(r.gross);
+      const cost = r.costManual ? parseNum(r.cost) : finalFromGross(gross, r.type, fees);
+      return {
+        type: r.type,
+        cost,
+        gross: gross || cost,
+        commission_pct: parseNum(r.commissionPct),
+      };
+    },
+    [fees],
+  );
+
+  const commonRows = rows.filter((r) => r.optionKey === null);
+  const hasOptions = options.length > 0;
+
+  const calcBase = React.useMemo(
+    () => ({
+      markup_type: markupType,
+      markup_value: parseNum(markupValue),
+      discount: parseNum(discount),
+      pax,
+    }),
+    [markupType, markupValue, discount, pax],
+  );
+
   const totals = React.useMemo<QuoteTotals>(
     () =>
       computeQuoteTotals({
-        items: rows.map((r) => ({
-          type: r.type,
-          cost: parseNum(r.cost),
-          gross: r.gross.trim() === "" ? parseNum(r.cost) : parseNum(r.gross),
-          commission_pct: parseNum(r.commissionPct),
-        })),
-        markup_type: markupType,
-        markup_value: parseNum(markupValue),
-        discount: parseNum(discount),
-        pax: paxNum,
+        ...calcBase,
+        items: rows.filter((r) => r.optionKey === null).map(toInput),
       }),
-    [rows, markupType, markupValue, discount, paxNum],
+    [rows, calcBase, toInput],
   );
 
+  const optionTotals = React.useMemo<QuoteOptionTotals[]>(() => {
+    if (!hasOptions) return [];
+    return computeOptionTotals(
+      rows.filter((r) => r.optionKey === null).map(toInput),
+      options.map((o) => ({
+        key: o.key,
+        name: o.name.trim() || "Opción",
+        subtitle: o.subtitle.trim() || null,
+        isRecommended: o.recommended,
+        items: rows.filter((r) => r.optionKey === o.key).map(toInput),
+      })),
+      calcBase,
+    );
+  }, [hasOptions, rows, options, calcBase, toInput]);
+
+  /** la opción que manda en los totales guardados y en la barra resumen */
+  const principal = React.useMemo(
+    () => optionTotals.find((o) => o.isRecommended) ?? optionTotals[0] ?? null,
+    [optionTotals],
+  );
+  const headline = principal?.totals ?? totals;
+
   const nights = nightsBetween(dateFrom || null, dateTo || null);
+  const totalPax = paxCount(pax);
 
   const previewData: QuoteSheetData = {
     code: initial?.code ?? "P-····",
     title: title.trim() || null,
     destination: destination.trim() || "Tu próximo destino",
     currency,
-    pax: paxNum,
+    pax,
     nights,
     tripDateFrom: dateFrom || null,
     tripDateTo: dateTo || null,
     validUntil: validUntil || null,
-    totalPrice: totals.totalPrice,
-    perPerson: totals.perPerson,
-    discount: totals.discount,
+    totalPrice: headline.totalPrice,
+    perPerson: headline.perPerson,
+    perInfant: headline.perInfant,
+    discount: headline.discount,
     notes: notes.trim() || null,
     createdAt: null,
     contactName:
@@ -329,9 +480,20 @@ export function QuoteBuilder({
     agencyLogoUrl: agency.logoUrl,
     agencyPhone: agency.phone,
     sellerName,
-    items: rows
+    items: commonRows
       .filter((r) => r.description.trim())
       .map((r) => ({ type: r.type, description: r.description.trim() })),
+    options: optionTotals.map((o) => ({
+      name: o.name,
+      subtitle: o.subtitle,
+      isRecommended: o.isRecommended,
+      totalPrice: o.totals.totalPrice,
+      perPerson: o.totals.perPerson,
+      perInfant: o.totals.perInfant,
+      items: rows
+        .filter((r) => r.optionKey === o.key && r.description.trim())
+        .map((r) => ({ type: r.type, description: r.description.trim() })),
+    })),
     theme,
   };
 
@@ -368,6 +530,28 @@ export function QuoteBuilder({
     return [...localMatches, ...(serverMatches ?? []).filter((c) => !seen.has(c.id))].slice(0, 6);
   }, [localMatches, serverMatches]);
 
+  /* ── pasajeros ── */
+  function changePax(kind: "adults" | "children" | "infants", delta: number) {
+    setPax((p) => {
+      const next = { ...p, childrenAges: [...p.childrenAges] };
+      const min = kind === "adults" ? 1 : 0;
+      next[kind] = Math.max(min, Math.min(30, p[kind] + delta));
+      if (kind === "children") {
+        if (next.children > p.children) next.childrenAges.push(0);
+        else next.childrenAges = next.childrenAges.slice(0, next.children);
+      }
+      return next;
+    });
+  }
+  function changeChildAge(index: number, value: string) {
+    const n = Math.max(0, Math.min(17, Math.round(parseNum(value))));
+    setPax((p) => {
+      const ages = [...p.childrenAges];
+      ages[index] = n;
+      return { ...p, childrenAges: ages };
+    });
+  }
+
   /* ── mutadores de filas ── */
   function updateRow(key: string, patch: Partial<ItemRow>) {
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -386,26 +570,22 @@ export function QuoteBuilder({
     }, 160);
   }
   /** agregar con slide-up + autofocus en la descripción */
-  function addRow(type: ServiceType) {
-    const row = newRow(type, true);
+  function addRow(type: ServiceType, optionKey: string | null) {
+    const row = newRow(type, optionKey, true);
     pendingFocusRef.current = row.key;
     setRows((rs) => [...rs, row]);
   }
-  function addTerrestre() {
+  function addTerrestre(optionKey: string | null) {
     // default inteligente: repite el tipo del último servicio terrestre cargado
-    const last = [...rows].reverse().find((r) => r.type !== "aereo");
-    addRow(last?.type ?? "hotel");
+    const last = [...rows].reverse().find((r) => r.type !== "aereo" && r.optionKey === optionKey);
+    addRow(last?.type ?? "hotel", optionKey);
   }
   function pickSupplier(row: ItemRow, supplierId: string) {
     const sup = suppliers.find((s) => s.id === supplierId);
     updateRow(row.key, {
       supplierId,
-      commissionPct:
-        row.type === "aereo"
-          ? "0"
-          : sup
-            ? String(sup.default_commission_pct)
-            : row.commissionPct,
+      // la comisión sale sola del mayorista (aéreos incluidos)
+      commissionPct: sup ? String(sup.default_commission_pct) : row.commissionPct,
     });
   }
   const focusDescription = (row: ItemRow) => (el: HTMLInputElement | null) => {
@@ -414,6 +594,59 @@ export function QuoteBuilder({
       el.focus();
     }
   };
+
+  /* ── opciones ── */
+  function startComparing() {
+    const a: OptionRow = { key: `opt-a-${Date.now()}`, name: "", subtitle: "", recommended: true };
+    const b: OptionRow = { key: `opt-b-${Date.now()}`, name: "", subtitle: "", recommended: false };
+    setOptions([a, b]);
+    setActiveOption(a.key);
+  }
+  function addOption() {
+    if (options.length >= 4) return;
+    const o: OptionRow = {
+      key: `opt-${options.length}-${Date.now()}`,
+      name: "",
+      subtitle: "",
+      recommended: false,
+    };
+    setOptions((os) => [...os, o]);
+    setActiveOption(o.key);
+  }
+  function updateOption(key: string, patch: Partial<OptionRow>) {
+    setOptions((os) =>
+      os.map((o) =>
+        o.key === key
+          ? { ...o, ...patch }
+          : patch.recommended
+            ? { ...o, recommended: false }
+            : o,
+      ),
+    );
+  }
+  function removeOption(key: string) {
+    const rest = options.filter((o) => o.key !== key);
+
+    if (rest.length <= 1) {
+      // con una sola opción no hay nada que comparar: sus servicios vuelven a ser comunes
+      const survivor = rest[0]?.key ?? null;
+      setRows((rs) =>
+        rs
+          .filter((r) => r.optionKey !== key)
+          .map((r) => (r.optionKey === survivor ? { ...r, optionKey: null } : r)),
+      );
+      setOptions([]);
+      setActiveOption(null);
+      return;
+    }
+
+    const next = rest.some((o) => o.recommended)
+      ? rest
+      : rest.map((o, i) => (i === 0 ? { ...o, recommended: true } : o));
+    setRows((rs) => rs.filter((r) => r.optionKey !== key));
+    setOptions(next);
+    setActiveOption(next[0].key);
+  }
 
   /* ── tema ── */
   function changeTheme(patch: Partial<{ color: string; font: string }>) {
@@ -462,7 +695,7 @@ export function QuoteBuilder({
       toast.error("Contanos el destino del viaje.");
       return;
     }
-    const cleanRows = rows.filter((r) => r.description.trim() || parseNum(r.cost) > 0);
+    const cleanRows = rows.filter((r) => r.description.trim() || parseNum(r.gross) > 0);
     if (cleanRows.length === 0) {
       toast.error("Agregá al menos un servicio al presupuesto.");
       return;
@@ -470,6 +703,14 @@ export function QuoteBuilder({
     if (cleanRows.some((r) => !r.description.trim())) {
       toast.error("Completá la descripción de todos los servicios.");
       return;
+    }
+    if (hasOptions) {
+      const empty = options.find((o) => !cleanRows.some((r) => r.optionKey === o.key));
+      if (empty) {
+        toast.error("Cada opción necesita al menos un servicio propio.");
+        setActiveOption(empty.key);
+        return;
+      }
     }
 
     setSaving(send ? "enviar" : "borrador");
@@ -482,7 +723,10 @@ export function QuoteBuilder({
       title: title.trim() || null,
       tripDateFrom: dateFrom || null,
       tripDateTo: dateTo || null,
-      pax: paxNum,
+      paxAdults: pax.adults,
+      paxChildren: pax.children,
+      paxInfants: pax.infants,
+      childrenAges: pax.childrenAges.slice(0, pax.children),
       currency,
       validUntil: validUntil || null,
       markupType,
@@ -491,14 +735,24 @@ export function QuoteBuilder({
       notes: notes.trim() || null,
       internalNotes: internalNotes.trim() || null,
       theme,
-      items: cleanRows.map((r) => ({
-        type: r.type,
-        description: r.description.trim(),
-        supplierId: r.supplierId || null,
-        cost: parseNum(r.cost),
-        gross: r.gross.trim() === "" ? null : parseNum(r.gross),
-        commissionPct: parseNum(r.commissionPct),
+      options: options.map((o, idx) => ({
+        key: o.key,
+        name: o.name.trim() || `Opción ${OPTION_LETTERS[idx] ?? idx + 1}`,
+        subtitle: o.subtitle.trim() || null,
+        isRecommended: o.recommended,
       })),
+      items: cleanRows.map((r) => {
+        const input = toInput(r);
+        return {
+          type: r.type,
+          description: r.description.trim(),
+          supplierId: r.supplierId || null,
+          optionKey: r.optionKey,
+          cost: input.cost,
+          gross: input.gross,
+          commissionPct: input.commission_pct,
+        };
+      }),
       send,
     });
     setSaving(null);
@@ -513,7 +767,7 @@ export function QuoteBuilder({
         quoteId: res.data.quoteId,
         code: res.data.code,
         publicToken: res.data.publicToken,
-        totalPrice: totals.totalPrice,
+        totalPrice: headline.totalPrice,
         currency,
         destination: destination.trim(),
         sent: send,
@@ -530,8 +784,23 @@ export function QuoteBuilder({
     }
   }
 
-  const aereos = rows.filter((r) => r.type === "aereo");
-  const terrestres = rows.filter((r) => r.type !== "aereo");
+  const aereos = commonRows.filter((r) => r.type === "aereo");
+  const terrestres = commonRows.filter((r) => r.type !== "aereo");
+
+  /** servicios comunes que tiene sentido llevar a una opción (todo menos el aéreo) */
+  const movableRows = commonRows.filter(
+    (r) => r.type !== "aereo" && (r.description.trim() || parseNum(r.gross) > 0),
+  );
+
+  const moveTargets = hasOptions
+    ? [
+        { key: null as string | null, label: "Común a todas" },
+        ...options.map((o, idx) => ({
+          key: o.key as string | null,
+          label: o.name.trim() || `Opción ${OPTION_LETTERS[idx] ?? idx + 1}`,
+        })),
+      ]
+    : [];
 
   /* controles de markup/descuento — viven dentro del panel de totales */
   const markupSlot = (
@@ -562,7 +831,7 @@ export function QuoteBuilder({
       </div>
       {markupType === "porcentaje" && parseNum(markupValue) > 0 && (
         <p className="text-right text-[11px] tabular-nums text-ink-faint">
-          = {fmtMoney(totals.markupAmount, currency)}
+          = {fmtMoney(headline.markupAmount, currency)}
         </p>
       )}
       <div className="flex items-center justify-between gap-2">
@@ -580,6 +849,18 @@ export function QuoteBuilder({
         />
       </div>
     </div>
+  );
+
+  const totalsPanel = (
+    <TotalsPanel
+      totals={totals}
+      options={optionTotals}
+      currency={currency}
+      pax={pax}
+      isAdmin={isAdmin}
+      sellerCommissionPct={sellerCommissionPct}
+      markupSlot={markupSlot}
+    />
   );
 
   /* ═══════════════════════ render ═══════════════════════ */
@@ -739,17 +1020,6 @@ export function QuoteBuilder({
                 />
               </div>
               <div>
-                <Label htmlFor="pax">Pasajeros</Label>
-                <Input
-                  id="pax"
-                  type="number"
-                  min={1}
-                  inputMode="numeric"
-                  value={pax}
-                  onChange={(e) => setPax(e.target.value)}
-                />
-              </div>
-              <div>
                 <Label htmlFor="valid">Válido hasta</Label>
                 <Input
                   id="valid"
@@ -758,7 +1028,7 @@ export function QuoteBuilder({
                   onChange={(e) => setValidUntil(e.target.value)}
                 />
               </div>
-              <div className="col-span-2 sm:col-span-4">
+              <div>
                 <Label>Moneda</Label>
                 <Segmented
                   value={currency}
@@ -772,6 +1042,68 @@ export function QuoteBuilder({
             </div>
           </section>
 
+          {/* pasajeros */}
+          <section className={sectionCard}>
+            <div className="mb-3 flex items-baseline justify-between gap-2">
+              <SectionTitle icon={Users} className="mb-0">
+                Pasajeros
+              </SectionTitle>
+              <p className="text-[13px] tabular-nums text-ink-faint">
+                {totalPax} {totalPax === 1 ? "persona" : "personas"}
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+              {PAX_KINDS.map((k) => (
+                <PaxCounter
+                  key={k.key}
+                  icon={k.icon}
+                  label={k.label}
+                  hint={k.hint}
+                  value={pax[k.key]}
+                  min={k.key === "adults" ? 1 : 0}
+                  onChange={(delta) => changePax(k.key, delta)}
+                />
+              ))}
+            </div>
+
+            {pax.children > 0 && (
+              <div className="mt-3 rounded-xl bg-sand-soft/60 p-3 animate-slide-up">
+                <p className="mb-2 text-[13px] font-medium text-ink-soft">
+                  ¿Qué edad tienen los menores?
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {Array.from({ length: pax.children }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <span className="text-xs text-ink-faint">#{i + 1}</span>
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={17}
+                          inputMode="numeric"
+                          value={pax.childrenAges[i] ? String(pax.childrenAges[i]) : ""}
+                          onChange={(e) => changeChildAge(i, e.target.value)}
+                          placeholder="—"
+                          aria-label={`Edad del menor ${i + 1}`}
+                          className="h-10 w-[74px] pr-9 text-right text-[13px] tabular-nums"
+                        />
+                        <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-ink-faint">
+                          años
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {pax.infants > 0 && (
+              <p className="mt-2.5 text-xs text-ink-faint">
+                El infante paga el {Math.round(INFANT_FACTOR * 100)}% del precio por persona.
+              </p>
+            )}
+          </section>
+
           {/* ítems: aéreos */}
           <section className={cn(sectionCard, "@container")}>
             <ItemGroupHeader
@@ -780,7 +1112,7 @@ export function QuoteBuilder({
               subtotal={totals.byGroup.aereos}
               currency={currency}
             />
-            <ItemHeaderRow withType={false} />
+            <ItemHeaderRow withType={false} withCommission={isAdmin} fee={fees.aereo_pct} />
             <div className="space-y-2.5 @2xl:space-y-1.5">
               {aereos.length === 0 && (
                 <p className="rounded-xl border border-dashed border-line-strong/70 px-3 py-3 text-center text-[13px] text-ink-faint">
@@ -793,12 +1125,15 @@ export function QuoteBuilder({
                   row={row}
                   suppliers={suppliers}
                   currency={currency}
+                  fees={fees}
                   withType={false}
+                  withCommission={isAdmin}
                   removing={removingKeys.has(row.key)}
+                  moveTargets={moveTargets}
                   onChange={(patch) => updateRow(row.key, patch)}
                   onPickSupplier={(id) => pickSupplier(row, id)}
                   onRemove={() => removeRow(row.key)}
-                  onEnter={idx === aereos.length - 1 ? () => addRow("aereo") : undefined}
+                  onEnter={idx === aereos.length - 1 ? () => addRow("aereo", null) : undefined}
                   descRef={focusDescription(row)}
                 />
               ))}
@@ -807,7 +1142,7 @@ export function QuoteBuilder({
               variant="ghost"
               size="sm"
               className="mt-2.5 text-brand-700"
-              onClick={() => addRow("aereo")}
+              onClick={() => addRow("aereo", null)}
             >
               <Plus /> Agregar aéreo
             </Button>
@@ -817,11 +1152,16 @@ export function QuoteBuilder({
           <section className={cn(sectionCard, "@container")}>
             <ItemGroupHeader
               icon={Bus}
-              label="Terrestres"
+              label={hasOptions ? "Terrestres en común" : "Terrestres"}
               subtotal={totals.byGroup.terrestres}
               currency={currency}
             />
-            <ItemHeaderRow withType />
+            {hasOptions && (
+              <p className="-mt-1.5 mb-2.5 text-xs text-ink-faint">
+                Lo que va en todas las opciones (traslados, excursiones, asistencia).
+              </p>
+            )}
+            <ItemHeaderRow withType withCommission={isAdmin} fee={fees.terrestre_pct} />
             <div className="space-y-2.5 @2xl:space-y-1.5">
               {terrestres.length === 0 && (
                 <p className="rounded-xl border border-dashed border-line-strong/70 px-3 py-3 text-center text-[13px] text-ink-faint">
@@ -834,12 +1174,17 @@ export function QuoteBuilder({
                   row={row}
                   suppliers={suppliers}
                   currency={currency}
+                  fees={fees}
                   withType
+                  withCommission={isAdmin}
                   removing={removingKeys.has(row.key)}
+                  moveTargets={moveTargets}
                   onChange={(patch) => updateRow(row.key, patch)}
                   onPickSupplier={(id) => pickSupplier(row, id)}
                   onRemove={() => removeRow(row.key)}
-                  onEnter={idx === terrestres.length - 1 ? addTerrestre : undefined}
+                  onEnter={
+                    idx === terrestres.length - 1 ? () => addTerrestre(null) : undefined
+                  }
                   descRef={focusDescription(row)}
                 />
               ))}
@@ -848,11 +1193,213 @@ export function QuoteBuilder({
               variant="ghost"
               size="sm"
               className="mt-2.5 text-brand-700"
-              onClick={addTerrestre}
+              onClick={() => addTerrestre(null)}
             >
               <Plus /> Agregar servicio
             </Button>
           </section>
+
+          {/* opciones comparables */}
+          {!hasOptions ? (
+            <button
+              type="button"
+              onClick={startComparing}
+              className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-line-strong/70 bg-sand-soft/30 px-4 py-3.5 text-left transition-all tap-highlight-none hover:border-brand-500 hover:bg-brand-tint/40 active:scale-[0.99]"
+            >
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-brand-tint text-brand-text">
+                <Columns2 className="size-5" strokeWidth={1.9} />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-ink">Comparar dos opciones</span>
+                <span className="block text-xs text-ink-faint">
+                  Mismo presupuesto, dos hoteles: el cliente ve cuánto sale con cada uno.
+                </span>
+              </span>
+              <Plus className="ml-auto size-4 shrink-0 text-ink-faint" />
+            </button>
+          ) : (
+            <section className={cn(sectionCard, "@container")}>
+              <div className="mb-3 flex items-baseline justify-between gap-2">
+                <SectionTitle icon={Columns2} className="mb-0">
+                  Opciones
+                </SectionTitle>
+                {options.length < 4 && (
+                  <Button variant="ghost" size="sm" className="text-brand-700" onClick={addOption}>
+                    <Plus /> Otra opción
+                  </Button>
+                )}
+              </div>
+
+              {/* tabs con el precio de cada opción: la comparación en sí */}
+              <div className="-mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1">
+                {options.map((o, idx) => {
+                  const t = optionTotals.find((ot) => ot.key === o.key);
+                  const active = activeOption === o.key;
+                  return (
+                    <button
+                      key={o.key}
+                      type="button"
+                      onClick={() => setActiveOption(o.key)}
+                      aria-pressed={active}
+                      className={cn(
+                        "min-w-[150px] flex-1 rounded-xl border px-3 py-2.5 text-left transition-all tap-highlight-none active:scale-[0.98]",
+                        active
+                          ? "border-brand-500 bg-brand-tint shadow-sm"
+                          : "border-line bg-paper hover:border-line-strong",
+                      )}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        {o.recommended && (
+                          <Sparkles
+                            className="size-3.5 shrink-0 text-brand-600"
+                            strokeWidth={2}
+                            aria-label="Recomendada"
+                          />
+                        )}
+                        <span
+                          className={cn(
+                            "truncate text-[13px] font-medium",
+                            active ? "text-brand-text" : "text-ink",
+                          )}
+                        >
+                          {o.name.trim() || `Opción ${OPTION_LETTERS[idx] ?? idx + 1}`}
+                        </span>
+                      </span>
+                      <span className="mt-0.5 block text-base font-semibold leading-tight tabular-nums text-ink">
+                        {fmtMoney(t?.totals.perPerson ?? 0, currency)}
+                      </span>
+                      <span className="block text-[11px] tabular-nums text-ink-faint">
+                        por persona
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {options.map((o, idx) => {
+                if (o.key !== activeOption) return null;
+                const optionRows = rows.filter((r) => r.optionKey === o.key);
+                const t = optionTotals.find((ot) => ot.key === o.key);
+                return (
+                  <div key={o.key} className="animate-fade-in">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <Label htmlFor={`opt-name-${o.key}`}>Nombre de la opción</Label>
+                        <Input
+                          id={`opt-name-${o.key}`}
+                          value={o.name}
+                          onChange={(e) => updateOption(o.key, { name: e.target.value })}
+                          placeholder={`Ej: Hotel Riu 5★ (Opción ${OPTION_LETTERS[idx] ?? idx + 1})`}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor={`opt-sub-${o.key}`}>Detalle (opcional)</Label>
+                        <Input
+                          id={`opt-sub-${o.key}`}
+                          value={o.subtitle}
+                          onChange={(e) => updateOption(o.key, { subtitle: e.target.value })}
+                          placeholder="Ej: All inclusive, frente al mar"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => updateOption(o.key, { recommended: true })}
+                        aria-pressed={o.recommended}
+                        className={cn(
+                          "inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-all tap-highlight-none active:scale-95",
+                          o.recommended
+                            ? "border-brand-tint-line bg-brand-tint text-brand-text"
+                            : "border-line text-ink-faint hover:border-line-strong hover:text-ink-soft",
+                        )}
+                      >
+                        <Sparkles className="size-3.5" strokeWidth={2} />
+                        {o.recommended ? "Es la recomendada" : "Marcar como recomendada"}
+                      </button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-tone-red-text hover:bg-tone-red-soft"
+                        onClick={() => removeOption(o.key)}
+                      >
+                        <Trash2 /> Quitar opción
+                      </Button>
+                    </div>
+
+                    <div className="mt-3.5">
+                      <ItemHeaderRow withType withCommission={isAdmin} fee={fees.terrestre_pct} />
+                      <div className="space-y-2.5 @2xl:space-y-1.5">
+                        {optionRows.length === 0 && (
+                          <div className="rounded-xl border border-dashed border-line-strong/70 px-3 py-3.5 text-center">
+                            <p className="text-[13px] text-ink-faint">
+                              Cargá el hotel (o lo que cambie) de esta opción.
+                            </p>
+                            {movableRows.length > 0 && (
+                              <div className="mt-2.5">
+                                <p className="text-[11px] font-medium uppercase tracking-wide text-ink-faint">
+                                  O traé uno ya cargado
+                                </p>
+                                <div className="mt-1.5 flex flex-wrap justify-center gap-1.5">
+                                  {movableRows.map((r) => (
+                                    <button
+                                      key={r.key}
+                                      type="button"
+                                      onClick={() => updateRow(r.key, { optionKey: o.key })}
+                                      className="max-w-full truncate rounded-full border border-line bg-paper px-3 py-1.5 text-xs text-ink-soft transition-all tap-highlight-none hover:border-brand-500 hover:text-brand-text active:scale-[0.97]"
+                                    >
+                                      {r.description.trim() || SERVICE_TYPES[r.type].label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {optionRows.map((row, i) => (
+                          <ItemRowEditor
+                            key={row.key}
+                            row={row}
+                            suppliers={suppliers}
+                            currency={currency}
+                            fees={fees}
+                            withType
+                            withCommission={isAdmin}
+                            removing={removingKeys.has(row.key)}
+                            moveTargets={moveTargets}
+                            onChange={(patch) => updateRow(row.key, patch)}
+                            onPickSupplier={(id) => pickSupplier(row, id)}
+                            onRemove={() => removeRow(row.key)}
+                            onEnter={
+                              i === optionRows.length - 1 ? () => addTerrestre(o.key) : undefined
+                            }
+                            descRef={focusDescription(row)}
+                          />
+                        ))}
+                      </div>
+                      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-brand-700"
+                          onClick={() => addTerrestre(o.key)}
+                        >
+                          <Plus /> Agregar a esta opción
+                        </Button>
+                        <p className="text-sm tabular-nums text-ink-soft">
+                          Total{" "}
+                          <span className="font-semibold text-ink">
+                            {fmtMoney(t?.totals.totalPrice ?? 0, currency)}
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
+          )}
 
           {/* notas */}
           <section className={sectionCard}>
@@ -1009,12 +1556,14 @@ export function QuoteBuilder({
             <div className="sticky bottom-0 z-10 lg:hidden">
               {summaryOpen && (
                 <div className="mb-2 max-h-[45dvh] overflow-y-auto animate-slide-up">
-                  <TotalsPanel totals={totals} currency={currency} markupSlot={markupSlot} />
+                  {totalsPanel}
                 </div>
               )}
               <SummaryBar
-                totals={totals}
+                totals={headline}
                 currency={currency}
+                isAdmin={isAdmin}
+                sellerCommissionPct={sellerCommissionPct}
                 open={summaryOpen}
                 onToggle={() => setSummaryOpen((o) => !o)}
               />
@@ -1032,9 +1581,7 @@ export function QuoteBuilder({
               : "xl:sticky xl:top-6 xl:max-h-[calc(100dvh-3rem)] xl:overflow-y-auto xl:pb-4 xl:pr-1",
           )}
         >
-          <div className={cn("hidden", isDialog ? "lg:block" : "xl:block")}>
-            <TotalsPanel totals={totals} currency={currency} markupSlot={markupSlot} />
-          </div>
+          <div className={cn("hidden", isDialog ? "lg:block" : "xl:block")}>{totalsPanel}</div>
           <div>
             <p
               className={cn(
@@ -1060,12 +1607,14 @@ export function QuoteBuilder({
           <div className="mx-auto max-w-xl">
             {summaryOpen && (
               <div className="mb-2 max-h-[55dvh] overflow-y-auto animate-slide-up">
-                <TotalsPanel totals={totals} currency={currency} markupSlot={markupSlot} />
+                {totalsPanel}
               </div>
             )}
             <SummaryBar
-              totals={totals}
+              totals={headline}
               currency={currency}
+              isAdmin={isAdmin}
+              sellerCommissionPct={sellerCommissionPct}
               open={summaryOpen}
               onToggle={() => setSummaryOpen((o) => !o)}
             />
@@ -1095,12 +1644,19 @@ export function QuoteBuilder({
 function SectionTitle({
   icon: Icon,
   children,
+  className,
 }: {
   icon: LucideIcon;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <h2 className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-ink">
+    <h2
+      className={cn(
+        "mb-3 flex items-center gap-2 font-display text-lg font-semibold text-ink",
+        className,
+      )}
+    >
       <Icon className="size-[18px] text-ink-faint" strokeWidth={1.75} />
       {children}
     </h2>
@@ -1136,6 +1692,55 @@ function ContactChip({
   );
 }
 
+/** contador de pasajeros: − [n] + con targets grandes para el pulgar */
+function PaxCounter({
+  icon: Icon,
+  label,
+  hint,
+  value,
+  min,
+  onChange,
+}: {
+  icon: LucideIcon;
+  label: string;
+  hint: string | null;
+  value: number;
+  min: number;
+  onChange: (delta: number) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-line bg-sand-soft/30 p-2.5">
+      <p className="flex items-center gap-1.5 text-[13px] font-medium text-ink-soft">
+        <Icon className="size-4 shrink-0 text-ink-faint" strokeWidth={1.9} />
+        <span className="truncate">{label}</span>
+      </p>
+      <div className="mt-1.5 flex items-center justify-between gap-1">
+        <button
+          type="button"
+          onClick={() => onChange(-1)}
+          disabled={value <= min}
+          aria-label={`Menos ${label.toLowerCase()}`}
+          className="flex size-9 shrink-0 items-center justify-center rounded-full border border-line bg-paper text-lg leading-none text-ink-soft transition-all tap-highlight-none hover:border-line-strong hover:text-ink active:scale-90 disabled:opacity-35"
+        >
+          −
+        </button>
+        <span className="min-w-6 text-center text-lg font-semibold tabular-nums text-ink">
+          {value}
+        </span>
+        <button
+          type="button"
+          onClick={() => onChange(1)}
+          aria-label={`Más ${label.toLowerCase()}`}
+          className="flex size-9 shrink-0 items-center justify-center rounded-full border border-line bg-paper text-lg leading-none text-ink-soft transition-all tap-highlight-none hover:border-line-strong hover:text-ink active:scale-90"
+        >
+          +
+        </button>
+      </div>
+      {hint && <p className="mt-1 text-[10px] leading-tight text-ink-faint">{hint}</p>}
+    </div>
+  );
+}
+
 function ItemGroupHeader({
   icon: Icon,
   label,
@@ -1158,25 +1763,35 @@ function ItemGroupHeader({
   );
 }
 
-function ItemHeaderRow({ withType }: { withType: boolean }) {
+function ItemHeaderRow({
+  withType,
+  withCommission,
+  fee,
+}: {
+  withType: boolean;
+  withCommission: boolean;
+  fee: number;
+}) {
   return (
     <div
       className={cn(
         "mb-1.5 hidden gap-2 px-1 text-[11px] font-medium uppercase tracking-wide text-ink-faint @2xl:grid",
-        withType ? GRID_WITH_TYPE : GRID_NO_TYPE,
+        gridFor(withType, withCommission),
       )}
     >
       {withType && <span>Tipo</span>}
       <span>Descripción</span>
       <span>Proveedor</span>
-      <span className="text-right">Final</span>
-      <span
-        className="text-right"
-        title="Tarifa comisionable del mayorista. Vacío = igual al Final."
-      >
+      <span className="text-right" title="Tarifa comisionable del mayorista.">
         Bruto
       </span>
-      <span className="text-right">% com</span>
+      <span
+        className="text-right"
+        title={`Lo que se paga: el bruto + ${fee}%. Podés pisarlo a mano.`}
+      >
+        Final {fee > 0 ? `+${fmtNumber(fee, fee % 1 ? 1 : 0)}%` : ""}
+      </span>
+      {withCommission && <span className="text-right">% com</span>}
       <span />
     </div>
   );
@@ -1231,8 +1846,11 @@ function ItemRowEditor({
   row,
   suppliers,
   currency,
+  fees,
   withType,
+  withCommission,
   removing,
+  moveTargets,
   onChange,
   onPickSupplier,
   onRemove,
@@ -1242,8 +1860,11 @@ function ItemRowEditor({
   row: ItemRow;
   suppliers: BuilderSupplier[];
   currency: string;
+  fees: QuoteFees;
   withType: boolean;
+  withCommission: boolean;
   removing: boolean;
+  moveTargets: { key: string | null; label: string }[];
   onChange: (patch: Partial<ItemRow>) => void;
   onPickSupplier: (supplierId: string) => void;
   onRemove: () => void;
@@ -1251,10 +1872,11 @@ function ItemRowEditor({
   onEnter?: () => void;
   descRef?: (el: HTMLInputElement | null) => void;
 }) {
-  const commission =
-    ((row.gross.trim() === "" ? parseNum(row.cost) : parseNum(row.gross)) *
-      parseNum(row.commissionPct)) /
-    100;
+  const grossNum = parseNum(row.gross);
+  const autoCost = finalFromGross(grossNum, row.type, fees);
+  const costValue = row.costManual ? row.cost : autoCost ? String(round2(autoCost)) : "";
+  const commission = (grossNum * parseNum(row.commissionPct)) / 100;
+  const fee = feePct(row.type, fees);
 
   function handleEnter(e: React.KeyboardEvent) {
     if (e.key === "Enter" && onEnter) {
@@ -1263,12 +1885,37 @@ function ItemRowEditor({
     }
   }
 
+  const moveMenu = moveTargets.length > 0 && (
+    <Dropdown>
+      <DropdownTrigger asChild>
+        <button
+          type="button"
+          aria-label="Mover el servicio a otra opción"
+          className="rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-sand-soft hover:text-ink"
+        >
+          <ArrowLeftRight className="size-4" />
+        </button>
+      </DropdownTrigger>
+      <DropdownContent align="end" className="min-w-[180px]">
+        {moveTargets.map((t) => (
+          <DropdownItem
+            key={t.key ?? "common"}
+            onSelect={() => onChange({ optionKey: t.key })}
+          >
+            {t.label}
+            {row.optionKey === t.key && <Check className="ml-auto size-3.5" />}
+          </DropdownItem>
+        ))}
+      </DropdownContent>
+    </Dropdown>
+  );
+
   return (
     <div
       className={cn(
         "rounded-xl border border-line bg-sand-soft/30 p-3",
         "@2xl:grid @2xl:items-center @2xl:gap-2 @2xl:border-0 @2xl:bg-transparent @2xl:p-0",
-        withType ? GRID_WITH_TYPE : GRID_NO_TYPE,
+        gridFor(withType, withCommission),
         row.fresh && "animate-slide-up",
         removing && "pointer-events-none animate-fade-out",
       )}
@@ -1286,14 +1933,17 @@ function ItemRowEditor({
             <Plane className="size-4 text-ink-faint" strokeWidth={1.9} /> Aéreo
           </span>
         )}
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label="Eliminar ítem"
-          className="rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-tone-red-soft hover:text-tone-red-text"
-        >
-          <Trash2 className="size-4" />
-        </button>
+        <span className="flex items-center gap-0.5">
+          {moveMenu}
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label="Eliminar ítem"
+            className="rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-tone-red-soft hover:text-tone-red-text"
+          >
+            <Trash2 className="size-4" />
+          </button>
+        </span>
       </div>
 
       {/* tipo (desktop) */}
@@ -1334,29 +1984,15 @@ function ItemRowEditor({
       </div>
 
       {/* números */}
-      <div className="mt-2 grid grid-cols-3 gap-2 @2xl:col-span-3 @2xl:mt-0 @2xl:grid-cols-subgrid">
+      <div
+        className={cn(
+          "mt-2 grid gap-2 @2xl:mt-0 @2xl:grid-cols-subgrid",
+          withCommission ? "grid-cols-3 @2xl:col-span-3" : "grid-cols-2 @2xl:col-span-2",
+        )}
+      >
         <div>
           <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-ink-faint @2xl:hidden">
-            Final ({currency})
-          </span>
-          <Input
-            type="number"
-            min={0}
-            step="any"
-            inputMode="decimal"
-            value={row.cost}
-            onChange={(e) => onChange({ cost: e.target.value })}
-            onKeyDown={handleEnter}
-            placeholder="0"
-            className="h-9 text-right text-[13px] tabular-nums"
-          />
-        </div>
-        <div>
-          <span
-            className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-ink-faint @2xl:hidden"
-            title="Tarifa comisionable del mayorista. Vacío = igual al Final."
-          >
-            Bruto
+            Bruto ({currency})
           </span>
           <Input
             type="number"
@@ -1366,39 +2002,80 @@ function ItemRowEditor({
             value={row.gross}
             onChange={(e) => onChange({ gross: e.target.value })}
             onKeyDown={handleEnter}
-            placeholder="= final"
+            placeholder="0"
+            aria-label="Precio bruto"
             className="h-9 text-right text-[13px] tabular-nums"
           />
         </div>
         <div>
           <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-ink-faint @2xl:hidden">
-            % com
+            Final {fee > 0 ? `(+${fmtNumber(fee, fee % 1 ? 1 : 0)}%)` : ""}
           </span>
-          <Input
-            type="number"
-            min={0}
-            max={100}
-            step="any"
-            inputMode="decimal"
-            value={row.commissionPct}
-            onChange={(e) => onChange({ commissionPct: e.target.value })}
-            onKeyDown={handleEnter}
-            placeholder="0"
-            className="h-9 text-right text-[13px] tabular-nums"
-          />
+          <div className="relative">
+            <Input
+              type="number"
+              min={0}
+              step="any"
+              inputMode="decimal"
+              value={costValue}
+              onChange={(e) => onChange({ cost: e.target.value, costManual: true })}
+              onKeyDown={handleEnter}
+              placeholder="0"
+              aria-label="Precio final"
+              className={cn(
+                "h-9 text-right text-[13px] tabular-nums",
+                row.costManual ? "pr-7" : "bg-sand-soft/70 text-ink-soft",
+              )}
+            />
+            {row.costManual && (
+              <Tooltip content="Volver al cálculo automático">
+                <button
+                  type="button"
+                  onClick={() => onChange({ costManual: false, cost: "" })}
+                  aria-label="Volver al final automático"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-faint transition-colors hover:bg-sand-soft hover:text-ink"
+                >
+                  <RotateCcw className="size-3.5" />
+                </button>
+              </Tooltip>
+            )}
+          </div>
         </div>
+        {withCommission && (
+          <div>
+            <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-ink-faint @2xl:hidden">
+              % com
+            </span>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              step="any"
+              inputMode="decimal"
+              value={row.commissionPct}
+              onChange={(e) => onChange({ commissionPct: e.target.value })}
+              onKeyDown={handleEnter}
+              placeholder="0"
+              aria-label="Comisión del mayorista en porcentaje"
+              className="h-9 text-right text-[13px] tabular-nums"
+            />
+          </div>
+        )}
       </div>
 
-      {/* eliminar (desktop) + comisión de la fila (mobile) */}
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label="Eliminar ítem"
-        className="hidden rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-tone-red-soft hover:text-tone-red-text @2xl:block"
-      >
-        <Trash2 className="size-4" />
-      </button>
-      {commission > 0 && (
+      {/* acciones (desktop) + comisión de la fila (mobile) */}
+      <span className="hidden items-center gap-0.5 @2xl:flex">
+        {moveMenu}
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Eliminar ítem"
+          className="rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-tone-red-soft hover:text-tone-red-text"
+        >
+          <Trash2 className="size-4" />
+        </button>
+      </span>
+      {withCommission && commission > 0 && (
         <p className="mt-2 text-right text-[11px] tabular-nums text-money-700 @2xl:hidden">
           comisión {fmtMoney(commission, currency)}
         </p>
@@ -1435,14 +2112,21 @@ function MoneyTicker({
 function SummaryBar({
   totals,
   currency,
+  isAdmin,
+  sellerCommissionPct,
   open,
   onToggle,
 }: {
   totals: QuoteTotals;
   currency: string;
+  isAdmin: boolean;
+  sellerCommissionPct: number;
   open: boolean;
   onToggle: () => void;
 }) {
+  const commission = isAdmin
+    ? totals.commissionTotal
+    : sellerMarkupCommission(totals.markupAmount, sellerCommissionPct);
   return (
     <button
       type="button"
@@ -1452,21 +2136,24 @@ function SummaryBar({
     >
       <div>
         <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
-          Precio cliente
+          Por persona
         </p>
         <MoneyTicker
-          value={totals.totalPrice}
+          value={totals.perPerson}
           currency={currency}
           className="text-lg font-semibold leading-tight text-ink"
         />
+        <p className="text-[11px] tabular-nums text-ink-faint">
+          total {fmtMoney(totals.totalPrice, currency)}
+        </p>
       </div>
       <div className="flex items-center gap-3">
         <div className="text-right">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
-            Comisión
+            {isAdmin ? "Comisión" : "Tu comisión"}
           </p>
           <MoneyTicker
-            value={totals.commissionTotal}
+            value={commission}
             currency={currency}
             className="text-sm font-semibold leading-tight text-money-700"
           />
@@ -1485,111 +2172,204 @@ function SummaryBar({
 /* ── panel de totales (también lo usa el detalle del presupuesto) ── */
 export function TotalsPanel({
   totals,
+  options = [],
   currency,
+  pax,
+  isAdmin,
+  sellerCommissionPct = DEFAULT_SELLER_MARKUP_PCT,
   markupSlot,
 }: {
+  /** totales de los servicios comunes (o del presupuesto entero si no hay opciones) */
   totals: QuoteTotals;
+  /** si hay opciones, cada una con su precio */
+  options?: QuoteOptionTotals[];
   currency: string;
+  pax: QuotePax;
+  isAdmin: boolean;
+  sellerCommissionPct?: number;
   /** en el builder, los controles de markup/descuento viven acá adentro */
   markupSlot?: React.ReactNode;
 }) {
+  const hasOptions = options.length > 0;
+  const headline = hasOptions
+    ? (options.find((o) => o.isRecommended) ?? options[0]).totals
+    : totals;
+  const sellerEstimate = sellerMarkupCommission(headline.markupAmount, sellerCommissionPct);
+  const totalPax = paxCount(pax);
+
   return (
     <div className="space-y-3">
-      {/* precio cliente */}
-      <div className="card p-4 sm:p-5">
-        <dl className="space-y-2 text-sm">
-          <div className="flex items-baseline justify-between">
-            <dt className="text-ink-soft">Total paquete</dt>
-            <dd className="tabular-nums text-ink">{fmtMoney(totals.totalCost, currency)}</dd>
-          </div>
-          {!markupSlot && (
-            <>
-              <div className="flex items-baseline justify-between">
-                <dt className="text-ink-soft">Markup</dt>
-                <dd className="tabular-nums text-ink">
-                  {fmtMoney(totals.markupAmount, currency)}
-                  <span className="ml-1.5 text-xs text-ink-faint">
-                    ({fmtNumber(totals.markupPct, totals.markupPct % 1 ? 1 : 0)}%)
-                  </span>
-                </dd>
+      {/* precio: por persona grande, total chico */}
+      {hasOptions ? (
+        <div className="space-y-2.5">
+          {options.map((o) => (
+            <div
+              key={o.key}
+              className={cn(
+                "card p-4",
+                o.isRecommended && "border-brand-tint-line bg-brand-tint/25",
+              )}
+            >
+              <div className="flex items-center gap-1.5">
+                {o.isRecommended && (
+                  <Sparkles className="size-3.5 shrink-0 text-brand-600" strokeWidth={2} />
+                )}
+                <p className="truncate text-[13px] font-medium text-ink">{o.name}</p>
               </div>
-              {totals.discount > 0 && (
+              {o.subtitle && (
+                <p className="truncate text-xs text-ink-faint">{o.subtitle}</p>
+              )}
+              <div className="mt-2 flex items-end justify-between gap-2">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
+                    Por persona
+                  </p>
+                  <MoneyTicker
+                    value={o.totals.perPerson}
+                    currency={currency}
+                    className="text-[26px] font-semibold leading-none text-ink"
+                  />
+                </div>
+                <p className="text-right text-xs tabular-nums text-ink-faint">
+                  total {fmtMoney(o.totals.totalPrice, currency)}
+                  <span className="block">costo {fmtMoney(o.totals.totalCost, currency)}</span>
+                </p>
+              </div>
+            </div>
+          ))}
+          {markupSlot && <div className="card p-4 sm:p-5">{markupSlot}</div>}
+        </div>
+      ) : (
+        <div className="card p-4 sm:p-5">
+          <dl className="space-y-2 text-sm">
+            <div className="flex items-baseline justify-between">
+              <dt className="text-ink-soft">Total paquete</dt>
+              <dd className="tabular-nums text-ink">{fmtMoney(totals.totalCost, currency)}</dd>
+            </div>
+            {!markupSlot && (
+              <>
                 <div className="flex items-baseline justify-between">
-                  <dt className="text-ink-soft">Descuento</dt>
-                  <dd className="tabular-nums text-tone-red-text">
-                    −{fmtMoney(totals.discount, currency)}
+                  <dt className="text-ink-soft">Markup</dt>
+                  <dd className="tabular-nums text-ink">
+                    {fmtMoney(totals.markupAmount, currency)}
+                    <span className="ml-1.5 text-xs text-ink-faint">
+                      ({fmtNumber(totals.markupPct, totals.markupPct % 1 ? 1 : 0)}%)
+                    </span>
                   </dd>
                 </div>
-              )}
-            </>
-          )}
-        </dl>
-        {markupSlot}
-        <div className="mt-3 border-t border-line pt-3">
-          <div className="flex items-baseline justify-between">
+                {totals.discount > 0 && (
+                  <div className="flex items-baseline justify-between">
+                    <dt className="text-ink-soft">Descuento</dt>
+                    <dd className="tabular-nums text-tone-red-text">
+                      −{fmtMoney(totals.discount, currency)}
+                    </dd>
+                  </div>
+                )}
+              </>
+            )}
+          </dl>
+          {markupSlot}
+          <div className="mt-3 border-t border-line pt-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-soft">
-              Precio cliente
+              Precio por persona
             </p>
             <MoneyTicker
-              value={totals.totalPrice}
+              value={totals.perPerson}
               currency={currency}
-              className="text-[26px] font-semibold leading-none text-ink"
+              className="block text-[34px] font-semibold leading-none text-ink"
             />
+            <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+              <p className="text-xs tabular-nums text-ink-faint">
+                {paxLabel(pax, false)}
+                {pax.infants > 0
+                  ? ` · infante ${fmtMoney(totals.perInfant, currency)}`
+                  : ""}
+              </p>
+              <p className="text-xs tabular-nums text-ink-faint">
+                total{" "}
+                <span className="font-medium text-ink-soft">
+                  {fmtMoney(totals.totalPrice, currency)}
+                </span>
+              </p>
+            </div>
           </div>
-          <p className="mt-1 text-right text-xs tabular-nums text-ink-faint">
-            por persona {fmtMoney(totals.perPerson, currency)}
-          </p>
         </div>
-      </div>
+      )}
 
-      {/* comisión (como la planilla) */}
-      <div className="card p-4 sm:p-5">
-        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-          Comisión
-        </p>
-        <dl className="space-y-1.5 text-sm">
-          <div className="flex items-baseline justify-between">
-            <dt className="flex items-center gap-1.5 text-ink-soft">
-              <Plane className="size-4 self-center text-ink-faint" strokeWidth={1.75} />
-              Aéreos
-            </dt>
-            <dd className="tabular-nums text-ink">
-              {fmtMoney(totals.commissionByGroup.aereos, currency)}
-            </dd>
-          </div>
-          <div className="flex items-baseline justify-between">
-            <dt className="flex items-center gap-1.5 text-ink-soft">
-              <Bus className="size-4 self-center text-ink-faint" strokeWidth={1.75} />
-              Terrestres
-            </dt>
-            <dd className="tabular-nums text-ink">
-              {fmtMoney(totals.commissionByGroup.terrestres, currency)}
-            </dd>
-          </div>
-          <div className="flex items-baseline justify-between">
-            <dt className="text-ink-soft">Markup</dt>
-            <dd className="tabular-nums text-ink">{fmtMoney(totals.markupAmount, currency)}</dd>
-          </div>
-          {totals.discount > 0 && (
+      {/* comisión: la ve solo el admin. El vendedor ve su estimado. */}
+      {isAdmin ? (
+        <div className="card p-4 sm:p-5">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+            Comisión {hasOptions ? "· opción recomendada" : ""}
+          </p>
+          <dl className="space-y-1.5 text-sm">
             <div className="flex items-baseline justify-between">
-              <dt className="text-ink-soft">Descuento</dt>
-              <dd className="tabular-nums text-tone-red-text">
-                −{fmtMoney(totals.discount, currency)}
+              <dt className="flex items-center gap-1.5 text-ink-soft">
+                <Plane className="size-4 self-center text-ink-faint" strokeWidth={1.75} />
+                Aéreos
+              </dt>
+              <dd className="tabular-nums text-ink">
+                {fmtMoney(headline.commissionByGroup.aereos, currency)}
               </dd>
             </div>
-          )}
-        </dl>
-        <div className="mt-2.5 flex items-baseline justify-between border-t border-line pt-2.5">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-money-700">
-            Total comisión
-          </p>
+            <div className="flex items-baseline justify-between">
+              <dt className="flex items-center gap-1.5 text-ink-soft">
+                <Bus className="size-4 self-center text-ink-faint" strokeWidth={1.75} />
+                Terrestres
+              </dt>
+              <dd className="tabular-nums text-ink">
+                {fmtMoney(headline.commissionByGroup.terrestres, currency)}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between">
+              <dt className="text-ink-soft">Markup</dt>
+              <dd className="tabular-nums text-ink">
+                {fmtMoney(headline.markupAmount, currency)}
+              </dd>
+            </div>
+            {headline.discount > 0 && (
+              <div className="flex items-baseline justify-between">
+                <dt className="text-ink-soft">Descuento</dt>
+                <dd className="tabular-nums text-tone-red-text">
+                  −{fmtMoney(headline.discount, currency)}
+                </dd>
+              </div>
+            )}
+          </dl>
+          <div className="mt-2.5 flex items-baseline justify-between border-t border-line pt-2.5">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-money-700">
+              Total comisión
+            </p>
+            <MoneyTicker
+              value={headline.commissionTotal}
+              currency={currency}
+              className="text-xl font-semibold text-money-700"
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="card flex items-center justify-between gap-3 p-4">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              Tu comisión estimada
+            </p>
+            <p className="text-xs text-ink-faint">
+              {fmtNumber(sellerCommissionPct)}% del markup
+            </p>
+          </div>
           <MoneyTicker
-            value={totals.commissionTotal}
+            value={sellerEstimate}
             currency={currency}
-            className="text-xl font-semibold text-money-700"
+            className="shrink-0 text-xl font-semibold text-money-700"
           />
         </div>
-      </div>
+      )}
+
+      {totalPax > 0 && !hasOptions && pax.infants > 0 && (
+        <p className="px-1 text-[11px] text-ink-faint">
+          El infante paga el {Math.round(INFANT_FACTOR * 100)}% y ya está prorrateado en el total.
+        </p>
+      )}
     </div>
   );
 }

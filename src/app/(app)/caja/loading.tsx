@@ -37,12 +37,13 @@ export default function CajaLoading() {
           ))}
         </div>
 
-        {/* tabs + acciones */}
+        {/* tabs + acciones (en mobile las acciones bajan a una fila propia) */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Skeleton className="h-9 w-72 rounded-full" />
-          <div className="flex gap-2">
-            <Skeleton className="h-8 w-36 rounded-xl" />
-            <Skeleton className="h-8 w-36 rounded-xl" />
+          <div className="flex w-full gap-2 md:w-auto">
+            <Skeleton className="h-11 flex-1 rounded-xl md:h-8 md:w-36 md:flex-none" />
+            <Skeleton className="h-11 flex-1 rounded-xl md:h-8 md:w-36 md:flex-none" />
+            <Skeleton className="h-11 flex-1 rounded-xl md:h-8 md:w-36 md:flex-none" />
           </div>
         </div>
 

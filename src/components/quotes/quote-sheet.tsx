@@ -1,5 +1,6 @@
-import { quoteColor, quoteFont, SERVICE_TYPES, SERVICE_ORDER } from "@/lib/domain";
+import { INFANT_FACTOR, paxLabel, quoteColor, quoteFont, SERVICE_TYPES, SERVICE_ORDER } from "@/lib/domain";
 import { fmtDate, fmtDateLong, fmtMoney, fmtPhone } from "@/lib/format";
+import type { QuotePax } from "@/lib/domain";
 import type { ServiceType } from "@/lib/types";
 
 /**
@@ -8,18 +9,31 @@ import type { ServiceType } from "@/lib/types";
  * el detalle interno y la página pública (/p/[token]).
  * Nunca incluye costos ni comisiones.
  */
+export type QuoteSheetItem = { type: ServiceType; description: string };
+
+export type QuoteSheetOption = {
+  name: string;
+  subtitle: string | null;
+  isRecommended: boolean;
+  totalPrice: number;
+  perPerson: number;
+  perInfant: number;
+  items: QuoteSheetItem[];
+};
+
 export type QuoteSheetData = {
   code: string;
   title: string | null;
   destination: string;
   currency: string;
-  pax: number;
+  pax: QuotePax;
   nights: number | null;
   tripDateFrom: string | null;
   tripDateTo: string | null;
   validUntil: string | null;
   totalPrice: number;
   perPerson: number;
+  perInfant: number;
   discount: number;
   notes: string | null;
   createdAt: string | null;
@@ -29,7 +43,9 @@ export type QuoteSheetData = {
   agencyLogoUrl: string | null;
   agencyPhone: string | null;
   sellerName: string | null;
-  items: { type: ServiceType; description: string }[];
+  items: QuoteSheetItem[];
+  /** alternativas comparables: "con este hotel vale 10, con este otro 15" */
+  options: QuoteSheetOption[];
   theme: { color?: string; font?: string };
 };
 
@@ -47,17 +63,21 @@ function DotDivider({ color }: { color: string }) {
   );
 }
 
+/** grupos de servicios ordenados como la planilla */
+function groupItems(items: QuoteSheetItem[]) {
+  return SERVICE_ORDER.map((type) => ({
+    type,
+    items: items.filter((i) => i.type === type),
+  })).filter((g) => g.items.length > 0);
+}
+
 export function QuoteSheet({ data, className }: { data: QuoteSheetData; className?: string }) {
   const color = quoteColor(data.theme?.color);
   const font = quoteFont(data.theme?.font);
 
-  // agrupar servicios por tipo respetando el orden de la planilla
-  const groups = SERVICE_ORDER.map((type) => ({
-    type,
-    items: data.items.filter((i) => i.type === type),
-  })).filter((g) => g.items.length > 0);
-
+  const groups = groupItems(data.items);
   const softInk = { color: color.ink, opacity: 0.62 };
+  const hasOptions = data.options.length > 0;
 
   return (
     <div
@@ -140,7 +160,7 @@ export function QuoteSheet({ data, className }: { data: QuoteSheetData; classNam
         )}
         <p className="mt-0.5 text-[13px]" style={softInk}>
           {data.nights ? `${data.nights} ${data.nights === 1 ? "noche" : "noches"} · ` : ""}
-          {data.pax} {data.pax === 1 ? "persona" : "personas"}
+          {paxLabel(data.pax)}
         </p>
       </div>
 
@@ -182,28 +202,92 @@ export function QuoteSheet({ data, className }: { data: QuoteSheetData; classNam
         <DotDivider color={color.accent} />
       </div>
 
-      {/* total */}
-      <div className="mt-8 text-center">
-        <p
-          className="text-[10px] font-medium uppercase tracking-[0.32em]"
-          style={{ color: color.accent }}
-        >
-          Total
-        </p>
-        <p className="mt-1.5 text-[34px] leading-none tracking-tight tabular-nums">
-          {fmtMoney(data.totalPrice, data.currency)}
-        </p>
-        {data.pax > 1 && (
-          <p className="mt-2 text-[13px] tabular-nums" style={softInk}>
-            por persona {fmtMoney(data.perPerson, data.currency)}
+      {hasOptions ? (
+        /* ── opciones comparables: cada una con su precio ── */
+        <div className="mt-8">
+          <p
+            className="text-center text-[10px] font-medium uppercase tracking-[0.32em]"
+            style={{ color: color.accent }}
+          >
+            {data.options.length === 2 ? "Dos opciones" : "Opciones"}
           </p>
-        )}
-        {data.discount > 0 && (
-          <p className="mt-1.5 text-[12px]" style={{ color: color.accent }}>
-            incluye descuento de {fmtMoney(data.discount, data.currency)}
+          <div className="mt-4 space-y-4">
+            {data.options.map((o, idx) => (
+              <div
+                key={idx}
+                className="rounded-[3px] px-5 py-5 text-center"
+                style={{
+                  border: `1px solid ${color.accent}${o.isRecommended ? "66" : "33"}`,
+                  boxShadow: o.isRecommended ? `0 0 0 3px ${color.accent}14` : undefined,
+                }}
+              >
+                {o.isRecommended && (
+                  <p
+                    className="mb-1.5 text-[9px] font-medium uppercase tracking-[0.3em]"
+                    style={{ color: color.accent }}
+                  >
+                    Nuestra recomendación
+                  </p>
+                )}
+                <p className="text-[17px] leading-tight">{o.name}</p>
+                {o.subtitle && (
+                  <p className="mt-0.5 text-[12px]" style={softInk}>
+                    {o.subtitle}
+                  </p>
+                )}
+                {o.items.length > 0 && (
+                  <ul className="mt-2.5 space-y-1">
+                    {o.items.map((item, i) => (
+                      <li key={i} className="text-[13px] leading-snug" style={softInk}>
+                        {item.description}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="mt-4 text-[28px] leading-none tracking-tight tabular-nums">
+                  {fmtMoney(o.perPerson, data.currency)}
+                </p>
+                <p className="mt-1 text-[11px] uppercase tracking-[0.2em]" style={softInk}>
+                  por persona
+                </p>
+                <p className="mt-2 text-[12px] tabular-nums" style={softInk}>
+                  total {fmtMoney(o.totalPrice, data.currency)}
+                  {data.pax.infants > 0
+                    ? ` · infante ${fmtMoney(o.perInfant, data.currency)}`
+                    : ""}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        /* ── precio: por persona grande, total chico ── */
+        <div className="mt-8 text-center">
+          <p
+            className="text-[10px] font-medium uppercase tracking-[0.32em]"
+            style={{ color: color.accent }}
+          >
+            Por persona
           </p>
-        )}
-      </div>
+          <p className="mt-1.5 text-[38px] leading-none tracking-tight tabular-nums">
+            {fmtMoney(data.perPerson, data.currency)}
+          </p>
+          <p className="mt-3 text-[13px] tabular-nums" style={softInk}>
+            total {fmtMoney(data.totalPrice, data.currency)}
+          </p>
+          {data.pax.infants > 0 && (
+            <p className="mt-1 text-[12px] tabular-nums" style={softInk}>
+              el infante paga {fmtMoney(data.perInfant, data.currency)} (
+              {Math.round(INFANT_FACTOR * 100)}%)
+            </p>
+          )}
+          {data.discount > 0 && (
+            <p className="mt-1.5 text-[12px]" style={{ color: color.accent }}>
+              incluye descuento de {fmtMoney(data.discount, data.currency)}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* notas */}
       {data.notes && (

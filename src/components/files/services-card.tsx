@@ -3,7 +3,9 @@
 import * as React from "react";
 import { toast } from "sonner";
 import {
+  AlarmClock,
   ArrowRight,
+  ChevronRight,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -25,12 +27,21 @@ import {
   updateService,
   deleteService,
   toggleServicePaid,
+  updateFileCommission,
 } from "@/lib/actions/files";
-import { SERVICE_TYPES, SERVICE_ORDER, round2 } from "@/lib/domain";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import {
+  COMMISSION_TYPES,
+  SERVICE_TYPES,
+  SERVICE_ORDER,
+  fileCommission,
+  round2,
+  type CommissionType,
+} from "@/lib/domain";
+import { fmtDate, fmtDeadline, fmtMoney, fmtNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { ServiceType } from "@/lib/types";
+import type { ServiceImage, ServiceType } from "@/lib/types";
 import { numToInput, parseAmount } from "./helpers";
+import { ServiceImagesField, ServiceImagesStrip } from "./service-images";
 import type { ServiceRow, SupplierOption } from "./types";
 
 /** círculo tonal por tipo de servicio (clases estáticas para Tailwind) */
@@ -46,39 +57,81 @@ const SERVICE_TONES: Record<ServiceType, string> = {
   otro: "bg-tone-stone-soft text-tone-stone-text",
 };
 
+/** urgencia de la fecha de caída (la calcula fmtDeadline) */
+const DEADLINE_TONES: Record<"red" | "amber" | "stone", string> = {
+  red: "bg-tone-red-soft text-tone-red-text border-tone-red-line",
+  amber: "bg-tone-amber-soft text-tone-amber-text border-tone-amber-line",
+  stone: "bg-tone-stone-soft text-tone-stone-text border-tone-stone-line",
+};
+
+/** una reserva entra al banner si cae dentro de una semana (o ya venció) */
+const DUE_SOON_DAYS = 7;
+
+/** identidad estable para cuando no hay ningún toggle optimista en vuelo */
+const NO_OVERRIDES: Record<string, boolean> = {};
+
+type DueItem = {
+  service: ServiceRow;
+  deadline: NonNullable<ReturnType<typeof fmtDeadline>>;
+};
+
 export function ServicesCard({
   fileId,
+  agencyId,
   currency,
   services,
   suppliers,
   sellerName,
+  commissionType,
   commissionPct,
+  commissionAmount,
+  commissionLabel,
+  isAdmin,
   className,
 }: {
   fileId: string;
+  agencyId: string;
   currency: string;
   services: ServiceRow[];
   suppliers: SupplierOption[];
   sellerName: string;
+  commissionType: string;
   commissionPct: number;
+  commissionAmount: number;
+  commissionLabel: string | null;
+  isAdmin: boolean;
   className?: string;
 }) {
   const [dialogService, setDialogService] = React.useState<ServiceRow | "new" | null>(null);
   const [toDelete, setToDelete] = React.useState<ServiceRow | null>(null);
   const [deleting, setDeleting] = React.useState(false);
+  const [commissionOpen, setCommissionOpen] = React.useState(false);
 
-  /* toggle "pagado a proveedor" optimista */
-  const [paidOverrides, setPaidOverrides] = React.useState<Record<string, boolean>>({});
-  React.useEffect(() => setPaidOverrides({}), [services]);
+  /* toggle "pagado a proveedor" optimista: el override vale mientras el servidor
+     siga contestando lo mismo; en cuanto llegan datos nuevos se descarta solo. */
+  const serverPaid = services.map((s) => `${s.id}:${s.paid_to_supplier ? 1 : 0}`).join("|");
+  const [optimistic, setOptimistic] = React.useState<{
+    from: string;
+    map: Record<string, boolean>;
+  }>({ from: serverPaid, map: {} });
+  const paidOverrides = optimistic.from === serverPaid ? optimistic.map : NO_OVERRIDES;
 
   const isPaid = (s: ServiceRow) => paidOverrides[s.id] ?? s.paid_to_supplier;
 
   const togglePaid = async (s: ServiceRow) => {
     const next = !isPaid(s);
-    setPaidOverrides((prev) => ({ ...prev, [s.id]: next }));
+    setOptimistic((prev) => ({
+      from: serverPaid,
+      map: { ...(prev.from === serverPaid ? prev.map : {}), [s.id]: next },
+    }));
     const res = await toggleServicePaid({ serviceId: s.id, fileId, paid: next });
     if (!res.ok) {
-      setPaidOverrides((prev) => ({ ...prev, [s.id]: !next }));
+      // revertir = soltar el override y volver a lo que dice el servidor
+      setOptimistic((prev) => {
+        const map = { ...prev.map };
+        delete map[s.id];
+        return { from: prev.from, map };
+      });
       toast.error(res.error);
     }
   };
@@ -106,10 +159,30 @@ export function ServicesCard({
     [services],
   );
 
+  /* reservas sin pagar que caen en <= 7 días (o ya vencidas), la más urgente primero */
+  const dueSoon = React.useMemo<DueItem[]>(() => {
+    const out: DueItem[] = [];
+    for (const s of services) {
+      if (!s.deadline_date) continue;
+      if (paidOverrides[s.id] ?? s.paid_to_supplier) continue;
+      const deadline = fmtDeadline(s.deadline_date);
+      if (!deadline || deadline.days > DUE_SOON_DAYS) continue;
+      out.push({ service: s, deadline });
+    }
+    return out.sort((a, b) => a.deadline.days - b.deadline.days);
+  }, [services, paidOverrides]);
+
   const totalCost = round2(services.reduce((a, s) => a + s.cost, 0));
   const totalSale = round2(services.reduce((a, s) => a + s.price, 0));
   const utility = round2(totalSale - totalCost);
-  const commission = round2((utility * commissionPct) / 100);
+  const isFixed = commissionType === "monto_fijo";
+  const commission = fileCommission({
+    commission_type: commissionType,
+    commission_pct: commissionPct,
+    commission_amount: commissionAmount,
+    utility,
+  });
+  const showCommission = isAdmin || commission > 0;
 
   return (
     <section className={cn("card animate-slide-up p-4 md:p-5", className)}>
@@ -119,6 +192,10 @@ export function ServicesCard({
           <Plus /> Agregar
         </Button>
       </div>
+
+      {dueSoon.length > 0 && (
+        <DeadlineBanner items={dueSoon} onOpen={(s) => setDialogService(s)} />
+      )}
 
       {services.length === 0 ? (
         <EmptyState
@@ -202,15 +279,18 @@ export function ServicesCard({
                 {fmtMoney(utility, currency)}
               </span>
             </div>
-            {commissionPct > 0 && (
-              <div className="flex items-center justify-between text-[13px]">
-                <span className="text-ink-faint">
-                  Comisión {sellerName} ({commissionPct}%)
-                </span>
-                <span className="font-medium tabular-nums text-ink-soft">
-                  {fmtMoney(commission, currency)}
-                </span>
-              </div>
+
+            {showCommission && (
+              <CommissionLine
+                sellerName={sellerName}
+                currency={currency}
+                isFixed={isFixed}
+                commissionPct={commissionPct}
+                commissionLabel={commissionLabel}
+                commission={commission}
+                editable={isAdmin}
+                onEdit={() => setCommissionOpen(true)}
+              />
             )}
           </div>
         </>
@@ -218,12 +298,29 @@ export function ServicesCard({
 
       {dialogService && (
         <ServiceDialog
+          key={dialogService === "new" ? "new" : dialogService.id}
           fileId={fileId}
+          agencyId={agencyId}
           currency={currency}
           suppliers={suppliers}
           service={dialogService === "new" ? null : dialogService}
           open
           onOpenChange={(o) => !o && setDialogService(null)}
+        />
+      )}
+
+      {commissionOpen && (
+        <CommissionDialog
+          fileId={fileId}
+          currency={currency}
+          sellerName={sellerName}
+          utility={utility}
+          commissionType={commissionType}
+          commissionPct={commissionPct}
+          commissionAmount={commissionAmount}
+          commissionLabel={commissionLabel}
+          open
+          onOpenChange={setCommissionOpen}
         />
       )}
 
@@ -245,6 +342,74 @@ export function ServicesCard({
         </Dialog>
       )}
     </section>
+  );
+}
+
+/* ───────────────────────── caída de reservas ───────────────────────── */
+
+/** chip de la fecha de caída. `muted` = ya está pagada al proveedor: informa, no alarma. */
+function DeadlineChip({
+  date,
+  muted,
+  className,
+}: {
+  date: string;
+  muted?: boolean;
+  className?: string;
+}) {
+  const dl = fmtDeadline(date);
+  if (!dl) return null;
+  return (
+    <span
+      className={cn(
+        "inline-flex min-h-6 items-center gap-1 rounded-full border px-2 text-[11px] font-medium",
+        muted ? "border-line bg-sand-soft text-ink-faint" : DEADLINE_TONES[dl.tone],
+        className,
+      )}
+    >
+      <AlarmClock className="size-3.5 shrink-0" strokeWidth={1.9} />
+      {muted ? `Caía ${fmtDate(date)}` : dl.label}
+    </span>
+  );
+}
+
+/** aviso compacto arriba de la lista: cuántas reservas caen y cuál es la más urgente */
+function DeadlineBanner({
+  items,
+  onOpen,
+}: {
+  items: DueItem[];
+  onOpen: (service: ServiceRow) => void;
+}) {
+  const first = items[0];
+  const overdue = items.filter((i) => i.deadline.days < 0).length;
+  const title =
+    items.length === 1
+      ? first.deadline.days < 0
+        ? "Reserva vencida"
+        : "Reserva por caer"
+      : overdue === items.length
+        ? `${items.length} reservas vencidas`
+        : `${items.length} reservas por caer`;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(first.service)}
+      className={cn(
+        "mb-3 flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-transform tap-highlight-none active:scale-[0.99] animate-fade-in",
+        DEADLINE_TONES[first.deadline.tone],
+      )}
+    >
+      <AlarmClock className="size-4.5 shrink-0" strokeWidth={1.9} />
+      <div className="min-w-0 flex-1">
+        <p className="text-[13px] font-semibold leading-snug">{title}</p>
+        <p className="truncate text-xs leading-snug opacity-90">
+          {first.service.description} — {first.deadline.label}
+        </p>
+      </div>
+      <ChevronRight className="size-4 shrink-0 opacity-60" strokeWidth={2} />
+    </button>
   );
 }
 
@@ -298,7 +463,11 @@ function ServiceItem({
           {/* switch de pagado: visible directo en desktop */}
           <Tooltip content={paid ? "Pagado al proveedor" : "Debe al proveedor"}>
             <span className="hidden md:inline-flex">
-              <Switch checked={paid} onCheckedChange={onTogglePaid} />
+              <Switch
+                checked={paid}
+                onCheckedChange={onTogglePaid}
+                aria-label={`Pagado al proveedor: ${s.description}`}
+              />
             </span>
           </Tooltip>
           <Dropdown>
@@ -324,12 +493,255 @@ function ServiceItem({
         </div>
       </div>
 
-      {/* mobile: switch con label explícito */}
-      <label className="mt-1.5 flex min-h-6 w-fit items-center gap-2 text-xs text-ink-faint tap-highlight-none md:hidden">
-        <Switch checked={paid} onCheckedChange={onTogglePaid} />
-        {paid ? "Pagado a proveedor" : "Debe al proveedor"}
-      </label>
+      {/* pie de la fila: pago al proveedor (mobile), caída de la reserva y vouchers.
+          Sin caída ni fotos no aporta nada en desktop (ahí el switch ya está arriba). */}
+      <div
+        className={cn(
+          "mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5",
+          !s.deadline_date && s.images.length === 0 && "md:hidden",
+        )}
+      >
+        <label className="flex min-h-6 items-center gap-2 text-xs text-ink-faint tap-highlight-none md:hidden">
+          <Switch checked={paid} onCheckedChange={onTogglePaid} />
+          {paid ? "Pagado a proveedor" : "Debe al proveedor"}
+        </label>
+        {s.deadline_date && <DeadlineChip date={s.deadline_date} muted={paid} />}
+        <ServiceImagesStrip images={s.images} />
+      </div>
     </div>
+  );
+}
+
+/* ───────────────────────── comisión del vendedor ───────────────────────── */
+
+function CommissionLine({
+  sellerName,
+  currency,
+  isFixed,
+  commissionPct,
+  commissionLabel,
+  commission,
+  editable,
+  onEdit,
+}: {
+  sellerName: string;
+  currency: string;
+  isFixed: boolean;
+  commissionPct: number;
+  commissionLabel: string | null;
+  commission: number;
+  editable: boolean;
+  onEdit: () => void;
+}) {
+  const content = (
+    <>
+      <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-[13px] text-ink-faint">
+        <span className="truncate">
+          Comisión {sellerName}
+          {!isFixed && commissionPct > 0
+            ? ` (${fmtNumber(commissionPct, Number.isInteger(commissionPct) ? 0 : 1)}%)`
+            : ""}
+        </span>
+        {commissionLabel && (
+          <span className="rounded-full border border-brand-tint-line bg-brand-tint px-1.5 py-0.5 text-[10px] font-medium leading-tight text-brand-text">
+            {commissionLabel}
+          </span>
+        )}
+        {isFixed && !commissionLabel && (
+          <span className="rounded-full border border-line bg-paper px-1.5 py-0.5 text-[10px] font-medium leading-tight text-ink-faint">
+            {COMMISSION_TYPES.monto_fijo.short}
+          </span>
+        )}
+      </span>
+      <span className="flex shrink-0 items-center gap-1.5">
+        <span className="text-[13px] font-medium tabular-nums text-ink-soft">
+          {fmtMoney(commission, currency)}
+        </span>
+        {editable && <Pencil className="size-3.5 text-ink-faint" strokeWidth={2} />}
+      </span>
+    </>
+  );
+
+  if (!editable) {
+    return <div className="flex items-center justify-between gap-2 pt-0.5">{content}</div>;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onEdit}
+      aria-label="Editar la comisión del vendedor"
+      className="-mx-1.5 flex min-h-11 w-full items-center justify-between gap-2 rounded-lg px-1.5 text-left transition-colors hover:bg-sand-deep/50 tap-highlight-none"
+    >
+      {content}
+    </button>
+  );
+}
+
+const COMMISSION_ORDER: CommissionType[] = ["utilidad_pct", "monto_fijo"];
+
+function CommissionDialog({
+  fileId,
+  currency,
+  sellerName,
+  utility,
+  commissionType,
+  commissionPct,
+  commissionAmount,
+  commissionLabel,
+  open,
+  onOpenChange,
+}: {
+  fileId: string;
+  currency: string;
+  sellerName: string;
+  utility: number;
+  commissionType: string;
+  commissionPct: number;
+  commissionAmount: number;
+  commissionLabel: string | null;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}) {
+  const [type, setType] = React.useState<CommissionType>(
+    commissionType === "monto_fijo" ? "monto_fijo" : "utilidad_pct",
+  );
+  const [pct, setPct] = React.useState(numToInput(commissionPct));
+  const [amount, setAmount] = React.useState(numToInput(commissionAmount));
+  const [label, setLabel] = React.useState(commissionLabel ?? "");
+  const [loading, setLoading] = React.useState(false);
+
+  const pctNum = parseAmount(pct);
+  const amountNum = parseAmount(amount);
+  const preview = fileCommission({
+    commission_type: type,
+    commission_pct: pctNum,
+    commission_amount: amountNum,
+    utility,
+  });
+
+  const submit = async () => {
+    if (type === "utilidad_pct" && (pctNum < 0 || pctNum > 100)) {
+      toast.error("El porcentaje va de 0 a 100.");
+      return;
+    }
+    if (type === "monto_fijo" && amountNum < 0) {
+      toast.error("El monto no puede ser negativo.");
+      return;
+    }
+    setLoading(true);
+    const res = await updateFileCommission({
+      fileId,
+      commissionType: type,
+      commissionPct: Math.min(100, Math.max(0, pctNum)),
+      commissionAmount: Math.max(0, amountNum),
+      commissionLabel: label.trim() || null,
+    });
+    setLoading(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    toast.success("Listo, actualizamos la comisión");
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        title="Comisión del vendedor"
+        description={`Cómo cobra ${sellerName} esta venta.`}
+      >
+        <div className="space-y-4">
+          <ChoiceGrid<CommissionType>
+            options={COMMISSION_ORDER.map((k) => ({
+              value: k,
+              label: COMMISSION_TYPES[k].label,
+              icon: COMMISSION_TYPES[k].icon,
+              hint: COMMISSION_TYPES[k].hint,
+            }))}
+            value={type}
+            onChange={setType}
+            columns={2}
+          />
+
+          {type === "utilidad_pct" ? (
+            <div>
+              <Label htmlFor="cm-pct">Porcentaje de la utilidad</Label>
+              <div className="relative">
+                <Input
+                  id="cm-pct"
+                  inputMode="decimal"
+                  value={pct}
+                  onChange={(e) => setPct(e.target.value)}
+                  placeholder="0"
+                  className="pr-8 text-right tabular-nums"
+                />
+                <span className="pointer-events-none absolute inset-y-0 right-3.5 flex items-center text-sm text-ink-faint">
+                  %
+                </span>
+              </div>
+              <p className="mt-1.5 text-[11px] text-ink-faint">
+                Utilidad de este file: {fmtMoney(utility, currency)}
+              </p>
+            </div>
+          ) : (
+            <div>
+              <Label htmlFor="cm-amount">Monto por venta</Label>
+              <div className="relative">
+                <Input
+                  id="cm-amount"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0"
+                  className="pr-12 text-right tabular-nums"
+                />
+                <span className="pointer-events-none absolute inset-y-0 right-3.5 flex items-center text-sm text-ink-faint">
+                  {currency}
+                </span>
+              </div>
+              <p className="mt-1.5 text-[11px] text-ink-faint">
+                Se paga igual, sin importar la utilidad del file.
+              </p>
+            </div>
+          )}
+
+          <div>
+            <Label htmlFor="cm-label">Etiqueta (opcional)</Label>
+            <Input
+              id="cm-label"
+              value={label}
+              maxLength={40}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Ej: Grupal Europa"
+            />
+            <p className="mt-1.5 text-[11px] text-ink-faint">
+              Queda al lado de la comisión, para acordarte por qué es así.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 rounded-xl bg-money-tint px-3.5 py-3">
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold text-money-text">Cobra {sellerName}</p>
+              <p className="text-[11px] text-ink-faint">con esta venta</p>
+            </div>
+            <span className="shrink-0 text-xl font-bold tabular-nums text-money-text">
+              {fmtMoney(preview, currency)}
+            </span>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => onOpenChange(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={submit} loading={loading}>
+              Guardar comisión
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -337,6 +749,7 @@ function ServiceItem({
 
 function ServiceDialog({
   fileId,
+  agencyId,
   currency,
   suppliers,
   service,
@@ -344,6 +757,7 @@ function ServiceDialog({
   onOpenChange,
 }: {
   fileId: string;
+  agencyId: string;
   currency: string;
   suppliers: SupplierOption[];
   service: ServiceRow | null;
@@ -357,6 +771,9 @@ function ServiceDialog({
   const [reservationCode, setReservationCode] = React.useState(service?.reservation_code ?? "");
   const [dateFrom, setDateFrom] = React.useState(service?.date_from ?? "");
   const [dateTo, setDateTo] = React.useState(service?.date_to ?? "");
+  const [deadlineDate, setDeadlineDate] = React.useState(service?.deadline_date ?? "");
+  const [images, setImages] = React.useState<ServiceImage[]>(service?.images ?? []);
+  const [uploadingImages, setUploadingImages] = React.useState(false);
   const [cost, setCost] = React.useState(numToInput(service?.cost));
   const [price, setPrice] = React.useState(numToInput(service?.price));
   const [loading, setLoading] = React.useState(false);
@@ -364,7 +781,7 @@ function ServiceDialog({
   const costNum = parseAmount(cost);
   const priceNum = parseAmount(price);
   const utility = round2(priceNum - costNum);
-  const canSave = description.trim().length > 0;
+  const canSave = description.trim().length > 0 && !uploadingImages;
 
   const submit = async () => {
     if (!canSave) return;
@@ -377,6 +794,8 @@ function ServiceDialog({
       reservationCode: reservationCode.trim() || null,
       dateFrom: dateFrom || null,
       dateTo: dateTo || null,
+      deadlineDate: deadlineDate || null,
+      images,
       cost: costNum,
       price: priceNum,
     };
@@ -476,6 +895,35 @@ function ServiceDialog({
             </div>
           </div>
 
+          {/* fecha de caída: el margen para pagarle al proveedor antes de perder la reserva */}
+          <div className="rounded-xl border border-line bg-sand-soft/50 p-3">
+            <Label htmlFor="sv-deadline">Fecha de caída de la reserva</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                id="sv-deadline"
+                type="date"
+                value={deadlineDate}
+                onChange={(e) => setDeadlineDate(e.target.value)}
+                className="w-full sm:w-48"
+              />
+              {deadlineDate && <DeadlineChip date={deadlineDate} />}
+            </div>
+            <p className="mt-1.5 text-[11px] text-ink-faint">
+              Hasta cuándo hay tiempo de pagarla. Te avisamos cuando se acerca.
+            </p>
+          </div>
+
+          <div>
+            <Label>Fotos y comprobantes</Label>
+            <ServiceImagesField
+              agencyId={agencyId}
+              fileId={fileId}
+              value={images}
+              onChange={setImages}
+              onUploadingChange={setUploadingImages}
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="sv-cost">Costo ({currency})</Label>
@@ -517,7 +965,10 @@ function ServiceDialog({
             </span>
           </div>
 
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {uploadingImages && (
+              <p className="mr-auto text-[11px] text-ink-faint">Esperá, se están subiendo las fotos.</p>
+            )}
             <Button variant="secondary" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>

@@ -383,9 +383,11 @@ export type Database = {
           created_at: string
           date_from: string | null
           date_to: string | null
+          deadline_date: string | null
           description: string
           file_id: string
           id: string
+          images: Json
           paid_to_supplier: boolean
           position: number
           price: number
@@ -400,9 +402,11 @@ export type Database = {
           created_at?: string
           date_from?: string | null
           date_to?: string | null
+          deadline_date?: string | null
           description: string
           file_id: string
           id?: string
+          images?: Json
           paid_to_supplier?: boolean
           position?: number
           price?: number
@@ -417,9 +421,11 @@ export type Database = {
           created_at?: string
           date_from?: string | null
           date_to?: string | null
+          deadline_date?: string | null
           description?: string
           file_id?: string
           id?: string
+          images?: Json
           paid_to_supplier?: boolean
           position?: number
           price?: number
@@ -510,7 +516,10 @@ export type Database = {
         Row: {
           agency_id: string
           code: string
+          commission_amount: number
+          commission_label: string | null
           commission_pct: number
+          commission_type: string
           contact_id: string
           created_at: string
           currency: string
@@ -529,7 +538,10 @@ export type Database = {
         Insert: {
           agency_id: string
           code?: string
+          commission_amount?: number
+          commission_label?: string | null
           commission_pct?: number
+          commission_type?: string
           contact_id: string
           created_at?: string
           currency?: string
@@ -548,7 +560,10 @@ export type Database = {
         Update: {
           agency_id?: string
           code?: string
+          commission_amount?: number
+          commission_label?: string | null
           commission_pct?: number
+          commission_type?: string
           contact_id?: string
           created_at?: string
           currency?: string
@@ -1092,8 +1107,9 @@ export type Database = {
           currency: string
           direction: Database["public"]["Enums"]["payment_direction"]
           exchange_rate: number | null
-          file_id: string
+          file_id: string | null
           id: string
+          member_id: string | null
           method: Database["public"]["Enums"]["payment_method"]
           note: string | null
           paid_at: string
@@ -1112,8 +1128,9 @@ export type Database = {
           currency?: string
           direction?: Database["public"]["Enums"]["payment_direction"]
           exchange_rate?: number | null
-          file_id: string
+          file_id?: string | null
           id?: string
+          member_id?: string | null
           method?: Database["public"]["Enums"]["payment_method"]
           note?: string | null
           paid_at?: string
@@ -1132,8 +1149,9 @@ export type Database = {
           currency?: string
           direction?: Database["public"]["Enums"]["payment_direction"]
           exchange_rate?: number | null
-          file_id?: string
+          file_id?: string | null
           id?: string
+          member_id?: string | null
           method?: Database["public"]["Enums"]["payment_method"]
           note?: string | null
           paid_at?: string
@@ -1173,6 +1191,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "payments_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "payments_received_by_fkey"
             columns: ["received_by"]
             isOneToOne: false
@@ -1197,6 +1222,7 @@ export type Database = {
           description: string
           gross: number | null
           id: string
+          option_id: string | null
           position: number
           quote_id: string
           show_in_client_quote: boolean
@@ -1211,6 +1237,7 @@ export type Database = {
           description: string
           gross?: number | null
           id?: string
+          option_id?: string | null
           position?: number
           quote_id: string
           show_in_client_quote?: boolean
@@ -1225,6 +1252,7 @@ export type Database = {
           description?: string
           gross?: number | null
           id?: string
+          option_id?: string | null
           position?: number
           quote_id?: string
           show_in_client_quote?: boolean
@@ -1237,6 +1265,13 @@ export type Database = {
             columns: ["agency_id"]
             isOneToOne: false
             referencedRelation: "agencies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_items_option_id_fkey"
+            columns: ["option_id"]
+            isOneToOne: false
+            referencedRelation: "quote_options"
             referencedColumns: ["id"]
           },
           {
@@ -1255,10 +1290,69 @@ export type Database = {
           },
         ]
       }
+      quote_options: {
+        Row: {
+          agency_id: string
+          created_at: string
+          id: string
+          is_recommended: boolean
+          name: string
+          per_person: number
+          position: number
+          quote_id: string
+          subtitle: string | null
+          total_cost: number
+          total_price: number
+        }
+        Insert: {
+          agency_id: string
+          created_at?: string
+          id?: string
+          is_recommended?: boolean
+          name: string
+          per_person?: number
+          position?: number
+          quote_id: string
+          subtitle?: string | null
+          total_cost?: number
+          total_price?: number
+        }
+        Update: {
+          agency_id?: string
+          created_at?: string
+          id?: string
+          is_recommended?: boolean
+          name?: string
+          per_person?: number
+          position?: number
+          quote_id?: string
+          subtitle?: string | null
+          total_cost?: number
+          total_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_options_agency_id_fkey"
+            columns: ["agency_id"]
+            isOneToOne: false
+            referencedRelation: "agencies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_options_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quotes: {
         Row: {
           accepted_at: string | null
+          accepted_option_id: string | null
           agency_id: string
+          children_ages: Json
           code: string
           commission_total: number
           contact_id: string | null
@@ -1277,6 +1371,9 @@ export type Database = {
           notes: string | null
           number: number
           pax: number
+          pax_adults: number
+          pax_children: number
+          pax_infants: number
           public_token: string
           sent_at: string | null
           status: Database["public"]["Enums"]["quote_status"]
@@ -1291,7 +1388,9 @@ export type Database = {
         }
         Insert: {
           accepted_at?: string | null
+          accepted_option_id?: string | null
           agency_id: string
+          children_ages?: Json
           code?: string
           commission_total?: number
           contact_id?: string | null
@@ -1310,6 +1409,9 @@ export type Database = {
           notes?: string | null
           number?: number
           pax?: number
+          pax_adults?: number
+          pax_children?: number
+          pax_infants?: number
           public_token?: string
           sent_at?: string | null
           status?: Database["public"]["Enums"]["quote_status"]
@@ -1324,7 +1426,9 @@ export type Database = {
         }
         Update: {
           accepted_at?: string | null
+          accepted_option_id?: string | null
           agency_id?: string
+          children_ages?: Json
           code?: string
           commission_total?: number
           contact_id?: string | null
@@ -1343,6 +1447,9 @@ export type Database = {
           notes?: string | null
           number?: number
           pax?: number
+          pax_adults?: number
+          pax_children?: number
+          pax_infants?: number
           public_token?: string
           sent_at?: string | null
           status?: Database["public"]["Enums"]["quote_status"]
@@ -1356,6 +1463,13 @@ export type Database = {
           valid_until?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "quotes_accepted_option_id_fkey"
+            columns: ["accepted_option_id"]
+            isOneToOne: false
+            referencedRelation: "quote_options"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "quotes_agency_id_fkey"
             columns: ["agency_id"]
@@ -1672,7 +1786,11 @@ export type Database = {
         | "entregado"
         | "leido"
         | "fallido"
-      payment_direction: "cobro" | "pago_proveedor" | "reembolso"
+      payment_direction:
+        | "cobro"
+        | "pago_proveedor"
+        | "reembolso"
+        | "pago_comision"
       payment_method:
         | "efectivo"
         | "transferencia"
@@ -1866,7 +1984,12 @@ export const Constants = {
         "nota_interna",
       ],
       message_status: ["pendiente", "enviado", "entregado", "leido", "fallido"],
-      payment_direction: ["cobro", "pago_proveedor", "reembolso"],
+      payment_direction: [
+        "cobro",
+        "pago_proveedor",
+        "reembolso",
+        "pago_comision",
+      ],
       payment_method: [
         "efectivo",
         "transferencia",

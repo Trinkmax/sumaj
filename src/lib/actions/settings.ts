@@ -8,6 +8,8 @@ import {
   fail,
   type ActionResult,
 } from "@/lib/actions/core";
+import { createAnonClient } from "@/lib/supabase/server";
+import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
 import { TAG_COLORS, TAG_CATEGORIES } from "@/lib/domain";
 import type { AgencySettings, TablesUpdate } from "@/lib/types";
 import type { Json } from "@/lib/database.types";
@@ -63,6 +65,13 @@ const agencySchema = z.object({
         })
         .optional(),
       quote_saved_notes: z.array(z.string().max(500)).max(30).optional(),
+      quote_fees: z
+        .object({
+          aereo_pct: z.number().min(0).max(100),
+          terrestre_pct: z.number().min(0).max(100),
+        })
+        .optional(),
+      quote_seller_commission_pct: z.number().min(0).max(100).optional(),
     })
     .optional(),
 });
@@ -94,6 +103,10 @@ export async function updateAgency(
       ...(settingsPatch.quote_saved_notes && {
         quote_saved_notes: settingsPatch.quote_saved_notes,
       }),
+      ...(settingsPatch.quote_fees && { quote_fees: settingsPatch.quote_fees }),
+      ...(settingsPatch.quote_seller_commission_pct !== undefined && {
+        quote_seller_commission_pct: settingsPatch.quote_seller_commission_pct,
+      }),
       ...(settingsPatch.whatsapp && {
         whatsapp: {
           phone_number_id:
@@ -124,7 +137,193 @@ export async function updateAgency(
 }
 
 /* ───────────────────────────────────────────
-   Equipo
+   Equipo — alta de usuarios con email + contraseña
+   ─────────────────────────────────────────── */
+
+const teamMemberSchema = z.object({
+  email: z.email("Ese email no parece válido."),
+  password: z.string().min(8, "La contraseña necesita al menos 8 caracteres."),
+  displayName: z
+    .string()
+    .trim()
+    .min(2, "Poné el nombre de la persona.")
+    .max(80, "El nombre es muy largo."),
+  role: z.enum(["admin", "vendedor", "freelance"]),
+  commissionPct: z.number().min(0, "Mínimo 0").max(100, "Máximo 100"),
+});
+
+/** Resultado del alta: cómo quedó el acceso de la persona. */
+export type CreateTeamMemberResult = {
+  /** "directo": la cuenta ya está lista · "invitacion": entra sola la primera vez */
+  mode: "directo" | "invitacion";
+  /** el email ya tenía cuenta en el sistema: entra con SU contraseña, no con la nueva */
+  reusedAccount: boolean;
+};
+
+const ALREADY_REGISTERED =
+  /already been registered|already registered|already exists|user_exists|email_exists/i;
+
+/** ¿El error de auth dice "ese email ya tiene cuenta"? (mensaje o code) */
+function isAlreadyRegistered(
+  error: { message: string; code?: string | null } | null,
+): boolean {
+  if (!error) return false;
+  if (error.code === "email_exists" || error.code === "user_already_exists") return true;
+  return ALREADY_REGISTERED.test(error.message);
+}
+
+/** Busca un usuario de auth por email paginando el listado admin. */
+async function findAuthUserId(
+  admin: ReturnType<typeof createAdminClient>,
+  email: string,
+): Promise<string | null> {
+  const perPage = 200;
+  for (let page = 1; page <= 10; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+    if (error || !data) return null;
+    const hit = data.users.find((u) => u.email?.toLowerCase() === email);
+    if (hit) return hit.id;
+    if (data.users.length < perPage) return null;
+  }
+  return null;
+}
+
+/**
+ * Crea un usuario del equipo con email y contraseña.
+ * Con SUPABASE_SERVICE_ROLE_KEY la cuenta queda lista al toque (mode "directo").
+ * Sin ella, deja la invitación + la cuenta creada para que entre la primera vez
+ * con ese mismo email y contraseña (mode "invitacion"). Nunca queda a medias.
+ */
+export async function createTeamMember(
+  input: z.infer<typeof teamMemberSchema>,
+): Promise<ActionResult<CreateTeamMemberResult>> {
+  const parsed = teamMemberSchema.safeParse(input);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0]?.message ?? "Revisá los datos del usuario.";
+    return fail(first);
+  }
+  const { supabase, member, agency, isAdmin } = await requireAction();
+  if (!isAdmin) return fail(ADMIN_ONLY);
+
+  const email = parsed.data.email.toLowerCase().trim();
+  const { password, displayName, role, commissionPct } = parsed.data;
+
+  const { data: existingMember } = await supabase
+    .from("members")
+    .select("id")
+    .eq("agency_id", agency.id)
+    .eq("email", email)
+    .maybeSingle();
+  if (existingMember) return fail("Esa persona ya es parte del equipo.");
+
+  /* ── Camino A: service role key → la cuenta queda lista ── */
+  if (hasAdminClient()) {
+    try {
+      const admin = createAdminClient();
+      let userId: string | null = null;
+      let reusedAccount = false;
+      let createdNow = false;
+
+      const { data: created, error: createError } = await admin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { full_name: displayName },
+      });
+
+      if (created?.user) {
+        userId = created.user.id;
+        createdNow = true;
+      } else if (isAlreadyRegistered(createError)) {
+        // ese email ya tiene cuenta en el sistema: lo sumamos a esta agencia
+        userId = await findAuthUserId(admin, email);
+        reusedAccount = true;
+        if (!userId)
+          return fail(
+            "Ese email ya tiene una cuenta y no pudimos encontrarla. Probá con otro email.",
+          );
+      } else {
+        return fail("No se pudo crear el usuario. Revisá el email y probá de nuevo.");
+      }
+
+      const { data: alreadyInAgency } = await admin
+        .from("members")
+        .select("id")
+        .eq("agency_id", agency.id)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (alreadyInAgency) return fail("Esa cuenta ya está en el equipo de la agencia.");
+
+      const { error: memberError } = await admin.from("members").insert({
+        agency_id: agency.id,
+        user_id: userId,
+        role,
+        display_name: displayName,
+        email,
+        commission_pct: commissionPct,
+        is_active: true,
+      });
+      if (memberError) {
+        // si la cuenta la creamos recién, la borramos: así reintentar no cae en
+        // "ese email ya tiene cuenta" con una contraseña que nadie conoce
+        if (createdNow) await admin.auth.admin.deleteUser(userId).catch(() => {});
+        return fail("No pudimos sumar a la persona al equipo. Probá de nuevo.");
+      }
+
+      revalidatePath("/config/equipo");
+      return succeed<CreateTeamMemberResult>({ mode: "directo", reusedAccount });
+    } catch {
+      return fail("No se pudo crear el usuario. Probá de nuevo en un momento.");
+    }
+  }
+
+  /* ── Camino B: sin service role key → invitación + cuenta con esa contraseña ── */
+  const { data: pending } = await supabase
+    .from("invitations")
+    .select("id")
+    .eq("agency_id", agency.id)
+    .eq("email", email)
+    .is("accepted_at", null)
+    .maybeSingle();
+
+  if (pending) {
+    const { error } = await supabase
+      .from("invitations")
+      .update({ role, display_name: displayName, commission_pct: commissionPct })
+      .eq("id", pending.id);
+    if (error) return fail("No se pudo guardar el acceso. Probá de nuevo.");
+  } else {
+    const { error } = await supabase.from("invitations").insert({
+      agency_id: agency.id,
+      email,
+      role,
+      display_name: displayName,
+      commission_pct: commissionPct,
+      invited_by: member.id,
+    });
+    if (error) return fail("No se pudo crear el acceso. Probá de nuevo.");
+  }
+
+  // dejamos la cuenta creada con esa contraseña (best-effort: si ya existe, entra con la suya)
+  let reusedAccount = false;
+  try {
+    const anon = createAnonClient();
+    const { error: signUpError } = await anon.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: displayName } },
+    });
+    if (isAlreadyRegistered(signUpError)) reusedAccount = true;
+  } catch {
+    // la persona igual puede registrarse sola con ese email: la invitación la espera
+  }
+
+  revalidatePath("/config/equipo");
+  return succeed<CreateTeamMemberResult>({ mode: "invitacion", reusedAccount });
+}
+
+/* ───────────────────────────────────────────
+   Equipo — rol, comisión y estado
    ─────────────────────────────────────────── */
 
 const roleSchema = z.object({

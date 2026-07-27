@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Plus, ReceiptText, Search, SearchX } from "lucide-react";
+import { Columns2, Plus, ReceiptText, Search, SearchX } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { EmptyState, Segmented } from "@/components/ui/misc";
@@ -19,6 +19,11 @@ export type QuoteListItem = {
   status: QuoteStatus;
   currency: string;
   total_price: number;
+  /** el número que importa: lo que paga cada pasajero */
+  per_person: number;
+  pax_count: number;
+  /** cantidad de alternativas comparadas (0 = presupuesto simple) */
+  options_count: number;
   valid_until: string | null;
   created_at: string;
   contact: { full_name: string } | null;
@@ -170,6 +175,12 @@ export function QuotesList({ quotes }: { quotes: QuoteListItem[] }) {
                   </div>
                   <p className="mt-0.5 truncate text-[13px] text-ink-faint">
                     {q.contact?.full_name ?? "Sin contacto"}
+                    {q.pax_count > 0 && (
+                      <span className="tabular-nums">
+                        {" · "}
+                        {q.pax_count} {q.pax_count === 1 ? "pasajero" : "pasajeros"}
+                      </span>
+                    )}
                     {q.valid_until && (
                       <span className={cn(expired && "font-medium text-tone-red-text")}>
                         {" · "}
@@ -179,13 +190,19 @@ export function QuotesList({ quotes }: { quotes: QuoteListItem[] }) {
                     )}
                     <span className="sm:hidden"> · {fmtDate(q.created_at)}</span>
                   </p>
+                  {q.options_count > 1 && (
+                    <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-line bg-sand-soft/70 px-1.5 py-0.5 text-[10px] font-medium text-ink-soft">
+                      <Columns2 className="size-3" strokeWidth={2} />
+                      {q.options_count} opciones
+                    </span>
+                  )}
                 </div>
                 <div className="shrink-0 text-right">
                   <p className="text-sm font-semibold tabular-nums text-ink">
-                    {fmtMoney(q.total_price, q.currency)}
+                    {fmtMoney(q.per_person, q.currency)}
                   </p>
-                  <p className="mt-0.5 hidden text-xs text-ink-faint sm:block">
-                    {fmtDate(q.created_at)}
+                  <p className="text-[11px] tabular-nums text-ink-faint">
+                    por persona · {fmtMoney(q.total_price, q.currency)}
                   </p>
                 </div>
                 <span

@@ -26,7 +26,10 @@ export default async function EquipoPage() {
 
   return (
     <>
-      <PageHeader title="Equipo" subtitle="Quiénes venden y cuánto comisionan." />
+      <PageHeader
+        title="Equipo"
+        subtitle="Quiénes venden, cuánto comisionan y quién entra al sistema."
+      />
       <ConfigNav />
 
       <div className="mx-auto mt-4 max-w-3xl px-4 md:mx-0 md:px-6">

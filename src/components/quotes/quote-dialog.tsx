@@ -148,6 +148,9 @@ export function QuoteDialog({
             defaultTheme={data.defaultTheme}
             agency={data.agency}
             sellerName={data.sellerName}
+            isAdmin={data.isAdmin}
+            fees={data.fees}
+            sellerCommissionPct={data.sellerCommissionPct}
             variant="dialog"
             onSaved={handleSaved}
           />

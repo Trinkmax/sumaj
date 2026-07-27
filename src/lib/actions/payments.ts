@@ -184,6 +184,84 @@ export async function registerSupplierPayment(
 }
 
 /* ───────────────────────────────────────────
+   Registrar un pago de comisión a un vendedor
+   (el file es opcional: sin file es una liquidación del período)
+   ─────────────────────────────────────────── */
+const registerCommissionPaymentSchema = z.object({
+  memberId: z.string().uuid(),
+  fileId: z.string().uuid().nullable().optional(),
+  amount: z.number().positive(),
+  currency: z.string().min(2).max(5),
+  method: z.enum(PAYMENT_METHOD_KEYS),
+  note: z.string().max(500).optional(),
+  paidAt: z.string().regex(DATE_RE),
+});
+
+export async function registerCommissionPayment(
+  input: z.infer<typeof registerCommissionPaymentSchema>,
+): Promise<ActionResult<{ paymentId: string; sellerName: string }>> {
+  const parsed = registerCommissionPaymentSchema.safeParse(input);
+  if (!parsed.success) return fail("Datos inválidos. Revisá el monto y la fecha.");
+  const { memberId, fileId, amount, currency, method, note, paidAt } = parsed.data;
+
+  const { supabase, member, agency, isAdmin } = await requireAction();
+  if (!isAdmin) return fail("Solo un admin puede pagar comisiones.");
+
+  const { data: seller } = await supabase
+    .from("members")
+    .select("id, display_name")
+    .eq("id", memberId)
+    .maybeSingle();
+  if (!seller) return fail("No encontramos al vendedor.");
+
+  let file: { id: string; code: string } | null = null;
+  if (fileId) {
+    const { data } = await supabase
+      .from("files")
+      .select("id, code")
+      .eq("id", fileId)
+      .maybeSingle();
+    if (!data) return fail("No encontramos el file.");
+    file = data;
+  }
+
+  const { data: payment, error } = await supabase
+    .from("payments")
+    .insert({
+      agency_id: agency.id,
+      file_id: file?.id ?? null,
+      member_id: seller.id,
+      direction: "pago_comision",
+      amount: round2(amount),
+      currency,
+      amount_in_file_currency: round2(amount),
+      method,
+      note: note?.trim() || null,
+      paid_at: paidAt,
+      received_by: member.id,
+    })
+    .select("id")
+    .single();
+
+  if (error || !payment) return fail("No se pudo registrar el pago. Probá de nuevo.");
+
+  await logActivity({
+    agencyId: agency.id,
+    memberId: member.id,
+    fileId: file?.id ?? null,
+    type: "sistema",
+    body: `Comisión pagada a ${seller.display_name}: ${fmtMoney(amount, currency)}${
+      file ? ` — file ${file.code}` : ""
+    }`,
+  });
+
+  revalidatePath("/caja");
+  if (file) revalidatePath(`/files/${file.id}`);
+
+  return succeed({ paymentId: payment.id, sellerName: seller.display_name });
+}
+
+/* ───────────────────────────────────────────
    Eliminar un movimiento (solo admin)
    ─────────────────────────────────────────── */
 const deletePaymentSchema = z.object({ paymentId: z.string().uuid() });
@@ -207,22 +285,24 @@ export async function deletePayment(
   const { error } = await supabase.from("payments").delete().eq("id", payment.id);
   if (error) return fail("No se pudo eliminar el movimiento.");
 
+  const fileId = payment.file_id;
+
   // si el file estaba "pagado" y volvió a tener saldo, lo devolvemos a "vendido"
-  if (payment.direction === "cobro" && payment.file?.status === "pagado") {
+  if (fileId && payment.direction === "cobro" && payment.file?.status === "pagado") {
     const { data: totals } = await supabase
       .from("file_totals")
       .select("balance")
-      .eq("file_id", payment.file_id)
+      .eq("file_id", fileId)
       .maybeSingle();
     if (Number(totals?.balance ?? 0) > 0) {
-      await supabase.from("files").update({ status: "vendido" }).eq("id", payment.file_id);
+      await supabase.from("files").update({ status: "vendido" }).eq("id", fileId);
     }
   }
 
   await logActivity({
     agencyId: agency.id,
     memberId: member.id,
-    fileId: payment.file_id,
+    fileId,
     type: "sistema",
     body: `Movimiento eliminado: ${fmtMoney(Number(payment.amount), payment.currency)}${
       payment.receipt_code ? ` (recibo ${payment.receipt_code})` : ""
@@ -230,7 +310,7 @@ export async function deletePayment(
   });
 
   revalidatePath("/caja");
-  revalidatePath(`/files/${payment.file_id}`);
+  if (fileId) revalidatePath(`/files/${fileId}`);
 
   return succeed(null);
 }

@@ -20,4 +20,10 @@ export type QuoteBuilderData = {
   defaultTheme: { color: string; font: string };
   agency: { name: string; logoUrl: string | null; phone: string | null };
   sellerName: string;
+  /** la comisión solo la ve el admin; el vendedor ve el estimado sobre el markup */
+  isAdmin: boolean;
+  /** % que se le suma al bruto para llegar al final */
+  fees: { aereo_pct: number; terrestre_pct: number };
+  /** % del markup que se lleva el vendedor */
+  sellerCommissionPct: number;
 };

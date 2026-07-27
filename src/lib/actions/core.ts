@@ -91,6 +91,35 @@ export async function ensureConversation(
 }
 
 /**
+ * Un presupuesto puede tener varias opciones ("con este hotel vale 10, con este
+ * otro 15"). Al vender, van a la venta los servicios comunes + los de la opción
+ * elegida, y el precio es el de esa opción.
+ */
+export function selectQuoteSale<
+  I extends { option_id: string | null; cost: number | string; position: number },
+  O extends { id: string; is_recommended: boolean; total_price: number | string },
+>(
+  quote: { total_price: number | string; accepted_option_id: string | null },
+  items: I[],
+  options: O[],
+): { saleItems: I[]; totalPrice: number; optionId: string | null } {
+  const optionId =
+    (quote.accepted_option_id && options.some((o) => o.id === quote.accepted_option_id)
+      ? quote.accepted_option_id
+      : null) ??
+    options.find((o) => o.is_recommended)?.id ??
+    options[0]?.id ??
+    null;
+
+  const selected = options.find((o) => o.id === optionId) ?? null;
+  return {
+    saleItems: items.filter((i) => i.option_id === null || i.option_id === optionId),
+    totalPrice: Number(selected ? selected.total_price : quote.total_price),
+    optionId,
+  };
+}
+
+/**
  * Convierte un lead en venta (file). Si hay presupuesto, arma los servicios
  * a partir de sus ítems distribuyendo el markup proporcionalmente para que
  * Σ precio de venta = Precio Cliente del presupuesto.
@@ -111,18 +140,19 @@ export async function convertLeadToSale(input: {
   if (lead.won_file_id) return fail("Este lead ya tiene una venta creada.");
 
   // presupuesto: el indicado, o el último enviado/aceptado del lead
+  const QUOTE_SELECT = "*, items:quote_items(*), options:quote_options!quote_options_quote_id_fkey(*)";
   let quote = null;
   if (input.quoteId) {
     const { data } = await supabase
       .from("quotes")
-      .select("*, items:quote_items(*)")
+      .select(QUOTE_SELECT)
       .eq("id", input.quoteId)
       .single();
     quote = data;
   } else {
     const { data } = await supabase
       .from("quotes")
-      .select("*, items:quote_items(*)")
+      .select(QUOTE_SELECT)
       .eq("lead_id", input.leadId)
       .in("status", ["aceptado", "enviado"])
       .order("created_at", { ascending: false })
@@ -167,16 +197,17 @@ export async function convertLeadToSale(input: {
   if (fileError || !file) return fail("No se pudo crear el file.");
 
   // servicios desde el presupuesto, con markup distribuido proporcionalmente
-  if (quote && quote.items.length > 0) {
-    const totalCost = quote.items.reduce((a, i) => a + Number(i.cost), 0);
-    const factor = totalCost > 0 ? Number(quote.total_price) / totalCost : 1;
+  const sale = quote ? selectQuoteSale(quote, quote.items, quote.options ?? []) : null;
+  if (quote && sale && sale.saleItems.length > 0) {
+    const totalCost = sale.saleItems.reduce((a, i) => a + Number(i.cost), 0);
+    const factor = totalCost > 0 ? sale.totalPrice / totalCost : 1;
     let priceAcc = 0;
-    const services = quote.items
+    const services = [...sale.saleItems]
       .sort((a, b) => a.position - b.position)
       .map((item, idx, arr) => {
         const isLast = idx === arr.length - 1;
         const price = isLast
-          ? round2(Number(quote.total_price) - priceAcc)
+          ? round2(sale.totalPrice - priceAcc)
           : round2(Number(item.cost) * factor);
         priceAcc = round2(priceAcc + price);
         return {
@@ -204,6 +235,7 @@ export async function convertLeadToSale(input: {
       .update({
         status: "aceptado",
         accepted_at: quote.accepted_at ?? new Date().toISOString(),
+        accepted_option_id: sale.optionId,
         file_id: file.id,
       })
       .eq("id", quote.id);

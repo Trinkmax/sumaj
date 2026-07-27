@@ -9,6 +9,7 @@ import { PaymentsCard } from "@/components/files/payments-card";
 import { TravelersCard } from "@/components/files/travelers-card";
 import { NotesCard } from "@/components/files/notes-card";
 import { FileTimeline } from "@/components/files/file-timeline";
+import type { ServiceImage } from "@/lib/types";
 import type {
   ActivityRow,
   FileDetail,
@@ -22,13 +23,26 @@ export const metadata = { title: "File" };
 const TRAVELER_FIELDS =
   "id, full_name, document_type, document_number, document_expiry, birth_date, linked_contact_id";
 
+/** file_services.images es jsonb: lo leemos defensivamente, nunca confiamos en la forma */
+function toServiceImages(value: unknown): ServiceImage[] {
+  if (!Array.isArray(value)) return [];
+  const out: ServiceImage[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const { path, name } = item as { path?: unknown; name?: unknown };
+    if (typeof path !== "string" || path.length === 0) continue;
+    out.push({ path, name: typeof name === "string" && name ? name : "Imagen" });
+  }
+  return out;
+}
+
 export default async function FileDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { agency } = await requireMember();
+  const { agency, isAdmin } = await requireMember();
   const supabase = await createClient();
 
   const { data: fileData } = await supabase
@@ -112,7 +126,10 @@ export default async function FileDetailPage({
     departure_date: fileData.departure_date,
     return_date: fileData.return_date,
     notes: fileData.notes,
+    commission_type: fileData.commission_type || "utilidad_pct",
     commission_pct: Number(fileData.commission_pct) || 0,
+    commission_amount: Number(fileData.commission_amount) || 0,
+    commission_label: fileData.commission_label,
     created_at: fileData.created_at,
     lead_id: fileData.lead_id,
     quote_id: fileData.quote_id,
@@ -136,6 +153,8 @@ export default async function FileDetailPage({
     reservation_code: s.reservation_code,
     date_from: s.date_from,
     date_to: s.date_to,
+    deadline_date: s.deadline_date,
+    images: toServiceImages(s.images),
     cost: Number(s.cost) || 0,
     price: Number(s.price) || 0,
     paid_to_supplier: s.paid_to_supplier,
@@ -187,11 +206,16 @@ export default async function FileDetailPage({
         <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-4">
           <ServicesCard
             fileId={file.id}
+            agencyId={agency.id}
             currency={file.currency}
             services={services}
             suppliers={suppliersRes.data ?? []}
             sellerName={file.seller?.display_name ?? "Vendedor"}
+            commissionType={file.commission_type}
             commissionPct={file.commission_pct}
+            commissionAmount={file.commission_amount}
+            commissionLabel={file.commission_label}
+            isAdmin={isAdmin}
             className="order-1 lg:order-none"
           />
           <TravelersCard

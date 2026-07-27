@@ -8,9 +8,18 @@ import {
   fail,
   logActivity,
   convertLeadToSale,
+  selectQuoteSale,
   type ActionResult,
 } from "@/lib/actions/core";
-import { computeQuoteTotals, round2 } from "@/lib/domain";
+import {
+  computeQuoteTotals,
+  DEFAULT_QUOTE_FEES,
+  DEFAULT_SELLER_MARKUP_PCT,
+  paxCount,
+  round2,
+  type QuoteItemInput,
+  type QuotePax,
+} from "@/lib/domain";
 import { nightsBetween } from "@/lib/format";
 import type { AgencySettings, TablesUpdate } from "@/lib/types";
 import type { QuoteBuilderData } from "@/components/quotes/types";
@@ -33,7 +42,7 @@ export async function getQuoteBuilderData(input: {
   const parsed = builderDataSchema.safeParse(input);
   if (!parsed.success) return fail("Datos inválidos.");
   const { leadId, contactId } = parsed.data;
-  const { supabase, member, agency } = await requireAction();
+  const { supabase, member, agency, isAdmin } = await requireAction();
 
   const [suppliersRes, contactsRes, leadRes] = await Promise.all([
     supabase
@@ -102,6 +111,16 @@ export async function getQuoteBuilderData(input: {
     defaultTheme: settings.quote_theme ?? { color: "sand", font: "editorial" },
     agency: { name: agency.name, logoUrl: agency.logo_url, phone: agency.phone },
     sellerName: member.display_name,
+    isAdmin,
+    fees: {
+      aereo_pct: Number(settings.quote_fees?.aereo_pct ?? DEFAULT_QUOTE_FEES.aereo_pct),
+      terrestre_pct: Number(
+        settings.quote_fees?.terrestre_pct ?? DEFAULT_QUOTE_FEES.terrestre_pct,
+      ),
+    },
+    sellerCommissionPct: Number(
+      settings.quote_seller_commission_pct ?? DEFAULT_SELLER_MARKUP_PCT,
+    ),
   });
 }
 
@@ -124,9 +143,18 @@ const itemSchema = z.object({
   ]),
   description: z.string().trim().min(1),
   supplierId: z.string().uuid().nullable(),
+  /** key de la opción a la que pertenece; null = común a todas */
+  optionKey: z.string().max(60).nullable(),
   cost: z.number().min(0),
   gross: z.number().min(0).nullable(),
   commissionPct: z.number().min(0).max(100),
+});
+
+const optionSchema = z.object({
+  key: z.string().min(1).max(60),
+  name: z.string().trim().min(1).max(80),
+  subtitle: z.string().trim().max(120).nullable(),
+  isRecommended: z.boolean(),
 });
 
 const dateStr = z
@@ -143,7 +171,10 @@ const saveSchema = z.object({
   title: z.string().trim().max(160).nullable(),
   tripDateFrom: dateStr,
   tripDateTo: dateStr,
-  pax: z.number().int().min(1).max(99),
+  paxAdults: z.number().int().min(1).max(60),
+  paxChildren: z.number().int().min(0).max(30),
+  paxInfants: z.number().int().min(0).max(20),
+  childrenAges: z.array(z.number().int().min(0).max(17)).max(30),
   currency: z.enum(["USD", "ARS"]),
   validUntil: dateStr,
   markupType: z.enum(["monto", "porcentaje"]),
@@ -152,6 +183,7 @@ const saveSchema = z.object({
   notes: z.string().trim().max(2000).nullable(),
   internalNotes: z.string().trim().max(2000).nullable(),
   theme: z.object({ color: z.string(), font: z.string() }),
+  options: z.array(optionSchema).max(4),
   items: z.array(itemSchema).min(1),
   send: z.boolean(),
 });
@@ -182,19 +214,52 @@ export async function saveQuote(
     contactId = created.id;
   }
 
-  // totales — el bruto vacío equivale al final (como la planilla)
-  const totals = computeQuoteTotals({
-    items: data.items.map((i) => ({
-      cost: i.cost,
-      gross: i.gross ?? i.cost,
-      commission_pct: i.commissionPct,
-      type: i.type,
-    })),
+  const pax: QuotePax = {
+    adults: data.paxAdults,
+    children: data.paxChildren,
+    infants: data.paxInfants,
+    childrenAges: data.childrenAges.slice(0, data.paxChildren),
+  };
+
+  const toInput = (i: (typeof data.items)[number]): QuoteItemInput => ({
+    cost: i.cost,
+    gross: i.gross ?? i.cost,
+    commission_pct: i.commissionPct,
+    type: i.type,
+  });
+
+  const calc = {
     markup_type: data.markupType,
     markup_value: data.markupValue,
     discount: data.discount,
-    pax: data.pax,
-  });
+    pax,
+  };
+
+  const commonItems = data.items.filter((i) => !i.optionKey);
+  const validOptions = data.options.filter((o) =>
+    data.items.some((i) => i.optionKey === o.key),
+  );
+
+  // totales de los servicios comunes (o del presupuesto entero si no hay opciones)
+  const baseTotals = computeQuoteTotals({ ...calc, items: commonItems.map(toInput) });
+
+  // totales por opción: comunes + propios
+  const optionTotals = validOptions.map((o) => ({
+    option: o,
+    totals: computeQuoteTotals({
+      ...calc,
+      items: [
+        ...commonItems.map(toInput),
+        ...data.items.filter((i) => i.optionKey === o.key).map(toInput),
+      ],
+    }),
+  }));
+
+  // los totales de la fila del presupuesto son los de la opción recomendada
+  const headline =
+    optionTotals.find((o) => o.option.isRecommended)?.totals ??
+    optionTotals[0]?.totals ??
+    baseTotals;
 
   const nights = nightsBetween(data.tripDateFrom, data.tripDateTo);
 
@@ -206,7 +271,11 @@ export async function saveQuote(
     trip_date_from: data.tripDateFrom,
     trip_date_to: data.tripDateTo,
     nights,
-    pax: data.pax,
+    pax: paxCount(pax),
+    pax_adults: pax.adults,
+    pax_children: pax.children,
+    pax_infants: pax.infants,
+    children_ages: pax.childrenAges,
     currency: data.currency,
     valid_until: data.validUntil,
     markup_type: data.markupType,
@@ -215,9 +284,9 @@ export async function saveQuote(
     notes: data.notes,
     internal_notes: data.internalNotes,
     theme: data.theme,
-    total_cost: totals.totalCost,
-    total_price: totals.totalPrice,
-    commission_total: totals.commissionTotal,
+    total_cost: headline.totalCost,
+    total_price: headline.totalPrice,
+    commission_total: headline.commissionTotal,
     updated_at: new Date().toISOString(),
   };
 
@@ -225,6 +294,7 @@ export async function saveQuote(
   let code: string;
   let publicToken: string;
   let prevItemIds: string[] = [];
+  let prevOptionIds: string[] = [];
 
   if (data.id) {
     // update: mantener estado salvo que se envíe
@@ -236,12 +306,13 @@ export async function saveQuote(
     if (!existing) return fail("No encontramos el presupuesto.");
 
     // ítems previos: se borran DESPUÉS de insertar los nuevos, para no perder nada si falla
-    const { data: prevItems, error: prevError } = await supabase
-      .from("quote_items")
-      .select("id")
-      .eq("quote_id", data.id);
+    const [{ data: prevItems, error: prevError }, { data: prevOptions }] = await Promise.all([
+      supabase.from("quote_items").select("id").eq("quote_id", data.id),
+      supabase.from("quote_options").select("id").eq("quote_id", data.id),
+    ]);
     if (prevError) return fail("No se pudo guardar el presupuesto.");
     prevItemIds = (prevItems ?? []).map((i) => i.id);
+    prevOptionIds = (prevOptions ?? []).map((o) => o.id);
 
     const { data: updated, error } = await supabase
       .from("quotes")
@@ -277,6 +348,33 @@ export async function saveQuote(
     publicToken = created.public_token;
   }
 
+  // opciones nuevas (con sus totales ya calculados) → mapa key → id
+  const optionIdByKey = new Map<string, string>();
+  if (optionTotals.length > 0) {
+    const { data: createdOptions, error: optionsError } = await supabase
+      .from("quote_options")
+      .insert(
+        optionTotals.map((o, idx) => ({
+          agency_id: agency.id,
+          quote_id: quoteId,
+          name: o.option.name,
+          subtitle: o.option.subtitle,
+          is_recommended: o.option.isRecommended,
+          position: idx,
+          total_cost: o.totals.totalCost,
+          total_price: o.totals.totalPrice,
+          per_person: o.totals.perPerson,
+        })),
+      )
+      .select("id, position");
+    if (optionsError || !createdOptions)
+      return fail("No se pudieron guardar las opciones del presupuesto.");
+    for (const created of createdOptions) {
+      const source = optionTotals[created.position];
+      if (source) optionIdByKey.set(source.option.key, created.id);
+    }
+  }
+
   // ítems: aéreos primero, después terrestres (orden de la planilla)
   const ordered = [
     ...data.items.filter((i) => i.type === "aereo"),
@@ -286,6 +384,7 @@ export async function saveQuote(
     ordered.map((i, idx) => ({
       agency_id: agency.id,
       quote_id: quoteId,
+      option_id: i.optionKey ? optionIdByKey.get(i.optionKey) ?? null : null,
       type: i.type,
       description: i.description,
       supplier_id: i.supplierId,
@@ -306,6 +405,19 @@ export async function saveQuote(
     if (cleanupError)
       return fail("Se guardó el presupuesto pero quedaron ítems repetidos. Guardalo de nuevo.");
   }
+  if (prevOptionIds.length > 0) {
+    await supabase.from("quote_options").delete().in("id", prevOptionIds);
+  }
+
+  // opción vigente (la que se usa al convertir en venta): la recomendada.
+  // Se reapunta en cada guardado porque las opciones se regeneran.
+  const recommendedId =
+    optionTotals.length > 0
+      ? optionIdByKey.get(
+          (optionTotals.find((o) => o.option.isRecommended) ?? optionTotals[0]).option.key,
+        ) ?? null
+      : null;
+  await supabase.from("quotes").update({ accepted_option_id: recommendedId }).eq("id", quoteId);
 
   if (data.send) {
     await logActivity({
@@ -315,7 +427,7 @@ export async function saveQuote(
       contactId,
       type: "presupuesto",
       body: `Presupuesto ${code} enviado — ${data.destination}`,
-      metadata: { quote_id: quoteId, total_price: totals.totalPrice },
+      metadata: { quote_id: quoteId, total_price: headline.totalPrice },
     });
     // lead en etapas tempranas pasa a "presupuestado"
     if (data.leadId) {
@@ -378,7 +490,7 @@ export async function duplicateQuote(input: {
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("*, items:quote_items(*)")
+    .select("*, items:quote_items(*), options:quote_options!quote_options_quote_id_fkey(*)")
     .eq("id", parsed.data.quoteId)
     .single();
   if (!quote) return fail("No encontramos el presupuesto.");
@@ -400,6 +512,10 @@ export async function duplicateQuote(input: {
       trip_date_to: quote.trip_date_to,
       nights: quote.nights,
       pax: quote.pax,
+      pax_adults: quote.pax_adults,
+      pax_children: quote.pax_children,
+      pax_infants: quote.pax_infants,
+      children_ages: quote.children_ages,
       currency: quote.currency,
       valid_until: validUntil.toISOString().slice(0, 10),
       markup_type: quote.markup_type,
@@ -416,13 +532,41 @@ export async function duplicateQuote(input: {
     .single();
   if (error || !created) return fail("No se pudo duplicar el presupuesto.");
 
+  // opciones: se copian primero para poder reapuntar los ítems
+  const newOptionId = new Map<string, string>();
+  const sourceOptions = [...(quote.options ?? [])].sort((a, b) => a.position - b.position);
+  if (sourceOptions.length > 0) {
+    const { data: copiedOptions, error: optionsError } = await supabase
+      .from("quote_options")
+      .insert(
+        sourceOptions.map((o, idx) => ({
+          agency_id: agency.id,
+          quote_id: created.id,
+          name: o.name,
+          subtitle: o.subtitle,
+          is_recommended: o.is_recommended,
+          position: idx,
+          total_cost: o.total_cost,
+          total_price: o.total_price,
+          per_person: o.per_person,
+        })),
+      )
+      .select("id, position");
+    if (optionsError || !copiedOptions) return fail("No se pudieron copiar las opciones.");
+    for (const copied of copiedOptions) {
+      const source = sourceOptions[copied.position];
+      if (source) newOptionId.set(source.id, copied.id);
+    }
+  }
+
   if (quote.items.length > 0) {
     const { error: itemsError } = await supabase.from("quote_items").insert(
-      quote.items
+      [...quote.items]
         .sort((a, b) => a.position - b.position)
         .map((i, idx) => ({
           agency_id: agency.id,
           quote_id: created.id,
+          option_id: i.option_id ? newOptionId.get(i.option_id) ?? null : null,
           type: i.type,
           description: i.description,
           supplier_id: i.supplier_id,
@@ -510,13 +654,15 @@ export async function convertQuoteDirect(input: {
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("*, items:quote_items(*)")
+    .select("*, items:quote_items(*), options:quote_options!quote_options_quote_id_fkey(*)")
     .eq("id", parsed.data.quoteId)
     .single();
   if (!quote) return fail("No encontramos el presupuesto.");
   if (quote.file_id) return fail("Este presupuesto ya tiene una venta creada.");
   if (!quote.contact_id)
     return fail("El presupuesto no tiene contacto asignado. Editalo y elegí uno.");
+
+  const sale = selectQuoteSale(quote, quote.items, quote.options ?? []);
 
   // vendedor: quien creó el presupuesto, o quien convierte
   let sellerId = quote.created_by ?? member.id;
@@ -552,16 +698,16 @@ export async function convertQuoteDirect(input: {
     .single();
   if (fileError || !file) return fail("No se pudo crear el file.");
 
-  if (quote.items.length > 0) {
-    const totalCost = quote.items.reduce((a, i) => a + Number(i.cost), 0);
-    const factor = totalCost > 0 ? Number(quote.total_price) / totalCost : 1;
+  if (sale.saleItems.length > 0) {
+    const totalCost = sale.saleItems.reduce((a, i) => a + Number(i.cost), 0);
+    const factor = totalCost > 0 ? sale.totalPrice / totalCost : 1;
     let priceAcc = 0;
-    const services = quote.items
+    const services = [...sale.saleItems]
       .sort((a, b) => a.position - b.position)
       .map((item, idx, arr) => {
         const isLast = idx === arr.length - 1;
         const price = isLast
-          ? round2(Number(quote.total_price) - priceAcc)
+          ? round2(sale.totalPrice - priceAcc)
           : round2(Number(item.cost) * factor);
         priceAcc = round2(priceAcc + price);
         return {
@@ -590,6 +736,7 @@ export async function convertQuoteDirect(input: {
     .update({
       status: "aceptado",
       accepted_at: quote.accepted_at ?? new Date().toISOString(),
+      accepted_option_id: sale.optionId,
       file_id: file.id,
     })
     .eq("id", quote.id);
@@ -617,10 +764,17 @@ export async function convertQuoteDirect(input: {
    sin lead usa convertQuoteDirect.
    ─────────────────────────────────────────── */
 
+const convertWithOptionSchema = z.object({
+  quoteId: z.string().uuid(),
+  /** con qué opción cerró el cliente (si el presupuesto compara varias) */
+  optionId: z.string().uuid().nullable().optional(),
+});
+
 export async function convertQuote(input: {
   quoteId: string;
+  optionId?: string | null;
 }): Promise<ActionResult<{ fileId: string; fileCode: string }>> {
-  const parsed = convertSchema.safeParse(input);
+  const parsed = convertWithOptionSchema.safeParse(input);
   if (!parsed.success) return fail("Datos inválidos.");
   const { supabase } = await requireAction();
 
@@ -631,6 +785,21 @@ export async function convertQuote(input: {
     .single();
   if (!quote) return fail("No encontramos el presupuesto.");
   if (quote.file_id) return fail("Este presupuesto ya tiene una venta creada.");
+
+  // la opción elegida manda: se guarda antes de armar la venta
+  if (parsed.data.optionId) {
+    const { data: option } = await supabase
+      .from("quote_options")
+      .select("id")
+      .eq("id", parsed.data.optionId)
+      .eq("quote_id", quote.id)
+      .maybeSingle();
+    if (!option) return fail("No encontramos esa opción del presupuesto.");
+    await supabase
+      .from("quotes")
+      .update({ accepted_option_id: option.id })
+      .eq("id", quote.id);
+  }
 
   const result = quote.lead_id
     ? await convertLeadToSale({ leadId: quote.lead_id, quoteId: quote.id })

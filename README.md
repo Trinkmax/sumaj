@@ -14,6 +14,21 @@ cp .env.example .env.local   # ya viene configurado para el proyecto Supabase
 pnpm dev
 ```
 
+### Variables de entorno
+
+| Variable | Para qué |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` · `NEXT_PUBLIC_SUPABASE_ANON_KEY` | conexión a Supabase |
+| `NEXT_PUBLIC_APP_URL` | links públicos de presupuestos, recibos y acceso al login |
+| `SUPABASE_SERVICE_ROLE_KEY` | alta directa de usuarios del equipo — **opcional pero recomendada** |
+
+`SUPABASE_SERVICE_ROLE_KEY` habilita el alta directa de usuarios del equipo:
+el admin pone email y contraseña en Configuración → Equipo y la cuenta queda lista
+para pasarle el acceso por WhatsApp. Sin la clave el alta igual funciona, pero deja
+una invitación y la persona entra sola la primera vez con ese email y contraseña.
+**Nunca se expone al browser**: no lleva prefijo `NEXT_PUBLIC_`, vive solo en el
+servidor (`src/lib/supabase/admin.ts`) y saltea todas las políticas RLS.
+
 Usuarios demo (password `sumaj2026`):
 
 | Email | Rol |
@@ -30,7 +45,7 @@ Usuarios demo (password `sumaj2026`):
 - **/presupuestos** — cotizador que replica la planilla (Final/Bruto/% comisión mayorista, markup, comisión por grupo) + presupuesto de papelería fina compartible: link público `/p/{token}`, imagen PNG para WhatsApp, temas de color y tipografía.
 - **/files** — la venta: servicios con costo/precio, utilidad y comisión del vendedor, pasajeros con vencimiento de documentos, cobros con recibo compartible `/r/{token}`.
 - **/caja** — movimientos, cuenta corriente con recordatorios por WhatsApp, comisiones por vendedor, multimoneda ARS/USD con cotización.
-- **/config** — agencia (logo, tema de comprobantes), equipo e invitaciones, etiquetas, proveedores (Tucano Tours precargado), plantillas de WhatsApp, cadencia de seguimiento automático (48 h → 7 d → 21 d) y conexión de la Cloud API.
+- **/config** — agencia (logo, tema de comprobantes, fees del cotizador y comisión del vendedor), equipo (alta de usuarios con email y contraseña, listo para pasar por WhatsApp), etiquetas, proveedores (Tucano Tours precargado), plantillas de WhatsApp, cadencia de seguimiento automático (48 h → 7 d → 21 d) y conexión de la Cloud API.
 
 ## Automatización (Supabase)
 

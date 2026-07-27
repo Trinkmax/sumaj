@@ -2,13 +2,24 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { Check, ImagePlus, Loader2, Trash2 } from "lucide-react";
+import { Calculator, Check, ImagePlus, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { updateAgency } from "@/lib/actions/settings";
-import { QUOTE_COLORS, QUOTE_FONTS } from "@/lib/domain";
+import { QUOTE_COLORS, QUOTE_FONTS, finalFromGross } from "@/lib/domain";
+import { fmtMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
+
+/** "2,5" → 2.5 · null si no es un porcentaje válido (0 a 100). */
+function pct(value: string): number | null {
+  const n = Number(value.trim().replace(",", "."));
+  if (value.trim() === "" || isNaN(n) || n < 0 || n > 100) return null;
+  return n;
+}
+
+/** Bruto de referencia para el ejemplo del cotizador. */
+const EXAMPLE_GROSS = 1000;
 
 type Snapshot = {
   name: string;
@@ -18,6 +29,9 @@ type Snapshot = {
   usdRate: string;
   themeColor: string;
   themeFont: string;
+  feeAereo: string;
+  feeTerrestre: string;
+  sellerPct: string;
 };
 
 export function AgencyForm({
@@ -33,6 +47,8 @@ export function AgencyForm({
     logo_url: string | null;
     usd_rate: number | null;
     quote_theme: { color: string; font: string };
+    quote_fees: { aereo_pct: number; terrestre_pct: number };
+    quote_seller_commission_pct: number;
   };
 }) {
   const [name, setName] = React.useState(initial.name);
@@ -42,6 +58,9 @@ export function AgencyForm({
   const [usdRate, setUsdRate] = React.useState(initial.usd_rate != null ? String(initial.usd_rate) : "");
   const [themeColor, setThemeColor] = React.useState(initial.quote_theme.color);
   const [themeFont, setThemeFont] = React.useState(initial.quote_theme.font);
+  const [feeAereo, setFeeAereo] = React.useState(String(initial.quote_fees.aereo_pct));
+  const [feeTerrestre, setFeeTerrestre] = React.useState(String(initial.quote_fees.terrestre_pct));
+  const [sellerPct, setSellerPct] = React.useState(String(initial.quote_seller_commission_pct));
   const [logoUrl, setLogoUrl] = React.useState(initial.logo_url);
   const [uploading, setUploading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -56,6 +75,9 @@ export function AgencyForm({
     usdRate: initial.usd_rate != null ? String(initial.usd_rate) : "",
     themeColor: initial.quote_theme.color,
     themeFont: initial.quote_theme.font,
+    feeAereo: String(initial.quote_fees.aereo_pct),
+    feeTerrestre: String(initial.quote_fees.terrestre_pct),
+    sellerPct: String(initial.quote_seller_commission_pct),
   });
 
   const dirty =
@@ -65,7 +87,16 @@ export function AgencyForm({
     address !== savedSnap.address ||
     usdRate !== savedSnap.usdRate ||
     themeColor !== savedSnap.themeColor ||
-    themeFont !== savedSnap.themeFont;
+    themeFont !== savedSnap.themeFont ||
+    feeAereo !== savedSnap.feeAereo ||
+    feeTerrestre !== savedSnap.feeTerrestre ||
+    sellerPct !== savedSnap.sellerPct;
+
+  // ejemplo vivo del cotizador: se actualiza mientras tocan los fees
+  const exampleFees = {
+    aereo_pct: pct(feeAereo) ?? 0,
+    terrestre_pct: pct(feeTerrestre) ?? 0,
+  };
 
   async function handleLogo(file: File) {
     if (!file.type.startsWith("image/")) {
@@ -122,6 +153,13 @@ export function AgencyForm({
       toast.error("La cotización del dólar tiene que ser un número mayor a 0.");
       return;
     }
+    const aereo = pct(feeAereo);
+    const terrestre = pct(feeTerrestre);
+    const seller = pct(sellerPct);
+    if (aereo === null || terrestre === null || seller === null) {
+      toast.error("Los porcentajes del cotizador tienen que estar entre 0 y 100.");
+      return;
+    }
     setSaving(true);
     const res = await updateAgency({
       name: name.trim(),
@@ -131,6 +169,8 @@ export function AgencyForm({
       settings: {
         usd_rate: rate,
         quote_theme: { color: themeColor, font: themeFont },
+        quote_fees: { aereo_pct: aereo, terrestre_pct: terrestre },
+        quote_seller_commission_pct: seller,
       },
     });
     setSaving(false);
@@ -138,7 +178,18 @@ export function AgencyForm({
       toast.error(res.error);
       return;
     }
-    setSavedSnap({ name, phone, email, address, usdRate, themeColor, themeFont });
+    setSavedSnap({
+      name,
+      phone,
+      email,
+      address,
+      usdRate,
+      themeColor,
+      themeFont,
+      feeAereo,
+      feeTerrestre,
+      sellerPct,
+    });
     toast.success("Datos de la agencia guardados.");
   }
 
@@ -209,6 +260,54 @@ export function AgencyForm({
             </p>
           </div>
         </div>
+      </section>
+
+      {/* Cotizador */}
+      <section className="card p-5 animate-slide-up">
+        <h2 className="font-display text-lg font-semibold text-ink">Cotizador</h2>
+        <p className="mt-0.5 text-sm text-ink-faint">
+          Cargás el bruto de cada servicio y el sistema calcula el final con estos números.
+        </p>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <PctField
+            id="ag-fee-aereo"
+            label="Fee aéreo"
+            value={feeAereo}
+            onChange={setFeeAereo}
+            hint="Al bruto de los aéreos se le suma este % para llegar al final."
+          />
+          <PctField
+            id="ag-fee-terrestre"
+            label="Fee terrestre"
+            value={feeTerrestre}
+            onChange={setFeeTerrestre}
+            hint="Idem para hotelería y demás terrestres."
+          />
+          <PctField
+            id="ag-seller-pct"
+            label="Comisión del vendedor"
+            value={sellerPct}
+            onChange={setSellerPct}
+            hint="Del markup de cada presupuesto, esto es lo que se lleva el vendedor."
+            className="sm:col-span-2"
+          />
+        </div>
+
+        <p className="mt-4 flex items-start gap-2 rounded-xl bg-sand-soft px-3.5 py-2.5 text-xs leading-relaxed text-ink-soft">
+          <Calculator className="mt-px size-3.5 shrink-0 text-ink-faint" strokeWidth={1.9} />
+          <span>
+            Un aéreo de {fmtMoney(EXAMPLE_GROSS)} bruto sale{" "}
+            <span className="font-medium tabular-nums text-ink">
+              {fmtMoney(finalFromGross(EXAMPLE_GROSS, "aereo", exampleFees))}
+            </span>{" "}
+            · un terrestre igual sale{" "}
+            <span className="font-medium tabular-nums text-ink">
+              {fmtMoney(finalFromGross(EXAMPLE_GROSS, "hotel", exampleFees))}
+            </span>
+            .
+          </span>
+        </p>
       </section>
 
       {/* Logo */}
@@ -345,6 +444,53 @@ export function AgencyForm({
           Guardar cambios
         </Button>
       </div>
+    </div>
+  );
+}
+
+/* ── Campo de porcentaje con sufijo y explicación en criollo ── */
+
+function PctField({
+  id,
+  label,
+  value,
+  onChange,
+  hint,
+  className,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  hint: string;
+  className?: string;
+}) {
+  const invalid = pct(value) === null;
+
+  return (
+    <div className={className}>
+      <Label htmlFor={id}>{label}</Label>
+      <div className="relative">
+        <Input
+          id={id}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          inputMode="decimal"
+          placeholder="0"
+          aria-invalid={invalid}
+          aria-describedby={`${id}-hint`}
+          className={cn("h-11 pr-8 text-right tabular-nums", invalid && "border-tone-red-line")}
+        />
+        <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-sm text-ink-faint">
+          %
+        </span>
+      </div>
+      <p
+        id={`${id}-hint`}
+        className={cn("mt-1.5 text-xs", invalid ? "text-tone-red-text" : "text-ink-faint")}
+      >
+        {invalid ? "Poné un número entre 0 y 100." : hint}
+      </p>
     </div>
   );
 }

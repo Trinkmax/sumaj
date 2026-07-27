@@ -1,4 +1,4 @@
-import type { Enums } from "@/lib/types";
+import type { Enums, ServiceImage } from "@/lib/types";
 
 /** fila de la lista /files (files + file_totals + joins) */
 export type FileListRow = {
@@ -34,7 +34,12 @@ export type FileDetail = {
   departure_date: string | null;
   return_date: string | null;
   notes: string | null;
+  /** esquema de comisión del vendedor: "utilidad_pct" | "monto_fijo" */
+  commission_type: string;
   commission_pct: number;
+  commission_amount: number;
+  /** etiqueta del esquema fijo, ej. "Grupal Europa" */
+  commission_label: string | null;
   created_at: string;
   /** navegación cruzada: lead y presupuesto de origen */
   lead_id: string | null;
@@ -59,6 +64,10 @@ export type ServiceRow = {
   reservation_code: string | null;
   date_from: string | null;
   date_to: string | null;
+  /** fecha de caída: hasta cuándo hay tiempo de pagarle al proveedor */
+  deadline_date: string | null;
+  /** vouchers y comprobantes en el bucket privado `attachments` */
+  images: ServiceImage[];
   cost: number;
   price: number;
   paid_to_supplier: boolean;

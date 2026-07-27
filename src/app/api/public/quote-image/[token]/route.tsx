@@ -1,8 +1,16 @@
 import { ImageResponse } from "next/og";
 import { createAnonClient } from "@/lib/supabase/server";
-import { quoteColor, SERVICE_ORDER, SERVICE_TYPES } from "@/lib/domain";
+import { paxLabel, quoteColor, SERVICE_ORDER, SERVICE_TYPES } from "@/lib/domain";
 import { fmtDate, fmtDateLong, fmtMoney, fmtPhone } from "@/lib/format";
 import type { ServiceType } from "@/lib/types";
+
+type QuotePublicOption = {
+  name: string;
+  subtitle: string | null;
+  is_recommended: boolean;
+  total_price: number;
+  per_person: number;
+};
 
 type QuotePublic = {
   code: string;
@@ -10,6 +18,10 @@ type QuotePublic = {
   destination: string;
   currency: string;
   pax: number;
+  pax_adults: number;
+  pax_children: number;
+  pax_infants: number;
+  options: QuotePublicOption[] | null;
   nights: number | null;
   trip_date_from: string | null;
   trip_date_to: string | null;
@@ -70,6 +82,8 @@ export async function GET(
     type,
     items: quote.items.filter((i) => i.type === type),
   })).filter((g) => g.items.length > 0);
+
+  const options = quote.options ?? [];
 
   const soft = { color: color.ink, opacity: 0.62 };
   const accentLabel = {
@@ -161,7 +175,15 @@ export async function GET(
                 ? `${fmtDate(quote.trip_date_from)} — ${fmtDate(quote.trip_date_to)}`
                 : null,
               quote.nights ? `${quote.nights} ${quote.nights === 1 ? "noche" : "noches"}` : null,
-              `${quote.pax} ${quote.pax === 1 ? "persona" : "personas"}`,
+              paxLabel(
+                {
+                  adults: quote.pax_adults ?? Math.max(1, quote.pax),
+                  children: quote.pax_children ?? 0,
+                  infants: quote.pax_infants ?? 0,
+                  childrenAges: [],
+                },
+                false,
+              ),
             ]
               .filter(Boolean)
               .join(" · ")}
@@ -204,16 +226,62 @@ export async function GET(
 
         <div style={{ display: "flex", width: "100%", marginTop: 34 }}>{divider}</div>
 
-        {/* total */}
-        <div style={{ display: "flex", marginTop: 30, ...accentLabel, fontSize: 13 }}>TOTAL</div>
-        <div style={{ display: "flex", marginTop: 6, fontSize: 56 }}>
-          {fmtMoney(Number(quote.total_price), quote.currency)}
-        </div>
-        {quote.pax > 1 ? (
-          <div style={{ display: "flex", marginTop: 6, fontSize: 17, ...soft }}>
-            {`por persona ${fmtMoney(Number(quote.per_person), quote.currency)}`}
+        {/* precio: por persona grande, total chico (o una tarjeta por opción) */}
+        {options.length > 0 ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              marginTop: 26,
+              width: "100%",
+              gap: 14,
+            }}
+          >
+            <div style={{ display: "flex", ...accentLabel, fontSize: 13 }}>
+              {options.length === 2 ? "DOS OPCIONES" : "OPCIONES"}
+            </div>
+            {options.slice(0, 3).map((o, i) => (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  width: "100%",
+                  padding: "18px 22px",
+                  border: `1px solid ${color.accent}${o.is_recommended ? "66" : "33"}`,
+                  borderRadius: 3,
+                }}
+              >
+                <div style={{ display: "flex", fontSize: 22, textAlign: "center" }}>
+                  {sanitize(o.name)}
+                </div>
+                <div style={{ display: "flex", marginTop: 8, fontSize: 40 }}>
+                  {fmtMoney(Number(o.per_person), quote.currency)}
+                </div>
+                <div style={{ display: "flex", marginTop: 2, fontSize: 14, ...soft }}>
+                  por persona
+                </div>
+                <div style={{ display: "flex", marginTop: 6, fontSize: 15, ...soft }}>
+                  {`total ${fmtMoney(Number(o.total_price), quote.currency)}`}
+                </div>
+              </div>
+            ))}
           </div>
-        ) : null}
+        ) : (
+          <>
+            <div style={{ display: "flex", marginTop: 30, ...accentLabel, fontSize: 13 }}>
+              POR PERSONA
+            </div>
+            <div style={{ display: "flex", marginTop: 6, fontSize: 56 }}>
+              {fmtMoney(Number(quote.per_person), quote.currency)}
+            </div>
+            <div style={{ display: "flex", marginTop: 8, fontSize: 17, ...soft }}>
+              {`total ${fmtMoney(Number(quote.total_price), quote.currency)}`}
+            </div>
+          </>
+        )}
         {Number(quote.discount) > 0 ? (
           <div style={{ display: "flex", marginTop: 6, fontSize: 15, color: color.accent }}>
             {`incluye descuento de ${fmtMoney(Number(quote.discount), quote.currency)}`}

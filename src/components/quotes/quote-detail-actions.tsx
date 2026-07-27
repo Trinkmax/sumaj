@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Copy, Pencil, Send, Share2, ThumbsDown, Trophy } from "lucide-react";
+import { Check, Copy, Pencil, Send, Share2, Sparkles, ThumbsDown, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { ShareDialog } from "@/components/quotes/share-dialog";
@@ -13,7 +13,18 @@ import {
   duplicateQuote,
   setQuoteStatus,
 } from "@/lib/actions/quotes";
+import { fmtMoney } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { QuoteStatus } from "@/lib/types";
+
+export type QuoteOptionChoice = {
+  id: string;
+  name: string;
+  subtitle: string | null;
+  isRecommended: boolean;
+  perPerson: number;
+  totalPrice: number;
+};
 
 export function QuoteDetailActions({
   quoteId,
@@ -23,6 +34,9 @@ export function QuoteDetailActions({
   publicToken,
   contactName,
   contactPhone,
+  currency = "USD",
+  options = [],
+  acceptedOptionId = null,
 }: {
   quoteId: string;
   code: string;
@@ -31,6 +45,10 @@ export function QuoteDetailActions({
   publicToken: string;
   contactName: string | null;
   contactPhone: string | null;
+  currency?: string;
+  /** si el presupuesto compara opciones, se elige con cuál cerró */
+  options?: QuoteOptionChoice[];
+  acceptedOptionId?: string | null;
 }) {
   const router = useRouter();
   const [shareOpen, setShareOpen] = React.useState(false);
@@ -39,6 +57,10 @@ export function QuoteDetailActions({
   const [busy, setBusy] = React.useState<
     "compartir" | "convertir" | "duplicar" | "rechazar" | null
   >(null);
+  const [chosenOption, setChosenOption] = React.useState<string | null>(
+    acceptedOptionId ?? options.find((o) => o.isRecommended)?.id ?? options[0]?.id ?? null,
+  );
+  const multiOption = options.length > 1;
 
   const isOpen = status === "borrador" || status === "enviado" || status === "vencido";
   const isDraft = status === "borrador";
@@ -61,7 +83,7 @@ export function QuoteDetailActions({
 
   async function handleConvert() {
     setBusy("convertir");
-    const res = await convertQuote({ quoteId });
+    const res = await convertQuote({ quoteId, optionId: multiOption ? chosenOption : null });
     setBusy(null);
     setConfirmOpen(false);
     if (!res.ok) {
@@ -205,9 +227,65 @@ export function QuoteDetailActions({
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent
-          title="¿Convertir en venta?"
-          description={`Se crea el file con los servicios del presupuesto ${code}.`}
+          title={multiOption ? "¿Con qué opción cerró?" : "¿Convertir en venta?"}
+          description={
+            multiOption
+              ? `Elegí la opción que compró el cliente. El file se arma con esos servicios.`
+              : `Se crea el file con los servicios del presupuesto ${code}.`
+          }
         >
+          {multiOption && (
+            <div className="mb-4 space-y-2">
+              {options.map((o) => {
+                const selected = chosenOption === o.id;
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    onClick={() => setChosenOption(o.id)}
+                    aria-pressed={selected}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-all tap-highlight-none active:scale-[0.99]",
+                      selected
+                        ? "border-brand-500 bg-brand-tint shadow-sm"
+                        : "border-line hover:border-line-strong hover:bg-sand-soft/50",
+                    )}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1.5">
+                        {o.isRecommended && (
+                          <Sparkles
+                            className="size-3.5 shrink-0 text-brand-600"
+                            strokeWidth={2}
+                            aria-label="Recomendada"
+                          />
+                        )}
+                        <span className="truncate text-sm font-medium text-ink">{o.name}</span>
+                      </span>
+                      {o.subtitle && (
+                        <span className="block truncate text-xs text-ink-faint">
+                          {o.subtitle}
+                        </span>
+                      )}
+                    </span>
+                    <span className="shrink-0 text-right">
+                      <span className="block text-sm font-semibold tabular-nums text-ink">
+                        {fmtMoney(o.totalPrice, currency)}
+                      </span>
+                      <span className="block text-[11px] tabular-nums text-ink-faint">
+                        {fmtMoney(o.perPerson, currency)} por persona
+                      </span>
+                    </span>
+                    {selected && (
+                      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white animate-check-pop">
+                        <Check className="size-3" strokeWidth={3} />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button variant="ghost" onClick={() => setConfirmOpen(false)} disabled={busy !== null}>
               Cancelar
