@@ -10,6 +10,7 @@ import {
   Megaphone,
   MessageCircle,
   ReceiptText,
+  Store,
   Trophy,
   X,
   XCircle,
@@ -21,7 +22,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
-import { EmptyState } from "@/components/ui/misc";
+import { EmptyState, Tooltip } from "@/components/ui/misc";
 import { openLeadChat, reassignLead, updateLeadStage } from "@/lib/actions/leads";
 import type { LeadStage } from "@/lib/types";
 import { NextActionCard } from "./next-action-card";
@@ -33,8 +34,11 @@ import type { DetailLead, LeadActivity, LeadQuote, MemberOption, TagOption } fro
 
 const ACTIVE_STAGES = STAGES.filter((s) => s.active);
 
+const ASSIGN_ADMIN_HINT = "La asignación la maneja un admin";
+
 export function LeadDetail({
   lead,
+  branch,
   quotes,
   activities,
   members,
@@ -42,11 +46,13 @@ export function LeadDetail({
   me,
 }: {
   lead: DetailLead;
+  /** sucursal dueña del lead (chip de solo lectura) */
+  branch?: { id: string; name: string; color: string } | null;
   quotes: LeadQuote[];
   activities: LeadActivity[];
   members: MemberOption[];
   allTags: TagOption[];
-  me: { id: string; name: string; isStaff: boolean };
+  me: { id: string; name: string; isAdmin: boolean };
 }) {
   const router = useRouter();
 
@@ -105,6 +111,30 @@ export function LeadDetail({
     }
   }
 
+  const assigneeSelect = (
+    <Select
+      value={assigned}
+      onChange={(e) => reassign(e.target.value)}
+      aria-label={
+        me.isAdmin ? "Vendedor asignado" : `Vendedor asignado — ${ASSIGN_ADMIN_HINT}`
+      }
+      disabled={!me.isAdmin}
+      className={cn(
+        "h-9 text-[13px]",
+        // deshabilitado no dispara hover: sin esto el tooltip del wrapper no abre
+        !me.isAdmin && "pointer-events-none",
+      )}
+    >
+      <option value="">Sin asignar</option>
+      {members.map((m) => (
+        <option key={m.id} value={m.id}>
+          {m.display_name}
+          {m.id === me.id ? " (yo)" : ""}
+        </option>
+      ))}
+    </Select>
+  );
+
   const currentIdx = ACTIVE_STAGES.findIndex((s) => s.key === stage);
   const stageMeta = STAGE_BY_KEY[stage];
   const StageIcon = stageMeta.icon;
@@ -156,6 +186,12 @@ export function LeadDetail({
                   {lead.origin_campaign}
                 </Badge>
               )}
+              {branch && (
+                <Badge color={branch.color}>
+                  <Store className="size-3" strokeWidth={2} />
+                  {branch.name}
+                </Badge>
+              )}
               <ContactTags
                 contactId={lead.contact.id}
                 leadId={lead.id}
@@ -166,24 +202,16 @@ export function LeadDetail({
           </div>
         </div>
 
-        {me.isStaff && (
-          <div className="w-full sm:w-48">
-            <Select
-              value={assigned}
-              onChange={(e) => reassign(e.target.value)}
-              aria-label="Vendedor asignado"
-              className="h-9 text-[13px]"
-            >
-              <option value="">Sin asignar</option>
-              {members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.display_name}
-                  {m.id === me.id ? " (yo)" : ""}
-                </option>
-              ))}
-            </Select>
-          </div>
-        )}
+        {/* se ve siempre a quién está asignado; solo el admin lo cambia */}
+        <div className="w-full sm:w-48">
+          {me.isAdmin ? (
+            assigneeSelect
+          ) : (
+            <Tooltip content={ASSIGN_ADMIN_HINT}>
+              <span className="block cursor-not-allowed">{assigneeSelect}</span>
+            </Tooltip>
+          )}
+        </div>
       </div>
 
       {/* banners de cierre */}

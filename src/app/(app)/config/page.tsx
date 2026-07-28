@@ -6,6 +6,7 @@ import {
   Handshake,
   MessageSquareText,
   Smartphone,
+  Store,
   SunMoon,
   Tags,
   UsersRound,
@@ -36,6 +37,13 @@ const SECTIONS: {
     tone: "bg-tone-sky-soft text-tone-sky-text",
     title: "Equipo",
     description: "Roles, comisiones e invitaciones.",
+  },
+  {
+    href: "/config/sucursales",
+    icon: Store,
+    tone: "bg-tone-cyan-soft text-tone-cyan-text",
+    title: "Sucursales",
+    description: "Cada local con su equipo y su WhatsApp propio.",
   },
   {
     href: "/config/etiquetas",

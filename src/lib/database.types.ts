@@ -198,6 +198,56 @@ export type Database = {
           },
         ]
       }
+      branches: {
+        Row: {
+          address: string | null
+          agency_id: string
+          color: string
+          created_at: string
+          id: string
+          is_active: boolean
+          is_default: boolean
+          name: string
+          phone: string | null
+          position: number
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          agency_id: string
+          color?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          name: string
+          phone?: string | null
+          position?: number
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          agency_id?: string
+          color?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          name?: string
+          phone?: string | null
+          position?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "branches_agency_id_fkey"
+            columns: ["agency_id"]
+            isOneToOne: false
+            referencedRelation: "agencies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contact_tags: {
         Row: {
           agency_id: string
@@ -310,13 +360,16 @@ export type Database = {
         Row: {
           agency_id: string
           assigned_to: string | null
+          branch_id: string | null
           channel: Database["public"]["Enums"]["lead_channel"]
+          channel_id: string | null
           contact_id: string
           created_at: string
           id: string
           last_inbound_at: string | null
           last_message_at: string | null
           last_message_preview: string | null
+          origin_conversation_id: string | null
           status: Database["public"]["Enums"]["conversation_status"]
           unread_count: number
           updated_at: string
@@ -325,13 +378,16 @@ export type Database = {
         Insert: {
           agency_id: string
           assigned_to?: string | null
+          branch_id?: string | null
           channel?: Database["public"]["Enums"]["lead_channel"]
+          channel_id?: string | null
           contact_id: string
           created_at?: string
           id?: string
           last_inbound_at?: string | null
           last_message_at?: string | null
           last_message_preview?: string | null
+          origin_conversation_id?: string | null
           status?: Database["public"]["Enums"]["conversation_status"]
           unread_count?: number
           updated_at?: string
@@ -340,13 +396,16 @@ export type Database = {
         Update: {
           agency_id?: string
           assigned_to?: string | null
+          branch_id?: string | null
           channel?: Database["public"]["Enums"]["lead_channel"]
+          channel_id?: string | null
           contact_id?: string
           created_at?: string
           id?: string
           last_inbound_at?: string | null
           last_message_at?: string | null
           last_message_preview?: string | null
+          origin_conversation_id?: string | null
           status?: Database["public"]["Enums"]["conversation_status"]
           unread_count?: number
           updated_at?: string
@@ -368,10 +427,31 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "conversations_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversations_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "wa_channels"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "conversations_contact_id_fkey"
             columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversations_origin_conversation_id_fkey"
+            columns: ["origin_conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
             referencedColumns: ["id"]
           },
         ]
@@ -515,6 +595,7 @@ export type Database = {
       files: {
         Row: {
           agency_id: string
+          branch_id: string | null
           code: string
           commission_amount: number
           commission_label: string | null
@@ -531,12 +612,16 @@ export type Database = {
           number: number
           quote_id: string | null
           return_date: string | null
+          review_status: Database["public"]["Enums"]["file_review_status"]
+          reviewed_at: string | null
+          reviewed_by: string | null
           seller_id: string | null
           status: Database["public"]["Enums"]["file_status"]
           updated_at: string
         }
         Insert: {
           agency_id: string
+          branch_id?: string | null
           code?: string
           commission_amount?: number
           commission_label?: string | null
@@ -553,12 +638,16 @@ export type Database = {
           number?: number
           quote_id?: string | null
           return_date?: string | null
+          review_status?: Database["public"]["Enums"]["file_review_status"]
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           seller_id?: string | null
           status?: Database["public"]["Enums"]["file_status"]
           updated_at?: string
         }
         Update: {
           agency_id?: string
+          branch_id?: string | null
           code?: string
           commission_amount?: number
           commission_label?: string | null
@@ -575,6 +664,9 @@ export type Database = {
           number?: number
           quote_id?: string | null
           return_date?: string | null
+          review_status?: Database["public"]["Enums"]["file_review_status"]
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           seller_id?: string | null
           status?: Database["public"]["Enums"]["file_status"]
           updated_at?: string
@@ -585,6 +677,13 @@ export type Database = {
             columns: ["agency_id"]
             isOneToOne: false
             referencedRelation: "agencies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "files_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
             referencedColumns: ["id"]
           },
           {
@@ -606,6 +705,13 @@ export type Database = {
             columns: ["quote_id"]
             isOneToOne: false
             referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "files_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "members"
             referencedColumns: ["id"]
           },
           {
@@ -798,6 +904,7 @@ export type Database = {
         Row: {
           agency_id: string
           assigned_to: string | null
+          branch_id: string | null
           budget_currency: string
           budget_estimate: number | null
           closed_at: string | null
@@ -826,6 +933,7 @@ export type Database = {
         Insert: {
           agency_id: string
           assigned_to?: string | null
+          branch_id?: string | null
           budget_currency?: string
           budget_estimate?: number | null
           closed_at?: string | null
@@ -854,6 +962,7 @@ export type Database = {
         Update: {
           agency_id?: string
           assigned_to?: string | null
+          branch_id?: string | null
           budget_currency?: string
           budget_estimate?: number | null
           closed_at?: string | null
@@ -895,6 +1004,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "leads_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "leads_contact_id_fkey"
             columns: ["contact_id"]
             isOneToOne: false
@@ -921,6 +1037,7 @@ export type Database = {
         Row: {
           agency_id: string
           avatar_url: string | null
+          branch_id: string | null
           commission_pct: number
           created_at: string
           display_name: string
@@ -935,6 +1052,7 @@ export type Database = {
         Insert: {
           agency_id: string
           avatar_url?: string | null
+          branch_id?: string | null
           commission_pct?: number
           created_at?: string
           display_name: string
@@ -949,6 +1067,7 @@ export type Database = {
         Update: {
           agency_id?: string
           avatar_url?: string | null
+          branch_id?: string | null
           commission_pct?: number
           created_at?: string
           display_name?: string
@@ -966,6 +1085,13 @@ export type Database = {
             columns: ["agency_id"]
             isOneToOne: false
             referencedRelation: "agencies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "members_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
             referencedColumns: ["id"]
           },
         ]
@@ -1514,6 +1640,54 @@ export type Database = {
           },
         ]
       }
+      routing_rules: {
+        Row: {
+          agency_id: string
+          branch_id: string
+          created_at: string
+          id: string
+          is_active: boolean
+          match_type: string
+          pattern: string
+          position: number
+        }
+        Insert: {
+          agency_id: string
+          branch_id: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          match_type?: string
+          pattern: string
+          position?: number
+        }
+        Update: {
+          agency_id?: string
+          branch_id?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          match_type?: string
+          pattern?: string
+          position?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "routing_rules_agency_id_fkey"
+            columns: ["agency_id"]
+            isOneToOne: false
+            referencedRelation: "agencies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "routing_rules_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       suppliers: {
         Row: {
           agency_id: string
@@ -1666,6 +1840,110 @@ export type Database = {
           },
         ]
       }
+      wa_channels: {
+        Row: {
+          agency_id: string
+          auto_reply_enabled: boolean
+          auto_reply_text: string | null
+          branch_id: string | null
+          created_at: string
+          id: string
+          is_mother: boolean
+          kind: Database["public"]["Enums"]["wa_channel_kind"]
+          label: string
+          last_connected_at: string | null
+          last_error: string | null
+          phone: string | null
+          phone_number_id: string | null
+          qr: string | null
+          qr_expires_at: string | null
+          status: Database["public"]["Enums"]["wa_channel_status"]
+          updated_at: string
+        }
+        Insert: {
+          agency_id: string
+          auto_reply_enabled?: boolean
+          auto_reply_text?: string | null
+          branch_id?: string | null
+          created_at?: string
+          id?: string
+          is_mother?: boolean
+          kind?: Database["public"]["Enums"]["wa_channel_kind"]
+          label: string
+          last_connected_at?: string | null
+          last_error?: string | null
+          phone?: string | null
+          phone_number_id?: string | null
+          qr?: string | null
+          qr_expires_at?: string | null
+          status?: Database["public"]["Enums"]["wa_channel_status"]
+          updated_at?: string
+        }
+        Update: {
+          agency_id?: string
+          auto_reply_enabled?: boolean
+          auto_reply_text?: string | null
+          branch_id?: string | null
+          created_at?: string
+          id?: string
+          is_mother?: boolean
+          kind?: Database["public"]["Enums"]["wa_channel_kind"]
+          label?: string
+          last_connected_at?: string | null
+          last_error?: string | null
+          phone?: string | null
+          phone_number_id?: string | null
+          qr?: string | null
+          qr_expires_at?: string | null
+          status?: Database["public"]["Enums"]["wa_channel_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wa_channels_agency_id_fkey"
+            columns: ["agency_id"]
+            isOneToOne: false
+            referencedRelation: "agencies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wa_channels_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wa_session_state: {
+        Row: {
+          channel_id: string
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          channel_id: string
+          key: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          channel_id?: string
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wa_session_state_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "wa_channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       wa_templates: {
         Row: {
           agency_id: string
@@ -1748,6 +2026,7 @@ export type Database = {
         | "sistema"
       conversation_status: "abierta" | "cerrada" | "spam"
       document_type: "dni" | "pasaporte" | "visa" | "otro"
+      file_review_status: "pendiente" | "revisado"
       file_status:
         | "vendido"
         | "pagado"
@@ -1815,6 +2094,8 @@ export type Database = {
         | "crucero"
         | "otro"
       trip_type: "familiar" | "pareja" | "grupal" | "corporativo" | "solo"
+      wa_channel_kind: "cloud_api" | "baileys"
+      wa_channel_status: "desconectado" | "vinculando" | "conectado" | "error"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1953,6 +2234,7 @@ export const Constants = {
       ],
       conversation_status: ["abierta", "cerrada", "spam"],
       document_type: ["dni", "pasaporte", "visa", "otro"],
+      file_review_status: ["pendiente", "revisado"],
       file_status: ["vendido", "pagado", "en_curso", "finalizado", "cancelado"],
       followup_status: ["pendiente", "enviado", "cancelado", "fallido"],
       lead_channel: [
@@ -2011,6 +2293,8 @@ export const Constants = {
         "otro",
       ],
       trip_type: ["familiar", "pareja", "grupal", "corporativo", "solo"],
+      wa_channel_kind: ["cloud_api", "baileys"],
+      wa_channel_status: ["desconectado", "vinculando", "conectado", "error"],
     },
   },
 } as const

@@ -32,7 +32,7 @@ export default function ConfigLoading() {
 
         {/* Cards de secciones */}
         <div className="grid gap-3 pb-2 sm:grid-cols-2">
-          {Array.from({ length: 7 }).map((_, i) => (
+          {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="card flex items-center gap-4 p-4">
               <Skeleton className="size-11 rounded-full" />
               <div className="flex-1">

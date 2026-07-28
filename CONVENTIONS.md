@@ -20,6 +20,7 @@ Multi-tenant: TODA fila tiene `agency_id`; RLS lo garantiza — nunca filtrar po
 - Server: `import { createClient } from "@/lib/supabase/server"` (async).
 - Browser: `import { createClient } from "@/lib/supabase/client"`.
 - Público sin sesión (páginas /p/, /r/): `createAnonClient()` de server.ts + RPC `quote_public(token)` / `receipt_public(token)`.
+- Alta de usuarios del equipo: `createAdminClient()` de `@/lib/supabase/admin` (service role, **solo desde server actions**) si existe `SUPABASE_SERVICE_ROLE_KEY`; si no, cae al camino de invitación. Nunca importarlo desde un client component.
 - Auth en páginas: `const { member, agency, isAdmin, isStaff } = await requireMember()` de `@/lib/auth`.
 - En actions: `const { supabase, member, agency, isAdmin } = await requireAction()` de `@/lib/actions/core`.
 - Realtime: canal por recurso, SIEMPRE limpiar con `supabase.removeChannel(channel)` en el cleanup del useEffect.
@@ -32,12 +33,35 @@ Multi-tenant: TODA fila tiene `agency_id`; RLS lo garantiza — nunca filtrar po
   Metadata visual en `STAGES` de `src/lib/domain.ts`.
 - `leads.position` (numeric) ordena dentro de la columna kanban (fractional index: entre 2 tarjetas = promedio).
 - `leads.next_action` + `next_action_at` = próximo seguimiento manual del vendedor.
-- `conversations` (1 por contacto+canal) + `messages`. Trigger de DB ya actualiza `last_message_at`, `last_message_preview`, `unread_count` y cancela followups al recibir mensaje entrante — NO duplicar esa lógica.
-- `quotes` + `quote_items`: el cotizador. Ítem: `cost` (Final = lo que se paga), `gross` (Bruto comisionable), `commission_pct` (comisión mayorista). Totales SIEMPRE con `computeQuoteTotals()` de `src/lib/domain.ts` — única fuente de verdad, replica la planilla del cliente. Al guardar, persistir `total_cost`, `total_price`, `commission_total` en la fila.
+- `conversations` (1 por contacto + canal + **número**) + `messages`. Trigger de DB ya actualiza `last_message_at`, `last_message_preview`, `unread_count` y cancela followups al recibir mensaje entrante — NO duplicar esa lógica.
+
+## Mensajería: número madre + sucursales (LEER antes de tocar WhatsApp)
+
+La arquitectura que hace que el seguimiento no se pague:
+
+1. **Número madre** (`wa_channels.is_mother`, kind `cloud_api`): por ahí entran TODAS las consultas nuevas. El webhook `POST /api/wa/cloud/webhook` crea contacto + conversación + lead, manda la **respuesta automática** (`auto_reply_text`), **deriva a una sucursal** con `routing_rules` (primera que matchea; fallback `branches.is_default`) y **avisa a los operadores**.
+2. **Sucursales** (`branches`, una fila en `wa_channels` kind `baileys` por sucursal): el operador sigue la charla desde el número de la sucursal. Ahí **no hay ventana de 24 hs ni plantillas pagas** — por eso `sendMessage` solo valida la ventana cuando el canal es `cloud_api`.
+3. El **worker** (`/worker`, proceso aparte con Baileys) mantiene las sesiones, guarda credenciales en `wa_session_state` (RLS sin policies: solo service role) y publica el QR en `wa_channels.qr`. La app le habla por HTTP (`src/lib/wa/worker.ts`), él le avisa de los entrantes en `POST /api/wa/baileys/events` firmado con HMAC.
+
+Contratos:
+- Lógica de entrada compartida por los dos webhooks: `handleInboundMessage()` de `src/lib/wa/inbound.ts` (service role). Alerta a operadores: `alertBranchOperators()` — aviso in-app + WhatsApp al operador desde el número de la sucursal.
+- Envío: `sendMessage()` de `lib/actions/messages.ts` resuelve el canal solo. Handoff: `deriveToBranch({ conversationId, branchId })` (admin) abre/reusa el hilo de la sucursal y devuelve su `conversationId`.
+- Alta/vinculación de números: `lib/actions/branches.ts` (`linkChannel` → QR, `unlinkChannel`, `syncChannel`, `getChannelState` para el polling).
+- `members.branch_id` = sucursal del vendedor (null = ve todas, típico admin). **La asignación de vendedores y la derivación son admin-only.**
+- Si falta el worker o la Cloud API, todo sigue andando: el mensaje se registra con `metadata.simulated` y la UI lo dice.
+- `quotes` + `quote_items`: el cotizador. Ítem: `gross` (Bruto comisionable = **lo que se carga a mano**), `cost` (Final = lo que se paga = bruto + fee del grupo), `commission_pct` (comisión mayorista, sale sola del proveedor). Totales SIEMPRE con `computeQuoteTotals()` de `src/lib/domain.ts` — única fuente de verdad. Al guardar, persistir `total_cost`, `total_price`, `commission_total`.
+  - **Pasajeros desglosados**: `pax_adults` / `pax_children` / `pax_infants` + `children_ages` (jsonb). `pax` = total (lo mantiene la app). El infante paga el **30%** (`INFANT_FACTOR`): `paxUnits()` da las "unidades de precio" y el precio por persona sale de ahí.
+  - **Opciones comparables** (`quote_options`): dos hoteles en un mismo presupuesto. `quote_items.option_id` nulo = servicio común a todas las opciones. Totales por opción con `computeOptionTotals(comunes, opciones, calc)`; cada `quote_options` guarda `total_cost/total_price/per_person`. `quotes.accepted_option_id` = la opción vigente (con la que se vende).
+  - **Fees automáticos**: `finalFromGross(gross, type, fees)` con `agencies.settings.quote_fees` (`aereo_pct` 2, `terrestre_pct` 4). El usuario puede pisar el Final a mano.
+  - **Comisión**: la ve **solo el admin** (`isAdmin`). El vendedor ve un estimado = `sellerMarkupCommission(markup, settings.quote_seller_commission_pct)` (30% por defecto).
+  - Al vender: `selectQuoteSale(quote, items, options)` de `actions/core.ts` devuelve los ítems (comunes + los de la opción elegida) y el precio de esa opción.
 - `files` + `file_services` (cost/price por servicio) + `payments`. Vista `file_totals` (file_id, total_cost, total_sale, utility, paid_total, balance) — usarla para saldos, no recalcular.
-- `payments`: multimoneda. `amount` en la moneda pagada; `amount_in_file_currency` normalizado (si ARS→USD dividir por `exchange_rate`). Los cobros reciben `receipt_code` (R-0001) y `receipt_token` automáticamente (trigger).
+  - `files.review_status` (`pendiente` | `revisado`): las ventas que nacen del pipeline (`convertLeadToSale`) entran **pendiente** y un admin las cierra con `markFileReviewed`. Las cargadas a mano nacen revisadas.
+  - `file_services.deadline_date` = fecha de caída de la reserva (hasta cuándo hay tiempo de pagarle al proveedor) → chips con `fmtDeadline()`.
+  - `file_services.images` (jsonb `{path, name}[]`) = vouchers/comprobantes en el bucket privado `attachments`, path `{agency_id}/files/{file_id}/…` (`ServiceImagesField` / `ServiceImagesStrip`).
+- `payments`: multimoneda. `amount` en la moneda pagada; `amount_in_file_currency` normalizado (si ARS→USD dividir por `exchange_rate`). Los cobros reciben `receipt_code` (R-0001) y `receipt_token` automáticamente (trigger). Direcciones: `cobro`, `pago_proveedor`, `pago_comision` (a un `member_id`, `file_id` opcional), `reembolso` — metadata visual en `PAYMENT_DIRECTIONS`.
 - Numeración automática por triggers: files `F-0001`, quotes `P-0001`, recibos `R-0001`. NO setear number/code al insertar.
-- `members.commission_pct` = % del vendedor sobre la UTILIDAD del file; se snapshotea en `files.commission_pct`.
+- `members.commission_pct` = % del vendedor sobre la UTILIDAD del file; se snapshotea en `files.commission_pct`. La venta puede tener **comisión plana**: `files.commission_type` (`utilidad_pct` | `monto_fijo`) + `commission_amount` + `commission_label` (ej. "Grupal Europa"). Calcular SIEMPRE con `fileCommission()` de domain.ts.
 - Roles: admin (todo), vendedor (ve todo, la UI defaultea "míos"), freelance (RLS lo limita a lo suyo o sin asignar).
 - Historial: `logActivity()` de core.ts en cada evento relevante (cambio de etapa, presupuesto enviado, cobro, nota).
 
@@ -132,7 +156,7 @@ INMEDIATAMENTE, disparar la action, revertir + toast.error si falla. El vendedor
 - `Badge` (prop `color` = key de TAG_COLORS para etiquetas) · `Avatar` (prop `name`, genera iniciales+color)
 - `PageHeader` de `@/components/shell/page-header` en el tope de CADA página
 - Dinero: `fmtMoney(n, "USD")` → "USD 1.386". Fechas: `fmtDate/fmtDateFull/fmtDateLong/fmtRelative/fmtDue`. Teléfono: `fmtPhone`.
-- Dominio: `STAGES, STAGE_BY_KEY, CHANNELS, SERVICE_TYPES, SERVICE_ORDER, FILE_STATUSES, QUOTE_STATUSES, PAYMENT_METHODS, TRIP_TYPES, TAG_COLORS, TAG_DOTS, TAG_CATEGORIES, computeQuoteTotals, QUOTE_COLORS, QUOTE_FONTS, quoteColor, quoteFont, fillTemplate, waLink` — todo en `src/lib/domain.ts`.
+- Dominio: `STAGES, STAGE_BY_KEY, CHANNELS, SERVICE_TYPES, SERVICE_ORDER, FILE_STATUSES, QUOTE_STATUSES, PAYMENT_METHODS, PAYMENT_DIRECTIONS, COMMISSION_TYPES, TRIP_TYPES, TAG_COLORS, TAG_DOTS, TAG_CATEGORIES, computeQuoteTotals, computeOptionTotals, paxCount, paxUnits, paxLabel, PAX_KINDS, INFANT_FACTOR, feePct, finalFromGross, DEFAULT_QUOTE_FEES, sellerMarkupCommission, fileCommission, QUOTE_COLORS, QUOTE_FONTS, quoteColor, quoteFont, fillTemplate, waLink` — todo en `src/lib/domain.ts`.
   **Shapes v2 (con icono lucide, sin emoji)**: `STAGES[].icon` · `CHANNELS[c] = {label, short, icon}` · `TRIP_TYPES[t] = {label, icon}` · `SERVICE_TYPES[t] = {label, plural, icon}` (ya NO existe `.emoji`) · `PAYMENT_METHODS[m] = {label, icon}` · `ACTIVITY_TYPES[a] = {label, icon}` · `FILE_STATUSES[s] / QUOTE_STATUSES[s] = {label, chip, icon}`.
 - Personas relacionadas: `travelers.linked_contact_id` (nullable → ficha propia del pasajero). Grupo de un contacto = `travelers where contact_id = X`; "viaja con" inverso = `travelers where linked_contact_id = X` → dueño. Promover pasajero a contacto: action en `lib/actions/contacts.ts`.
 

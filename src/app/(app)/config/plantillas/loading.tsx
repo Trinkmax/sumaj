@@ -7,10 +7,10 @@ export default function PlantillasLoading() {
         <Skeleton className="h-8 w-36" />
         <Skeleton className="mt-2 h-4 w-64" />
       </div>
-      {/* ConfigNav: volver + 7 pills */}
+      {/* ConfigNav: volver + 8 pills */}
       <div className="flex items-center gap-1.5 overflow-hidden px-4 py-2 md:px-6">
         <Skeleton className="size-8 shrink-0 rounded-full" />
-        {Array.from({ length: 7 }).map((_, i) => (
+        {Array.from({ length: 8 }).map((_, i) => (
           <Skeleton key={i} className="h-8 w-24 shrink-0 rounded-full" />
         ))}
       </div>

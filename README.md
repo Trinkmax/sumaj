@@ -20,7 +20,9 @@ pnpm dev
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` · `NEXT_PUBLIC_SUPABASE_ANON_KEY` | conexión a Supabase |
 | `NEXT_PUBLIC_APP_URL` | links públicos de presupuestos, recibos y acceso al login |
-| `SUPABASE_SERVICE_ROLE_KEY` | alta directa de usuarios del equipo — **opcional pero recomendada** |
+| `SUPABASE_SERVICE_ROLE_KEY` | alta directa de usuarios del equipo y webhooks de WhatsApp — **opcional pero recomendada** |
+| `WA_CLOUD_TOKEN` · `WA_CLOUD_VERIFY_TOKEN` | número madre por Cloud API de Meta |
+| `WA_WORKER_URL` · `WA_WORKER_TOKEN` · `WA_WEBHOOK_SECRET` | worker de WhatsApp de las sucursales (ver `/worker`) |
 
 `SUPABASE_SERVICE_ROLE_KEY` habilita el alta directa de usuarios del equipo:
 el admin pone email y contraseña en Configuración → Equipo y la cuenta queda lista
@@ -28,6 +30,23 @@ para pasarle el acceso por WhatsApp. Sin la clave el alta igual funciona, pero d
 una invitación y la persona entra sola la primera vez con ese email y contraseña.
 **Nunca se expone al browser**: no lleva prefijo `NEXT_PUBLIC_`, vive solo en el
 servidor (`src/lib/supabase/admin.ts`) y saltea todas las políticas RLS.
+
+### WhatsApp: número madre + sucursales
+
+Todas las consultas entran por un **número madre** (Cloud API oficial): el sistema
+contesta solo, crea el lead, lo deriva a la sucursal que corresponda y avisa a sus
+operadores. Después, cada **sucursal** sigue la charla desde su propio número,
+vinculado por QR con el worker de `/worker` (Baileys): ahí **no hay ventana de 24 hs
+ni plantillas pagas**, así el seguimiento no cuesta.
+
+```bash
+cd worker && npm install && cp .env.example .env && npm run dev
+```
+
+Los secretos `WA_WORKER_TOKEN` y `WA_WEBHOOK_SECRET` tienen que ser los mismos en
+la app y en el worker. El detalle está en [`worker/README.md`](worker/README.md).
+Sin nada de esto configurado la app funciona igual: los mensajes se registran y la
+UI avisa que el número no está vinculado.
 
 Usuarios demo (password `sumaj2026`):
 

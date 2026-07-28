@@ -21,6 +21,8 @@ type EmbeddedConversation = Pick<
   "id" | "agency_id" | "contact_id" | "status" | "wa_id" | "last_inbound_at" | "unread_count"
 > & {
   contact: Pick<Tables<"contacts">, "id" | "full_name" | "phone"> | null;
+  /** por qué número sale el mensaje: define si aplica la ventana de 24 hs */
+  channel_ref: Pick<Tables<"wa_channels">, "id" | "kind" | "label" | "status"> | null;
 };
 
 /**
@@ -69,14 +71,26 @@ export function EmbeddedChat({
   }
 
   const loading = loadedId !== conversationId;
+  /* La ventana de 24 hs es una regla de la API oficial (número madre).
+     Por el número de una sucursal (Baileys) se escribe siempre: es la razón
+     de ser de la arquitectura — el seguimiento no se paga. */
+  const channelKind = conversation?.channel_ref?.kind ?? null;
+  const windowApplies = channelKind !== "baileys";
+  /* ¿el número por el que sale este chat está realmente conectado? */
+  const channelReady =
+    channelKind === "baileys"
+      ? conversation?.channel_ref?.status === "conectado"
+      : waConnected;
   const windowOpen =
-    lastInboundAt != null && now - new Date(lastInboundAt).getTime() < WINDOW_MS;
+    !windowApplies ||
+    (lastInboundAt != null && now - new Date(lastInboundAt).getTime() < WINDOW_MS);
 
-  /* reloj: reevalúa la ventana de 24 hs cada minuto */
+  /* reloj: reevalúa la ventana de 24 hs cada minuto (solo si aplica) */
   useEffect(() => {
+    if (!windowApplies) return;
     const t = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(t);
-  }, []);
+  }, [windowApplies]);
 
   const scrollToBottom = useCallback((smooth = false) => {
     const el = listRef.current;
@@ -93,7 +107,7 @@ export function EmbeddedChat({
         supabase
           .from("conversations")
           .select(
-            "id, agency_id, contact_id, status, wa_id, last_inbound_at, unread_count, contact:contacts(id, full_name, phone)",
+            "id, agency_id, contact_id, status, wa_id, last_inbound_at, unread_count, contact:contacts(id, full_name, phone), channel_ref:wa_channels(id, kind, label, status)",
           )
           .eq("id", conversationId)
           .maybeSingle(),
@@ -372,7 +386,7 @@ export function EmbeddedChat({
             placeholder={
               noteMode
                 ? "Escribí una nota interna…"
-                : waConnected
+                : channelReady
                   ? "Escribí un mensaje"
                   : "Escribí un mensaje (envío simulado)"
             }

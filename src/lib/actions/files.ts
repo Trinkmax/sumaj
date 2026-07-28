@@ -190,6 +190,57 @@ export async function updateFileStatus(
 }
 
 /* ───────────────────────────────────────────
+   Revisión de la venta.
+   Las ventas que nacen del pipeline entran en "pendiente": los servicios y
+   montos llegan del presupuesto y conviene que un admin los mire antes de
+   darlos por buenos. Las cargadas a mano ya nacen revisadas.
+   ─────────────────────────────────────────── */
+const reviewSchema = z.object({
+  fileId: z.string().uuid(),
+  reviewed: z.boolean(),
+});
+
+export async function markFileReviewed(
+  input: z.infer<typeof reviewSchema>,
+): Promise<ActionResult<null>> {
+  const parsed = reviewSchema.safeParse(input);
+  if (!parsed.success) return fail("Datos inválidos.");
+  const { supabase, member, agency, isAdmin } = await requireAction();
+  if (!isAdmin) return fail("La revisión la cierra un admin.");
+
+  const { reviewed } = parsed.data;
+
+  const { data: file, error } = await supabase
+    .from("files")
+    .update({
+      review_status: reviewed ? "revisado" : "pendiente",
+      reviewed_at: reviewed ? new Date().toISOString() : null,
+      reviewed_by: reviewed ? member.id : null,
+    })
+    .eq("id", parsed.data.fileId)
+    .select("id, code, contact_id")
+    .single();
+
+  if (error || !file) return fail("No se pudo guardar la revisión. Probá de nuevo.");
+
+  await logActivity({
+    agencyId: agency.id,
+    memberId: member.id,
+    contactId: file.contact_id,
+    fileId: file.id,
+    type: "sistema",
+    // el historial ya muestra quién lo hizo: el cuerpo solo dice qué pasó
+    body: reviewed
+      ? `La venta ${file.code} quedó revisada`
+      : `La venta ${file.code} volvió a revisión`,
+    metadata: { review_status: reviewed ? "revisado" : "pendiente" },
+  });
+
+  revalidateFile(parsed.data.fileId);
+  return succeed(null);
+}
+
+/* ───────────────────────────────────────────
    Esquema de comisión del vendedor sobre esta venta.
    · utilidad_pct → % sobre la utilidad del file (lo de siempre)
    · monto_fijo   → monto plano por venta (enlatados: "Grupal Europa, USD 100")

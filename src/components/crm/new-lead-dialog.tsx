@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { ChoiceGrid } from "@/components/ui/misc";
+import { ChoiceGrid, Tooltip } from "@/components/ui/misc";
 import { CHANNELS } from "@/lib/domain";
 import { normalizePhone } from "@/lib/format";
 import { createLead, findContactByPhone } from "@/lib/actions/leads";
@@ -20,6 +20,8 @@ const CHANNEL_OPTIONS = (Object.keys(CHANNELS) as LeadChannel[]).map((key) => ({
   icon: CHANNELS[key].icon,
 }));
 
+const ASSIGN_ADMIN_HINT = "La asignación la maneja un admin";
+
 /**
  * Alta de lead en menos de 30 segundos: nombre y teléfono arriba,
  * canal visual, y el resto opcional detrás de "Agregar detalles".
@@ -29,12 +31,15 @@ export function NewLeadDialog({
   onOpenChange,
   members,
   meId,
+  isAdmin = false,
   onCreated,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   members: MemberOption[];
   meId: string;
+  /** la asignación de vendedores la maneja un admin */
+  isAdmin?: boolean;
   onCreated?: (lead: BoardLead) => void;
 }) {
   const [name, setName] = React.useState("");
@@ -98,7 +103,9 @@ export function NewLeadDialog({
       return;
     }
 
-    const assignee = members.find((m) => m.id === assignedTo) ?? null;
+    // el server manda: si no sos admin, el lead queda tuyo
+    const finalAssigned = res.data.assignedTo;
+    const assignee = members.find((m) => m.id === finalAssigned) ?? null;
     onCreated?.({
       id: res.data.leadId,
       stage: "nuevo",
@@ -110,7 +117,7 @@ export function NewLeadDialog({
       created_at: new Date().toISOString(),
       pax_adults: 1,
       pax_children: 0,
-      assigned_to: assignedTo || null,
+      assigned_to: finalAssigned,
       won_file_id: null,
       budget_estimate: null,
       budget_currency: null,
@@ -131,6 +138,26 @@ export function NewLeadDialog({
     );
     onOpenChange(false);
   }
+
+  /* se ve a quién queda asignado; solo el admin lo cambia */
+  const assigneeSelect = (
+    <Select
+      id="nl-assignee"
+      value={assignedTo}
+      onChange={(e) => setAssignedTo(e.target.value)}
+      disabled={!isAdmin}
+      aria-label={isAdmin ? undefined : `Asignar a — ${ASSIGN_ADMIN_HINT}`}
+      // deshabilitado no dispara hover: sin esto el tooltip del wrapper no abre
+      className={cn(!isAdmin && "pointer-events-none")}
+    >
+      {members.map((m) => (
+        <option key={m.id} value={m.id}>
+          {m.display_name}
+          {m.id === meId ? " (yo)" : ""}
+        </option>
+      ))}
+    </Select>
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -211,18 +238,13 @@ export function NewLeadDialog({
 
               <div>
                 <Label htmlFor="nl-assignee">Asignar a</Label>
-                <Select
-                  id="nl-assignee"
-                  value={assignedTo}
-                  onChange={(e) => setAssignedTo(e.target.value)}
-                >
-                  {members.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.display_name}
-                      {m.id === meId ? " (yo)" : ""}
-                    </option>
-                  ))}
-                </Select>
+                {isAdmin ? (
+                  assigneeSelect
+                ) : (
+                  <Tooltip content={ASSIGN_ADMIN_HINT}>
+                    <span className="block cursor-not-allowed">{assigneeSelect}</span>
+                  </Tooltip>
+                )}
               </div>
 
               <div>

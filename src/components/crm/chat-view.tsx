@@ -4,22 +4,34 @@ import * as React from "react";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  Forward,
+  Globe,
   MessageCircle,
   PanelRightClose,
   PanelRightOpen,
+  PlugZap,
+  Store,
+  Unplug,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Avatar } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Tooltip } from "@/components/ui/misc";
+import { EmptyState, Tooltip } from "@/components/ui/misc";
 import { ConversationList } from "@/components/chats/conversation-list";
 import { EmbeddedChat } from "@/components/chats/embedded-chat";
 import { ChatContextPanel } from "@/components/chats/chat-context-panel";
-import { CONVERSATION_SELECT, type ConversationRow } from "@/components/chats/types";
+import {
+  CONVERSATION_SELECT,
+  conversationOrigin,
+  type BranchOption,
+  type ConversationRow,
+} from "@/components/chats/types";
 import { QuoteDialog } from "@/components/quotes/quote-dialog";
-import { assignConversation } from "@/lib/actions/messages";
-import { STAGE_BY_KEY } from "@/lib/domain";
+import { assignConversation, deriveToBranch } from "@/lib/actions/messages";
+import { STAGE_BY_KEY, TAG_DOTS } from "@/lib/domain";
 import { fmtPhone, fmtRelative } from "@/lib/format";
 import type { LeadStage } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -29,6 +41,23 @@ import type { MemberOption } from "./types";
 type HeaderLead = { id: string; destination: string | null; stage: LeadStage };
 
 const PANEL_KEY = "crm:chat-panel";
+
+const ASSIGN_ADMIN_HINT = "La asignación la maneja un admin";
+
+/** Qué implica el número por el que está abierta la conversación. */
+function originHint(
+  kind: "madre" | "sucursal" | "otro",
+  label: string,
+  canDerive: boolean,
+): string {
+  if (kind === "madre")
+    return canDerive
+      ? "Entra por el número madre: solo se puede escribir dentro de las 24 hs del último mensaje del cliente. Derivá a una sucursal para seguir sin límite."
+      : "Entra por el número madre: solo se puede escribir dentro de las 24 hs del último mensaje del cliente. Pedile a un admin que la derive a una sucursal.";
+  if (kind === "sucursal")
+    return `Hablás desde el número de ${label}: sin ventana de 24 hs ni plantillas pagas.`;
+  return `Conversación por ${label}.`;
+}
 
 /* Breakpoints con useSyncExternalStore: evita montar DOS EmbeddedChat
    (pane desktop + overlay mobile) a la vez — duplicaría queries, realtime
@@ -60,8 +89,10 @@ export function ChatView({
   initialConversations,
   agencyId,
   meId,
+  isAdmin,
   waConnected,
   members,
+  branches,
   initialConversationId,
   onSelectedChange,
   onOpenLead,
@@ -70,8 +101,12 @@ export function ChatView({
   initialConversations: ConversationRow[];
   agencyId: string;
   meId: string;
+  /** la asignación de vendedores y la derivación son solo de admins */
+  isAdmin: boolean;
   waConnected: boolean;
   members: MemberOption[];
+  /** sucursales activas con su número (filtro de la lista + derivar) */
+  branches: BranchOption[];
   initialConversationId?: string | null;
   /** El board sincroniza la conversación seleccionada a la URL (?c=). */
   onSelectedChange?: (conversationId: string | null) => void;
@@ -89,6 +124,7 @@ export function ChatView({
   const [conv, setConv] = React.useState<ConversationRow | null>(null);
   const [lead, setLead] = React.useState<HeaderLead | null>(null);
   const [quoteOpen, setQuoteOpen] = React.useState(false);
+  const [deriveOpen, setDeriveOpen] = React.useState(false);
   // panel de herramientas: aside colapsable en lg+, bottom sheet abajo
   const [panelOpen, setPanelOpen] = React.useState(false);
   const [sheetOpen, setSheetOpen] = React.useState(false);
@@ -222,6 +258,73 @@ export function ChatView({
     setLead((l) => (l && l.id === leadId ? { ...l, stage } : l));
   }, []);
 
+  /* por qué número está abierta la conversación (y si se puede derivar).
+     Se deriva todo lo que NO esté ya en el número de una sucursal: el madre,
+     otro canal y también los hilos viejos sin canal asignado. */
+  const from = active ? conversationOrigin(active) : null;
+  const canDerive = isAdmin && active != null && from?.kind !== "sucursal";
+  const FromIcon = from?.kind === "sucursal" ? Store : Globe;
+
+  const originChip = from && (
+    <Tooltip content={originHint(from.kind, from.label, canDerive)}>
+      {/* con poco ancho queda solo el icono: el tooltip explica el resto */}
+      <span
+        tabIndex={0}
+        className="flex shrink-0 items-center gap-1.5 rounded-full bg-wa-panel px-2 py-1 text-[11px] font-medium text-wa-ink-soft outline-none focus-visible:ring-2 focus-visible:ring-wa-accent-deep/30 lg:px-2.5"
+      >
+        <FromIcon className="size-3.5 shrink-0" strokeWidth={2} />
+        <span className="hidden max-w-[130px] truncate lg:inline">{from.label}</span>
+      </span>
+    </Tooltip>
+  );
+
+  const deriveButton = canDerive && (
+    <Tooltip content="Derivar a una sucursal">
+      <button
+        type="button"
+        onClick={() => setDeriveOpen(true)}
+        aria-label="Derivar a sucursal"
+        className="flex size-10 shrink-0 items-center justify-center rounded-full text-wa-ink-soft transition-colors hover:bg-wa-hover active:scale-95 tap-highlight-none"
+      >
+        <Forward className="size-5" strokeWidth={1.9} />
+      </button>
+    </Tooltip>
+  );
+
+  const assignSelect = (
+    <Select
+      value={active?.assigned_to ?? ""}
+      onChange={(e) => handleAssign(e.target.value)}
+      aria-label={
+        isAdmin ? "Vendedor asignado" : `Vendedor asignado — ${ASSIGN_ADMIN_HINT}`
+      }
+      disabled={!isAdmin}
+      className={cn(
+        "h-9 w-auto max-w-[150px] rounded-lg border-wa-line bg-wa-panel px-2.5 pr-8 text-[12px] text-wa-ink",
+        // deshabilitado no dispara eventos de mouse: sin esto el tooltip del
+        // wrapper nunca se abre y el vendedor no entiende por qué no lo puede tocar
+        !isAdmin && "pointer-events-none",
+      )}
+    >
+      <option value="">Sin asignar</option>
+      {members.map((m) => (
+        <option key={m.id} value={m.id}>
+          {m.display_name}
+          {m.id === meId ? " (yo)" : ""}
+        </option>
+      ))}
+    </Select>
+  );
+
+  /* se ve siempre a quién está asignada; solo el admin la cambia */
+  const assignControl = isAdmin ? (
+    assignSelect
+  ) : (
+    <Tooltip content={ASSIGN_ADMIN_HINT}>
+      <span className="inline-flex shrink-0 cursor-not-allowed">{assignSelect}</span>
+    </Tooltip>
+  );
+
   const stageChip = lead && (
     <button
       type="button"
@@ -273,6 +376,9 @@ export function ChatView({
             <ConversationList
               initial={initialConversations}
               agencyId={agencyId}
+              meId={meId}
+              isAdmin={isAdmin}
+              branches={branches}
               activeId={selectedId}
               onSelect={select}
               toolbar={toolbar}
@@ -291,21 +397,10 @@ export function ChatView({
                     </p>
                     <p className="truncate text-[12px] text-wa-ink-soft">{headerMeta}</p>
                   </div>
+                  {originChip}
                   {stageChip}
-                  <Select
-                    value={active?.assigned_to ?? ""}
-                    onChange={(e) => handleAssign(e.target.value)}
-                    aria-label="Vendedor asignado"
-                    className="h-9 w-auto max-w-[150px] rounded-lg border-wa-line bg-wa-panel px-2.5 pr-8 text-[12px] text-wa-ink"
-                  >
-                    <option value="">Sin asignar</option>
-                    {members.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.display_name}
-                        {m.id === meId ? " (yo)" : ""}
-                      </option>
-                    ))}
-                  </Select>
+                  {deriveButton}
+                  {assignControl}
                   {panelToggle}
                 </header>
                 {mdUp && (
@@ -372,9 +467,25 @@ export function ChatView({
               <p className="truncate text-[15px] font-medium leading-5 text-wa-ink">
                 {contactName}
               </p>
-              <p className="truncate text-[12px] text-wa-ink-soft">{headerMeta}</p>
+              {/* en mobile el número/sucursal va en la meta: no roba ancho al nombre */}
+              <p className="flex items-center gap-1 truncate text-[12px] text-wa-ink-soft">
+                {from && <FromIcon className="size-3 shrink-0" strokeWidth={2} />}
+                <span className="truncate">
+                  {from ? `${from.label} · ${headerMeta}` : headerMeta}
+                </span>
+              </p>
             </div>
             {stageChip}
+            {canDerive && (
+              <button
+                type="button"
+                onClick={() => setDeriveOpen(true)}
+                aria-label="Derivar a sucursal"
+                className="flex size-11 shrink-0 items-center justify-center rounded-full text-wa-ink-soft transition-colors active:bg-wa-active tap-highlight-none"
+              >
+                <Forward className="size-5" strokeWidth={1.9} />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setSheetOpen(true)}
@@ -415,6 +526,18 @@ export function ChatView({
         </DialogContent>
       </Dialog>
 
+      {/* derivar del número madre a una sucursal (admin) */}
+      {selectedId && (
+        <DeriveDialog
+          open={deriveOpen}
+          onOpenChange={setDeriveOpen}
+          conversationId={selectedId}
+          contactName={contactName}
+          branches={branches}
+          onDerived={select}
+        />
+      )}
+
       {/* popup de presupuesto: armalo acá y mandalo a la conversación */}
       <QuoteDialog
         open={quoteOpen}
@@ -425,5 +548,180 @@ export function ChatView({
         onDone={() => setPanelRefresh((k) => k + 1)}
       />
     </>
+  );
+}
+
+/* ───────────────────────────────────────────
+   Derivar a sucursal: el handoff del número madre
+   al número propio de la sucursal (sin ventana de
+   24 hs). Al confirmar, saltamos al hilo nuevo.
+   ─────────────────────────────────────────── */
+function DeriveDialog({
+  open,
+  onOpenChange,
+  conversationId,
+  contactName,
+  branches,
+  onDerived,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  conversationId: string;
+  contactName: string;
+  branches: BranchOption[];
+  onDerived: (conversationId: string) => void;
+}) {
+  const [picked, setPicked] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
+
+  /* al abrir: preseleccionamos la primera sucursal con el número vinculado
+     (ajuste de estado durante el render). Una sucursal sin canal creado no se
+     puede elegir: deriveToBranch la rechaza. */
+  const [prevOpen, setPrevOpen] = React.useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
+    if (open) {
+      setLoading(false);
+      setPicked(
+        branches.find((b) => b.channel?.status === "conectado")?.id ??
+          branches.find((b) => b.channel != null)?.id ??
+          null,
+      );
+    }
+  }
+
+  const pickedBranch = branches.find((b) => b.id === picked) ?? null;
+  /* vinculado pero caído: se deriva igual (el operador queda avisado) */
+  const pickedOffline =
+    pickedBranch?.channel != null && pickedBranch.channel.status !== "conectado";
+  const noneUsable = branches.length > 0 && branches.every((b) => b.channel == null);
+
+  async function confirm() {
+    if (!picked || loading) return;
+    if (pickedBranch?.channel == null) {
+      toast.error("Esa sucursal todavía no tiene número. Crealo en Configuración.");
+      return;
+    }
+    setLoading(true);
+    const res = await deriveToBranch({ conversationId, branchId: picked });
+    setLoading(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    toast.success(`Derivado a ${res.data.branchName}`);
+    onOpenChange(false);
+    onDerived(res.data.conversationId);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        title="Derivar a sucursal"
+        description={`${contactName} pasa a hablar por el número de la sucursal, sin ventana de 24 hs.`}
+        size="md"
+      >
+        {branches.length === 0 ? (
+          <EmptyState
+            icon={Store}
+            title="Todavía no hay sucursales"
+            description="Creá una en Configuración y vinculale su WhatsApp para derivar consultas."
+            className="py-6"
+          />
+        ) : (
+          <>
+            <div className="space-y-2 stagger-children">
+              {branches.map((b) => {
+                const connected = b.channel?.status === "conectado";
+                // sin fila de canal no hay a dónde derivar: la action lo rechaza
+                const noChannel = b.channel == null;
+                const selected = picked === b.id;
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => setPicked(b.id)}
+                    disabled={noChannel}
+                    aria-pressed={selected}
+                    className={cn(
+                      "flex min-h-11 w-full items-center gap-3 rounded-2xl border p-3 text-left transition-all duration-150 tap-highlight-none",
+                      noChannel
+                        ? "cursor-not-allowed border-line bg-sand-soft/40 opacity-60"
+                        : "active:scale-[0.99]",
+                      !noChannel &&
+                        (selected
+                          ? "border-brand-500 bg-brand-tint shadow-sm"
+                          : "border-line bg-paper hover:border-line-strong hover:bg-sand-soft/50"),
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "size-2.5 shrink-0 rounded-full",
+                        TAG_DOTS[b.color] ?? TAG_DOTS.gray,
+                      )}
+                      aria-hidden
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-ink">
+                        {b.name}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[12px] text-ink-faint">
+                        {b.channel?.phone
+                          ? fmtPhone(b.channel.phone)
+                          : noChannel
+                            ? "Sin número: crealo en Configuración"
+                            : "Sin número cargado"}
+                      </span>
+                    </span>
+                    <Badge color={connected ? "emerald" : "gray"} className="shrink-0">
+                      {connected ? (
+                        <PlugZap className="size-3" strokeWidth={2} />
+                      ) : (
+                        <Unplug className="size-3" strokeWidth={2} />
+                      )}
+                      {connected ? "Conectado" : noChannel ? "Sin número" : "Sin vincular"}
+                    </Badge>
+                  </button>
+                );
+              })}
+            </div>
+
+            {pickedOffline && (
+              <p className="mt-3 rounded-xl border border-tone-amber-line bg-tone-amber-soft px-3 py-2 text-[12px] leading-snug text-tone-amber-text animate-fade-in">
+                Esa sucursal todavía no tiene el WhatsApp vinculado. El lead se mueve igual
+                y el operador queda avisado.
+              </p>
+            )}
+
+            {noneUsable && (
+              <p className="mt-3 rounded-xl border border-tone-amber-line bg-tone-amber-soft px-3 py-2 text-[12px] leading-snug text-tone-amber-text animate-fade-in">
+                Ninguna sucursal tiene su número creado todavía. Andá a Configuración ·
+                Sucursales y creale el WhatsApp a la que va a atender.
+              </p>
+            )}
+
+            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => onOpenChange(false)}
+                disabled={loading}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={confirm}
+                loading={loading}
+                disabled={!picked || pickedBranch?.channel == null}
+              >
+                <Forward />
+                Derivar
+              </Button>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

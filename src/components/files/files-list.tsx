@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Luggage, PlaneTakeoff, Search, SearchX } from "lucide-react";
+import { ClipboardCheck, Luggage, PlaneTakeoff, Search, SearchX } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,8 @@ import type { FileListRow } from "./types";
 
 type StatusFilter = "todos" | FileStatus;
 type OwnerFilter = "mios" | "todos";
+/** las ventas que nacen del pipeline entran pendientes: el admin las filtra de un toque */
+type ReviewFilter = "todas" | "revision";
 
 export function FilesList({
   rows,
@@ -35,6 +37,7 @@ export function FilesList({
   const [query, setQuery] = React.useState("");
   const [status, setStatus] = React.useState<StatusFilter>("todos");
   const [owner, setOwner] = React.useState<OwnerFilter>(isAdmin ? "todos" : "mios");
+  const [review, setReview] = React.useState<ReviewFilter>("todas");
 
   const byOwner = React.useMemo(
     () => (owner === "mios" ? rows.filter((r) => r.seller_id === memberId) : rows),
@@ -43,10 +46,16 @@ export function FilesList({
 
   const stats = React.useMemo(() => computeStats(byOwner), [byOwner]);
 
+  const pendingReview = React.useMemo(
+    () => byOwner.filter((r) => r.review_status === "pendiente").length,
+    [byOwner],
+  );
+
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     return byOwner.filter((r) => {
       if (status !== "todos" && r.status !== status) return false;
+      if (review === "revision" && r.review_status !== "pendiente") return false;
       if (!q) return true;
       return (
         r.contact_name.toLowerCase().includes(q) ||
@@ -54,7 +63,7 @@ export function FilesList({
         r.code.toLowerCase().includes(q)
       );
     });
-  }, [byOwner, query, status]);
+  }, [byOwner, query, status, review]);
 
   if (rows.length === 0) {
     return (
@@ -97,14 +106,35 @@ export function FilesList({
           />
         </div>
 
-        <Segmented<OwnerFilter>
-          value={owner}
-          onChange={setOwner}
-          options={[
-            { value: "mios", label: "Míos" },
-            { value: "todos", label: "Todos" },
-          ]}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          {isAdmin && (pendingReview > 0 || review === "revision") && (
+            <Segmented<ReviewFilter>
+              value={review}
+              onChange={setReview}
+              options={[
+                { value: "todas", label: "Todas" },
+                {
+                  value: "revision",
+                  label: (
+                    <span className="inline-flex items-center gap-1.5">
+                      <ClipboardCheck className="size-3.5" strokeWidth={2} />
+                      Revisión · {pendingReview}
+                    </span>
+                  ),
+                },
+              ]}
+            />
+          )}
+
+          <Segmented<OwnerFilter>
+            value={owner}
+            onChange={setOwner}
+            options={[
+              { value: "mios", label: "Míos" },
+              { value: "todos", label: "Todos" },
+            ]}
+          />
+        </div>
       </div>
 
       {/* resultados */}
@@ -121,6 +151,7 @@ export function FilesList({
                 setQuery("");
                 setStatus("todos");
                 setOwner("todos");
+                setReview("todas");
               }}
             >
               Limpiar búsqueda
@@ -253,6 +284,16 @@ function StatusChip({ status, className }: { status: FileStatus; className?: str
   );
 }
 
+/** venta nacida del pipeline que todavía nadie chequeó */
+function ReviewChip() {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-tone-amber-line bg-tone-amber-soft px-2 py-0.5 text-[11px] font-medium leading-4 text-tone-amber-text">
+      <ClipboardCheck className="size-3" strokeWidth={2} />
+      Revisión
+    </span>
+  );
+}
+
 function DepartureChip({ label }: { label: string }) {
   return (
     <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-tone-sky-line bg-tone-sky-soft px-2 py-0.5 text-[11px] font-medium leading-4 text-tone-sky-text">
@@ -285,11 +326,12 @@ function FileRowCard({ row }: { row: FileListRow }) {
     >
       {/* mobile: dos líneas */}
       <div className="md:hidden">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <span className="shrink-0 font-mono text-xs font-semibold text-ink-soft">
               {row.code}
             </span>
+            {row.review_status === "pendiente" && <ReviewChip />}
             <StatusChip status={row.status} />
           </div>
           {badge && <DepartureChip label={badge} />}
@@ -334,6 +376,7 @@ function FileRowCard({ row }: { row: FileListRow }) {
           </p>
         </div>
 
+        {row.review_status === "pendiente" && <ReviewChip />}
         <StatusChip status={row.status} />
 
         <div className="w-32 shrink-0 text-right">

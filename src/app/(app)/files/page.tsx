@@ -15,7 +15,7 @@ export default async function FilesPage() {
     supabase
       .from("files")
       .select(
-        "id, code, destination, status, currency, departure_date, return_date, created_at, seller_id, contact_id, contact:contacts(id, full_name), seller:members(id, display_name)",
+        "id, code, destination, status, review_status, currency, departure_date, return_date, created_at, seller_id, contact_id, contact:contacts(id, full_name), seller:members!files_seller_id_fkey(id, display_name)",
       )
       .order("created_at", { ascending: false }),
     supabase.from("file_totals").select("file_id, total_cost, total_sale, utility, paid_total, balance"),
@@ -46,6 +46,7 @@ export default async function FilesPage() {
       code: f.code,
       destination: f.destination,
       status: f.status,
+      review_status: f.review_status,
       currency: f.currency,
       departure_date: f.departure_date,
       return_date: f.return_date,
@@ -61,11 +62,19 @@ export default async function FilesPage() {
     };
   });
 
+  // las ventas que nacen del pipeline entran en revisión hasta que un admin las valida
+  const pendingReview = rows.filter((r) => r.review_status === "pendiente").length;
+  const subtitle =
+    `${rows.length} ${rows.length === 1 ? "venta" : "ventas"}` +
+    (isAdmin && pendingReview > 0
+      ? ` · ${pendingReview} ${pendingReview === 1 ? "espera" : "esperan"} revisión`
+      : "");
+
   return (
     <div className="mx-auto w-full max-w-6xl">
       <PageHeader
         title="Files"
-        subtitle={`${rows.length} ${rows.length === 1 ? "venta" : "ventas"}`}
+        subtitle={subtitle}
         actions={
           <NewFileButton
             contacts={contactsRes.data ?? []}

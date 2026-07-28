@@ -2,20 +2,29 @@
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Check, MessageCircle, Search, type LucideIcon } from "lucide-react";
+import { Check, Globe, MessageCircle, Search, Store, type LucideIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Avatar } from "@/components/ui/avatar";
+import { Select } from "@/components/ui/input";
 import { fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { CONVERSATION_SELECT, type ConversationRow } from "./types";
+import {
+  CONVERSATION_SELECT,
+  conversationOrigin,
+  type BranchOption,
+  type ConversationRow,
+} from "./types";
 
-type Filter = "todos" | "no_leidas" | "sin_asignar";
+type Filter = "todos" | "mios" | "no_leidas" | "sin_asignar";
 
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "todos", label: "Todos" },
+  { value: "mios", label: "Míos" },
   { value: "no_leidas", label: "No leídas" },
   { value: "sin_asignar", label: "Sin asignar" },
 ];
+
+const ALL_ORIGINS = "todos";
 
 /** "hace 5 min" → "5 min" — hora corta para la fila */
 function shortTime(iso: string | null): string {
@@ -60,6 +69,9 @@ function WaEmpty({
 export function ConversationList({
   initial,
   agencyId,
+  meId,
+  isAdmin = false,
+  branches = [],
   activeId,
   hiddenOnMobile = false,
   onSelect,
@@ -67,6 +79,12 @@ export function ConversationList({
 }: {
   initial: ConversationRow[];
   agencyId: string;
+  /** member.id actual: alimenta el filtro "Míos" */
+  meId: string;
+  /** el admin quiere ver todo; el vendedor arranca en "Míos" */
+  isAdmin?: boolean;
+  /** sucursales activas: alimentan el filtro por número (madre / sucursal) */
+  branches?: BranchOption[];
   activeId?: string | null;
   /** true en pantallas donde la lista está oculta en mobile: sin suscripción ahí */
   hiddenOnMobile?: boolean;
@@ -77,7 +95,8 @@ export function ConversationList({
 }) {
   const [conversations, setConversations] = useState<ConversationRow[]>(initial);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<Filter>("todos");
+  const [filter, setFilter] = useState<Filter>(isAdmin ? "todos" : "mios");
+  const [origin, setOrigin] = useState<string>(ALL_ORIGINS);
 
   /* md+ como store externo (SSR: false = mobile-first) */
   const subscribeMd = useCallback((cb: () => void) => {
@@ -131,8 +150,13 @@ export function ConversationList({
     const qDigits = q.replace(/\D/g, "");
     return conversations
       .filter((c) => {
+        // "Míos" = lo mío + lo que no tiene dueño (mismo criterio que el pipeline:
+        // si no incluyera lo sin asignar, el vendedor abriría la bandeja vacía)
+        if (filter === "mios" && c.assigned_to !== null && c.assigned_to !== meId)
+          return false;
         if (filter === "no_leidas" && (c.unread_count === 0 || c.id === activeId)) return false;
         if (filter === "sin_asignar" && c.assigned_to != null) return false;
+        if (origin !== ALL_ORIGINS && conversationOrigin(c)?.key !== origin) return false;
         if (!q) return true;
         const name = c.contact?.full_name?.toLowerCase() ?? "";
         const phone = (c.contact?.phone ?? c.wa_id ?? "").replace(/\D/g, "");
@@ -143,7 +167,7 @@ export function ConversationList({
         const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
         return tb - ta;
       });
-  }, [conversations, search, filter, activeId]);
+  }, [conversations, search, filter, origin, activeId, meId]);
 
   const hasAny = conversations.length > 0;
 
@@ -173,26 +197,52 @@ export function ConversationList({
             className="h-[38px] w-full rounded-lg bg-wa-panel-alt pl-10 pr-3 text-[14px] text-wa-ink outline-none transition-shadow placeholder:text-wa-ink-faint focus:ring-2 focus:ring-wa-accent-deep/30"
           />
         </div>
-        <div className="flex items-center gap-1.5" role="tablist" aria-label="Filtrar chats">
-          {FILTERS.map((f) => {
-            const active = filter === f.value;
-            return (
-              <button
-                key={f.value}
-                role="tab"
-                aria-selected={active}
-                onClick={() => setFilter(f.value)}
-                className={cn(
-                  "h-8 rounded-full border px-3 text-[13px] transition-colors tap-highlight-none active:scale-[0.97]",
-                  active
-                    ? "border-transparent bg-wa-accent/15 font-medium text-wa-accent-deep"
-                    : "border-wa-line bg-wa-panel text-wa-ink-soft hover:bg-wa-hover",
-                )}
-              >
-                {f.label}
-              </button>
-            );
-          })}
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+          <div
+            className="flex shrink-0 items-center gap-1.5"
+            role="tablist"
+            aria-label="Filtrar chats"
+          >
+            {FILTERS.map((f) => {
+              const active = filter === f.value;
+              return (
+                <button
+                  key={f.value}
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setFilter(f.value)}
+                  className={cn(
+                    "h-8 shrink-0 rounded-full border px-3 text-[13px] transition-colors tap-highlight-none active:scale-[0.97]",
+                    active
+                      ? "border-transparent bg-wa-accent/15 font-medium text-wa-accent-deep"
+                      : "border-wa-line bg-wa-panel text-wa-ink-soft hover:bg-wa-hover",
+                  )}
+                >
+                  {f.label}
+                </button>
+              );
+            })}
+          </div>
+          {/* madre vs sucursal: por qué número entró el chat */}
+          {branches.length > 0 && (
+            <Select
+              value={origin}
+              onChange={(e) => setOrigin(e.target.value)}
+              aria-label="Filtrar por número"
+              className={cn(
+                "h-8 w-auto shrink-0 rounded-full border-wa-line bg-wa-panel pl-3 pr-8 text-[13px] text-wa-ink",
+                origin !== ALL_ORIGINS && "border-transparent bg-wa-accent/15 text-wa-accent-deep",
+              )}
+            >
+              <option value={ALL_ORIGINS}>Todos los números</option>
+              <option value="madre">Número madre</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </Select>
+          )}
         </div>
       </div>
 
@@ -219,6 +269,8 @@ export function ConversationList({
               const unread = active ? 0 : c.unread_count;
               const name = c.contact?.full_name ?? "Sin nombre";
               const outTick = lastIsOutbound(c);
+              const from = conversationOrigin(c);
+              const FromIcon = from?.kind === "sucursal" ? Store : Globe;
               const rowClass = cn(
                 "flex h-[72px] items-center gap-3 px-3 transition-colors tap-highlight-none",
                 active ? "bg-wa-active" : "hover:bg-wa-hover active:bg-wa-active",
@@ -229,19 +281,28 @@ export function ConversationList({
                   <Avatar name={name} className="size-[49px] text-base" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2">
-                      <p
-                        className={cn(
-                          "truncate text-[16px] leading-[21px] text-wa-ink",
-                          unread > 0 ? "font-semibold" : "font-normal",
-                        )}
-                      >
-                        {name}
-                        {c.status === "cerrada" && (
-                          <span className="ml-1.5 align-middle text-[10px] font-medium text-wa-ink-faint">
-                            · cerrada
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <p
+                          className={cn(
+                            "truncate text-[16px] leading-[21px] text-wa-ink",
+                            unread > 0 ? "font-semibold" : "font-normal",
+                          )}
+                        >
+                          {name}
+                          {c.status === "cerrada" && (
+                            <span className="ml-1.5 align-middle text-[10px] font-medium text-wa-ink-faint">
+                              · cerrada
+                            </span>
+                          )}
+                        </p>
+                        {/* metadata, no protagonista: por qué número entró */}
+                        {from && (
+                          <span className="flex max-w-[104px] shrink-0 items-center gap-1 rounded bg-wa-panel-alt px-1.5 py-px text-[10px] font-medium leading-4 text-wa-ink-faint">
+                            <FromIcon className="size-2.5 shrink-0" strokeWidth={2.25} />
+                            <span className="truncate">{from.label}</span>
                           </span>
                         )}
-                      </p>
+                      </div>
                       <span
                         className={cn(
                           "shrink-0 text-[12px] leading-[14px] tabular-nums",

@@ -6,6 +6,8 @@ export type FileListRow = {
   code: string;
   destination: string;
   status: Enums<"file_status">;
+  /** "pendiente" = venta nacida del pipeline que todavía nadie chequeó */
+  review_status: Enums<"file_review_status">;
   currency: string;
   departure_date: string | null;
   return_date: string | null;
@@ -30,6 +32,11 @@ export type FileDetail = {
   code: string;
   destination: string;
   status: Enums<"file_status">;
+  /** "pendiente" = venta nacida del pipeline que todavía nadie chequeó */
+  review_status: Enums<"file_review_status">;
+  reviewed_at: string | null;
+  /** nombre de quien la revisó (join a members) */
+  reviewed_by_name: string | null;
   currency: string;
   departure_date: string | null;
   return_date: string | null;

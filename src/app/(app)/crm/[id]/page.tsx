@@ -22,7 +22,7 @@ export default async function LeadPage({
   const { id } = await params;
   if (!UUID_RE.test(id)) notFound();
 
-  const { member, isStaff } = await requireMember();
+  const { member, isAdmin } = await requireMember();
   const supabase = await createClient();
 
   const [leadRes, activitiesRes, quotesRes, membersRes, tagsRes] = await Promise.all([
@@ -34,7 +34,8 @@ export default async function LeadPage({
          origin_channel, origin_campaign, initial_message, lost_reason, assigned_to,
          created_at, won_file_id,
          contact:contacts(id, full_name, phone, email, contact_tags(tag:tags(id, name, color, category))),
-         won_file:files!leads_won_file_fk(id, code)`,
+         won_file:files!leads_won_file_fk(id, code),
+         branch:branches(id, name, color)`,
       )
       .eq("id", id)
       .maybeSingle(),
@@ -115,11 +116,12 @@ export default async function LeadPage({
   return (
     <LeadDetail
       lead={lead}
+      branch={raw.branch}
       quotes={quotes}
       activities={activities}
       members={members}
       allTags={allTags}
-      me={{ id: member.id, name: member.display_name, isStaff }}
+      me={{ id: member.id, name: member.display_name, isAdmin }}
     />
   );
 }

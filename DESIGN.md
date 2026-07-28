@@ -48,6 +48,10 @@ responde en el acto, cada acción da feedback, nada requiere manual.
 
 - Una pantalla = una intención. El CRM muestra el pipeline; los detalles viven en el detalle.
 - Números importantes grandes y con `tabular-nums` (o `AnimatedNumber` para KPIs). Plata SIEMPRE con fmtMoney.
+- **Presupuestos: el precio por persona es el protagonista** (26–38px); el total del paquete va chico y secundario, tanto en el cotizador como en la hoja del cliente y en la lista. Es el número con el que el vendedor habla.
+- Cuando un presupuesto compara opciones (dos hoteles), cada opción es una tarjeta con su precio por persona: la comparación se ve de un vistazo, sin hacer cuentas.
+- Comisiones: **solo el admin** ve el desglose. El vendedor ve una sola línea con su comisión estimada. Nunca mostrar plata que no le corresponde ver.
+- Contadores de gente (pasajeros): steppers − [n] + con targets de 36–44px, nunca inputs numéricos pelados.
 - Listas: filas de 56–64px en mobile, información en 2 líneas máx (título + meta gris).
 - Vacíos SIEMPRE con `EmptyState` (icon + título + descripción + acción). Nunca una tabla vacía muda.
 - Cargas SIEMPRE con `loading.tsx` de skeletons que replican el layout real.
@@ -85,6 +89,20 @@ con `text-wa-bubble-ink`, meta `text-wa-bubble-meta`, ticks leídos `text-wa-tic
 Fondo del hilo: utility **`wa-wallpaper`** (wallpaper oficial claro/oscuro provisto en /public).
 Colitas de burbuja: `bubble-tail-in` / `bubble-tail-out`. Dentro de la zona WhatsApp NO se usan
 tokens cream/paper: es otro mundo visual, deliberadamente.
+
+## Sucursales y números de WhatsApp
+
+- Un chat siempre dice **por qué número** está saliendo: chip discreto con el nombre
+  del número madre o de la sucursal. Es metadata: no compite con el nombre del contacto.
+- Vincular un número es la pantalla más importante de Configuración: el **QR es el
+  protagonista** (grande, centrado) con tres pasos en criollo al lado. El estado
+  (conectado / vinculando / desconectado / error) siempre visible con punto de color
+  y el número real en `fmtPhone`.
+- Cuando falta infraestructura (worker sin levantar, Cloud API sin conectar) se dice
+  con calma y sin dramatizar: qué falta, y que mientras tanto el sistema sigue
+  andando con los mensajes registrados.
+- Los colores de sucursal salen de `TAG_COLORS` / `TAG_DOTS`: la misma sucursal se
+  ve del mismo color en el chat, en el kanban y en Configuración.
 
 ## Mobile-first (no negociable)
 

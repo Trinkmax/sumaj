@@ -2,7 +2,11 @@ import { requireMember } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { CrmBoard, type CrmView } from "@/components/crm/crm-board";
 import type { BoardLead, LeadConversation, MemberOption } from "@/components/crm/types";
-import { CONVERSATION_SELECT, type ConversationRow } from "@/components/chats/types";
+import {
+  CONVERSATION_SELECT,
+  type BranchOption,
+  type ConversationRow,
+} from "@/components/chats/types";
 import type { AgencySettings } from "@/lib/types";
 
 export const metadata = { title: "CRM" };
@@ -13,10 +17,10 @@ export default async function CrmPage({
   searchParams: Promise<{ vista?: string; c?: string }>;
 }) {
   const { vista, c } = await searchParams;
-  const { member, agency, isAdmin, isStaff } = await requireMember();
+  const { member, agency, isAdmin } = await requireMember();
   const supabase = await createClient();
 
-  const [leadsRes, membersRes, convsRes] = await Promise.all([
+  const [leadsRes, membersRes, convsRes, branchesRes] = await Promise.all([
     supabase
       .from("leads")
       .select(
@@ -38,6 +42,12 @@ export default async function CrmPage({
       .from("conversations")
       .select(CONVERSATION_SELECT)
       .order("last_message_at", { ascending: false, nullsFirst: false }),
+    // sucursales activas + su número: filtro de la bandeja y derivación
+    supabase
+      .from("branches")
+      .select("id, name, color, position, channels:wa_channels(id, kind, status, phone)")
+      .eq("is_active", true)
+      .order("position", { ascending: true }),
   ]);
 
   const conversations = (convsRes.data ?? []) as unknown as ConversationRow[];
@@ -79,6 +89,19 @@ export default async function CrmPage({
 
   const members: MemberOption[] = membersRes.data ?? [];
 
+  // el número de la sucursal es siempre el de Baileys (el madre no tiene sucursal)
+  const branches: BranchOption[] = (branchesRes.data ?? []).map((b) => {
+    const channel = (b.channels ?? []).find((c) => c.kind === "baileys") ?? null;
+    return {
+      id: b.id,
+      name: b.name,
+      color: b.color,
+      channel: channel
+        ? { id: channel.id, status: channel.status, phone: channel.phone }
+        : null,
+    };
+  });
+
   const settings = (agency.settings ?? {}) as Partial<AgencySettings>;
   const waConnected = settings.whatsapp?.connected === true;
 
@@ -96,9 +119,9 @@ export default async function CrmPage({
       initialLeads={leads}
       initialConversations={conversations}
       members={members}
+      branches={branches}
       meId={member.id}
       isAdmin={isAdmin}
-      isStaff={isStaff}
       agencyId={agency.id}
       waConnected={waConnected}
       initialView={initialView}

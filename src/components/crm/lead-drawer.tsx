@@ -12,6 +12,7 @@ import {
   MessageCircle,
   Plane,
   ReceiptText,
+  Store,
   Trophy,
   Users,
   X,
@@ -23,7 +24,7 @@ import { fmtDate, fmtMoney, fmtPhone, fmtRelative, nightsBetween } from "@/lib/f
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
-import { EmptyState, Segmented, Skeleton } from "@/components/ui/misc";
+import { EmptyState, Segmented, Skeleton, Tooltip } from "@/components/ui/misc";
 import { EmbeddedChat } from "@/components/chats/embedded-chat";
 import { QuoteDialog } from "@/components/quotes/quote-dialog";
 import { getLeadConversationId, reassignLead, updateLeadStage } from "@/lib/actions/leads";
@@ -33,6 +34,11 @@ import { WinLeadDialog, LoseLeadDialog } from "./win-lose-dialogs";
 import type { BoardLead, LeadActivity, LeadQuote, MemberOption } from "./types";
 
 type Tab = "chat" | "ficha";
+
+const ASSIGN_ADMIN_HINT = "La asignación la maneja un admin";
+
+/** Sucursal dueña del lead (solo lectura acá). */
+type LeadBranch = { id: string; name: string; color: string };
 
 type FichaData = {
   next_action: string | null;
@@ -56,7 +62,7 @@ export function LeadDrawer({
   onOpenChange,
   members,
   meId,
-  isStaff,
+  isAdmin,
   waConnected,
   onLeadChanged,
 }: {
@@ -65,7 +71,8 @@ export function LeadDrawer({
   onOpenChange: (o: boolean) => void;
   members: MemberOption[];
   meId: string;
-  isStaff: boolean;
+  /** la asignación de vendedores la maneja un admin */
+  isAdmin: boolean;
   waConnected: boolean;
   onLeadChanged: (id: string, patch: Partial<BoardLead>) => void;
 }) {
@@ -76,6 +83,7 @@ export function LeadDrawer({
   );
   const [chatLoading, setChatLoading] = React.useState(false);
   const [ficha, setFicha] = React.useState<FichaData | null>(null);
+  const [branch, setBranch] = React.useState<LeadBranch | null>(null);
   const [quoteOpen, setQuoteOpen] = React.useState(false);
   const [winOpen, setWinOpen] = React.useState(false);
   const [loseOpen, setLoseOpen] = React.useState(false);
@@ -86,12 +94,32 @@ export function LeadDrawer({
     setPrevLeadId(lead?.id ?? null);
     setTab("chat");
     setFicha(null);
+    setBranch(null);
     setConversationId(lead?.conversation?.id ?? null);
   }
   // si la conversación aparece por realtime mientras el drawer está abierto
   if (lead?.conversation?.id && conversationId == null) {
     setConversationId(lead.conversation.id);
   }
+
+  // sucursal del lead: chip de solo lectura (no se cambia desde el CRM)
+  const leadId = lead?.id ?? null;
+  React.useEffect(() => {
+    if (!open || !leadId) return;
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("leads")
+        .select("branch:branches(id, name, color)")
+        .eq("id", leadId)
+        .maybeSingle();
+      if (!cancelled) setBranch(data?.branch ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, leadId]);
 
   // ficha: carga lazy la primera vez que se abre el tab
   React.useEffect(() => {
@@ -217,6 +245,32 @@ export function LeadDrawer({
   const stageMeta = lead ? STAGE_BY_KEY[lead.stage] : null;
   const StageIcon = stageMeta?.icon;
 
+  /* se ve siempre a quién está asignado; solo el admin lo cambia */
+  const assigneeSelect = (
+    <Select
+      value={lead?.assigned_to ?? ""}
+      onChange={(e) => reassign(e.target.value)}
+      aria-label={
+        isAdmin ? "Vendedor asignado" : `Vendedor asignado — ${ASSIGN_ADMIN_HINT}`
+      }
+      disabled={!isAdmin}
+      className={cn(
+        "h-8 w-auto max-w-[150px] rounded-lg px-2.5 pr-8 text-[12px]",
+        // un control deshabilitado no dispara hover: sin esto el tooltip del
+        // wrapper nunca aparece y el vendedor no sabe por qué no lo puede tocar
+        !isAdmin && "pointer-events-none",
+      )}
+    >
+      <option value="">Sin asignar</option>
+      {members.map((m) => (
+        <option key={m.id} value={m.id}>
+          {m.display_name}
+          {m.id === meId ? " (yo)" : ""}
+        </option>
+      ))}
+    </Select>
+  );
+
   return (
     <DialogPrimitive.Root open={open && lead != null} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
@@ -281,21 +335,18 @@ export function LeadDrawer({
                       ))}
                     </Select>
                   )}
-                  {isStaff && (
-                    <Select
-                      value={lead.assigned_to ?? ""}
-                      onChange={(e) => reassign(e.target.value)}
-                      aria-label="Vendedor asignado"
-                      className="h-8 w-auto max-w-[150px] rounded-lg px-2.5 pr-8 text-[12px]"
-                    >
-                      <option value="">Sin asignar</option>
-                      {members.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.display_name}
-                          {m.id === meId ? " (yo)" : ""}
-                        </option>
-                      ))}
-                    </Select>
+                  {branch && (
+                    <Badge color={branch.color} className="animate-fade-in">
+                      <Store className="size-3" strokeWidth={2} />
+                      {branch.name}
+                    </Badge>
+                  )}
+                  {isAdmin ? (
+                    assigneeSelect
+                  ) : (
+                    <Tooltip content={ASSIGN_ADMIN_HINT}>
+                      <span className="inline-flex cursor-not-allowed">{assigneeSelect}</span>
+                    </Tooltip>
                   )}
                   <Link
                     href={`/crm/${lead.id}`}

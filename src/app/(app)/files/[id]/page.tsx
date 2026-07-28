@@ -48,7 +48,7 @@ export default async function FileDetailPage({
   const { data: fileData } = await supabase
     .from("files")
     .select(
-      "*, contact:contacts(id, full_name, phone), seller:members(id, display_name)",
+      "*, contact:contacts(id, full_name, phone), seller:members!files_seller_id_fkey(id, display_name), reviewer:members!files_reviewed_by_fkey(id, display_name)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -122,6 +122,9 @@ export default async function FileDetailPage({
     code: fileData.code,
     destination: fileData.destination,
     status: fileData.status,
+    review_status: fileData.review_status,
+    reviewed_at: fileData.reviewed_at,
+    reviewed_by_name: fileData.reviewer?.display_name ?? null,
     currency: fileData.currency,
     departure_date: fileData.departure_date,
     return_date: fileData.return_date,
@@ -199,6 +202,7 @@ export default async function FileDetailPage({
         agencyName={agency.name}
         quoteCode={quoteRes.data?.code ?? null}
         conversationId={conversationRes.data?.id ?? null}
+        isAdmin={isAdmin}
       />
 
       <div className="flex flex-col gap-4 px-4 pb-4 pt-4 md:px-6 lg:grid lg:grid-cols-[3fr_2fr] lg:items-start">

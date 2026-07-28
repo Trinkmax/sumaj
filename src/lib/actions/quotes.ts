@@ -693,6 +693,8 @@ export async function convertQuoteDirect(input: {
       currency: quote.currency,
       commission_pct: sellerCommission,
       status: "vendido",
+      // nace de un presupuesto: los números los revisa un admin antes de darla por buena
+      review_status: "pendiente",
     })
     .select("id, code")
     .single();

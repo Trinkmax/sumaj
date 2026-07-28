@@ -1,0 +1,25 @@
+{
+  "name": "viajeros-wa-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worker multitenant de WhatsApp (Baileys) para viajerOS: una sesion por sucursal",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@supabase/supabase-js": "^2.110.2",
+    "@whiskeysockets/baileys": "^6.7.9",
+    "pino": "^9.5.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/qrcode": "^1.5.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5"
+  }
+}

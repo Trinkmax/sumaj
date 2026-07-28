@@ -8,7 +8,11 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/misc";
-import { CONVERSATION_SELECT, type ConversationRow } from "@/components/chats/types";
+import {
+  CONVERSATION_SELECT,
+  type BranchOption,
+  type ConversationRow,
+} from "@/components/chats/types";
 import type { Tables } from "@/lib/types";
 import { KanbanBoard } from "./kanban-board";
 import { FunnelView } from "./funnel-view";
@@ -30,9 +34,9 @@ export function CrmBoard({
   initialLeads,
   initialConversations,
   members,
+  branches,
   meId,
   isAdmin,
-  isStaff,
   agencyId,
   waConnected,
   initialView,
@@ -41,9 +45,10 @@ export function CrmBoard({
   initialLeads: BoardLead[];
   initialConversations: ConversationRow[];
   members: MemberOption[];
+  /** sucursales activas con su número de WhatsApp */
+  branches: BranchOption[];
   meId: string;
   isAdmin: boolean;
-  isStaff: boolean;
   agencyId: string;
   waConnected: boolean;
   /** null = la URL no trae ?vista= → se usa la última vista guardada en localStorage */
@@ -413,8 +418,10 @@ export function CrmBoard({
           initialConversations={conversations}
           agencyId={agencyId}
           meId={meId}
+          isAdmin={isAdmin}
           waConnected={waConnected}
           members={members}
+          branches={branches}
           initialConversationId={chatConvId}
           onSelectedChange={setChatConvId}
           onOpenLead={openLeadFromChat}
@@ -439,6 +446,7 @@ export function CrmBoard({
         onOpenChange={setNewOpen}
         members={members}
         meId={meId}
+        isAdmin={isAdmin}
         onCreated={addLead}
       />
 
@@ -450,7 +458,7 @@ export function CrmBoard({
         }}
         members={members}
         meId={meId}
-        isStaff={isStaff}
+        isAdmin={isAdmin}
         waConnected={waConnected}
         onLeadChanged={patchLead}
       />

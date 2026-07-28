@@ -58,15 +58,19 @@ export async function ensureConversation(
 ): Promise<ActionResult<{ conversationId: string }>> {
   const { supabase, agency, member } = await requireAction();
 
+  // Un contacto puede tener DOS hilos de WhatsApp (número madre y sucursal):
+  // se prioriza el de la sucursal, que es por donde se sigue la charla.
   const { data: existing } = await supabase
     .from("conversations")
-    .select("id")
+    .select("id, branch_id, last_message_at")
     .eq("agency_id", agency.id)
     .eq("contact_id", contactId)
     .eq("channel", "whatsapp")
-    .maybeSingle();
+    .order("branch_id", { ascending: false, nullsFirst: false })
+    .order("last_message_at", { ascending: false, nullsFirst: false })
+    .limit(1);
 
-  if (existing) return succeed({ conversationId: existing.id });
+  if (existing && existing.length > 0) return succeed({ conversationId: existing[0].id });
 
   const { data: contact } = await supabase
     .from("contacts")
@@ -74,12 +78,21 @@ export async function ensureConversation(
     .eq("id", contactId)
     .single();
 
+  // sin hilo previo, el chat arranca en el número madre de la agencia
+  const { data: mother } = await supabase
+    .from("wa_channels")
+    .select("id")
+    .eq("agency_id", agency.id)
+    .eq("is_mother", true)
+    .maybeSingle();
+
   const { data: created, error } = await supabase
     .from("conversations")
     .insert({
       agency_id: agency.id,
       contact_id: contactId,
       channel: "whatsapp",
+      channel_id: mother?.id ?? null,
       wa_id: contact?.phone ?? null,
       assigned_to: member.id,
     })
@@ -190,6 +203,9 @@ export async function convertLeadToSale(input: {
       currency: quote?.currency ?? "USD",
       commission_pct: sellerCommission,
       status: "vendido",
+      // nace del pipeline: los montos y servicios vienen del presupuesto,
+      // así que la venta entra en revisión hasta que un admin la valide
+      review_status: "pendiente",
     })
     .select("id, code")
     .single();

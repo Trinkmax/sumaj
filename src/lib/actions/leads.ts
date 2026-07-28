@@ -35,6 +35,9 @@ const LEAD_CHANNELS = [
 ] as const;
 const TRIP_TYPES_KEYS = ["familiar", "pareja", "grupal", "corporativo", "solo"] as const;
 
+/** La asignación de vendedores la maneja un admin (pedido del dueño). */
+const ASSIGN_ADMIN_ONLY = "La asignación de vendedores la maneja un admin.";
+
 function revalidateLead(leadId?: string) {
   revalidatePath("/crm");
   if (leadId) revalidatePath(`/crm/${leadId}`);
@@ -95,11 +98,39 @@ const createLeadSchema = z.object({
 
 export async function createLead(
   input: z.infer<typeof createLeadSchema>,
-): Promise<ActionResult<{ leadId: string; contactId: string; position: number; existingContact: boolean }>> {
+): Promise<
+  ActionResult<{
+    leadId: string;
+    contactId: string;
+    position: number;
+    existingContact: boolean;
+    /** a quién quedó asignado de verdad (el no-admin siempre a sí mismo) */
+    assignedTo: string;
+  }>
+> {
   const parsed = createLeadSchema.safeParse(input);
   if (!parsed.success) return fail("Revisá los datos: el nombre es obligatorio.");
-  const { supabase, agency, member } = await requireAction();
+  const { supabase, agency, member, isAdmin } = await requireAction();
   const data = parsed.data;
+
+  // solo el admin reparte leads: el resto se queda con el suyo
+  const assignedTo = isAdmin ? (data.assignedTo ?? member.id) : member.id;
+
+  /* Sucursal dueña del lead: la del vendedor; si trabaja en todas (admins),
+     la sucursal por defecto. Sin sucursal el seguimiento automático no puede
+     salir por el número de la sucursal y volvería a caer en plantillas pagas. */
+  let branchId = member.branch_id;
+  if (!branchId) {
+    const { data: defaultBranch } = await supabase
+      .from("branches")
+      .select("id")
+      .eq("agency_id", agency.id)
+      .eq("is_default", true)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+    branchId = defaultBranch?.id ?? null;
+  }
 
   // contacto: dedupe por teléfono dentro de la agencia (RLS filtra)
   let contactId: string | null = null;
@@ -140,11 +171,12 @@ export async function createLead(
     .insert({
       agency_id: agency.id,
       contact_id: contactId,
+      branch_id: branchId,
       stage: "nuevo",
       position,
       destination: data.destination || null,
       origin_channel: data.channel,
-      assigned_to: data.assignedTo ?? member.id,
+      assigned_to: assignedTo,
       initial_message: data.initialMessage || null,
     })
     .select("id")
@@ -162,7 +194,7 @@ export async function createLead(
   });
 
   revalidateLead(lead.id);
-  return succeed({ leadId: lead.id, contactId, position, existingContact });
+  return succeed({ leadId: lead.id, contactId, position, existingContact, assignedTo });
 }
 
 /* ───────────────────────────────────────────
@@ -361,7 +393,9 @@ export async function addLeadNote(
 }
 
 /* ───────────────────────────────────────────
-   Reasignar vendedor
+   Reasignar vendedor — SOLO admin.
+   El vendedor ve a quién está asignado el lead,
+   pero no lo mueve de manos.
    ─────────────────────────────────────────── */
 const reassignSchema = z.object({
   leadId: z.uuid(),
@@ -373,8 +407,8 @@ export async function reassignLead(
 ): Promise<ActionResult<null>> {
   const parsed = reassignSchema.safeParse(input);
   if (!parsed.success) return fail("Datos inválidos.");
-  const { supabase, agency, member, isStaff } = await requireAction();
-  if (!isStaff) return fail("No tenés permisos para reasignar leads.");
+  const { supabase, agency, member, isAdmin } = await requireAction();
+  if (!isAdmin) return fail(ASSIGN_ADMIN_ONLY);
 
   const { leadId, memberId } = parsed.data;
 

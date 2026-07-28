@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   ArrowRight,
   Calendar,
+  ClipboardCheck,
   Copy,
   Loader2,
   MessageCircle,
@@ -31,17 +32,32 @@ import {
   DropdownItem,
 } from "@/components/ui/dropdown";
 import { Avatar } from "@/components/ui/avatar";
-import { updateFile, updateFileStatus } from "@/lib/actions/files";
+import { markFileReviewed, updateFile, updateFileStatus } from "@/lib/actions/files";
 import { getLeadConversationId } from "@/lib/actions/leads";
 import { FILE_STATUSES, waLink } from "@/lib/domain";
-import { fmtDate, fmtDateFull, nightsBetween } from "@/lib/format";
+import { fmtDate, fmtDateFull, fmtRelative, nightsBetween } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { FileStatus, ServiceType } from "@/lib/types";
+import type { Enums, FileStatus, ServiceType } from "@/lib/types";
 import { departureBadge } from "./helpers";
 import type { FileDetail, ServiceRow, TravelerRow } from "./types";
 
 /** camino feliz del expediente; "cancelado" queda fuera del stepper */
 const STEPPER_STATUSES: FileStatus[] = ["vendido", "pagado", "en_curso", "finalizado"];
+
+/**
+ * Estado local optimista que se resincroniza cuando el server manda otro valor
+ * (revalidatePath). Se ajusta en el render —el patrón que recomienda React—
+ * en vez de un useEffect: no hay pintado intermedio con el valor viejo.
+ */
+function useServerState<T>(serverValue: T) {
+  const [value, setValue] = React.useState<T>(serverValue);
+  const [seen, setSeen] = React.useState<T>(serverValue);
+  if (seen !== serverValue) {
+    setSeen(serverValue);
+    setValue(serverValue);
+  }
+  return [value, setValue] as const;
+}
 
 export function FileHeader({
   file,
@@ -50,6 +66,7 @@ export function FileHeader({
   agencyName,
   quoteCode,
   conversationId,
+  isAdmin,
 }: {
   file: FileDetail;
   services: ServiceRow[];
@@ -57,13 +74,32 @@ export function FileHeader({
   agencyName: string;
   quoteCode?: string | null;
   conversationId?: string | null;
+  isAdmin: boolean;
 }) {
   const [datesOpen, setDatesOpen] = React.useState(false);
   const [cancelOpen, setCancelOpen] = React.useState(false);
 
   /* estado del file, optimista y compartido por stepper + menú */
-  const [status, setStatus] = React.useState<FileStatus>(file.status);
-  React.useEffect(() => setStatus(file.status), [file.status]);
+  const [status, setStatus] = useServerState<FileStatus>(file.status);
+
+  /* revisión de la venta (las que nacen del pipeline entran pendientes) */
+  const [review, setReview] = useServerState<Enums<"file_review_status">>(file.review_status);
+  const [reviewLoading, setReviewLoading] = React.useState(false);
+
+  const setReviewed = async (reviewed: boolean) => {
+    if (reviewLoading) return;
+    setReviewLoading(true);
+    const res = await markFileReviewed({ fileId: file.id, reviewed });
+    setReviewLoading(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    setReview(reviewed ? "revisado" : "pendiente");
+    toast.success(
+      reviewed ? `Venta ${file.code} revisada` : "La venta volvió a revisión",
+    );
+  };
 
   const changeStatus = async (next: FileStatus) => {
     if (next === status) return;
@@ -88,6 +124,34 @@ export function FileHeader({
 
   return (
     <div className="animate-slide-up px-4 pt-4 md:px-6">
+      {review === "pendiente" && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-tone-amber-line bg-tone-amber-soft px-3.5 py-3 animate-fade-in">
+          <div className="flex min-w-56 flex-1 items-start gap-2.5">
+            <ClipboardCheck
+              className="mt-0.5 size-4.5 shrink-0 text-tone-amber-text"
+              strokeWidth={2}
+            />
+            <div className="min-w-0 text-tone-amber-text">
+              <p className="text-sm font-semibold">En revisión</p>
+              <p className="mt-0.5 text-[13px] leading-snug">
+                {isAdmin
+                  ? "Esta venta se creó desde el pipeline. Chequeá servicios, montos y comisión antes de darla por buena."
+                  : "Esta venta se creó desde el pipeline. Un admin tiene que chequear servicios, montos y comisión antes de darla por buena."}
+              </p>
+            </div>
+          </div>
+          {isAdmin && (
+            <Button
+              onClick={() => setReviewed(true)}
+              loading={reviewLoading}
+              className="shrink-0 max-md:w-full"
+            >
+              <ClipboardCheck /> Marcar como revisada
+            </Button>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -137,6 +201,14 @@ export function FileHeader({
                 {file.seller.display_name}
               </span>
             )}
+            {review === "revisado" && file.reviewed_at && (
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-ink-faint">
+                <ClipboardCheck className="size-3.5" strokeWidth={2} />
+                {file.reviewed_by_name
+                  ? `Revisada por ${file.reviewed_by_name} · ${fmtRelative(file.reviewed_at)}`
+                  : `Revisada ${fmtRelative(file.reviewed_at)}`}
+              </span>
+            )}
           </div>
         </div>
 
@@ -157,6 +229,11 @@ export function FileHeader({
               <DropdownItem onSelect={() => setDatesOpen(true)}>
                 <Calendar /> Editar fechas
               </DropdownItem>
+              {isAdmin && review === "revisado" && (
+                <DropdownItem onSelect={() => setReviewed(false)}>
+                  <ClipboardCheck /> Volver a revisión
+                </DropdownItem>
+              )}
               {cancelled ? (
                 <DropdownItem onSelect={() => changeStatus("vendido")}>
                   <RotateCcw /> Reactivar file
