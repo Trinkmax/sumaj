@@ -10,6 +10,8 @@ import {
   logActivity,
   ensureConversation,
   convertLeadToSale,
+  resolveBranchId,
+  topPosition,
   type ActionResult,
 } from "@/lib/actions/core";
 import { CHANNELS, STAGE_BY_KEY } from "@/lib/domain";
@@ -41,23 +43,6 @@ const ASSIGN_ADMIN_ONLY = "La asignación de vendedores la maneja un admin.";
 function revalidateLead(leadId?: string) {
   revalidatePath("/crm");
   if (leadId) revalidatePath(`/crm/${leadId}`);
-}
-
-/** Posición nueva arriba de todo en una columna: min − 1 (0 si está vacía). */
-async function topPosition(
-  supabase: Awaited<ReturnType<typeof requireAction>>["supabase"],
-  stage: LeadStage,
-  excludeLeadId?: string,
-): Promise<number> {
-  let query = supabase
-    .from("leads")
-    .select("position")
-    .eq("stage", stage)
-    .order("position", { ascending: true })
-    .limit(1);
-  if (excludeLeadId) query = query.neq("id", excludeLeadId);
-  const { data } = await query;
-  return data && data.length > 0 ? Number(data[0].position) - 1 : 0;
 }
 
 /* ───────────────────────────────────────────
@@ -116,21 +101,7 @@ export async function createLead(
   // solo el admin reparte leads: el resto se queda con el suyo
   const assignedTo = isAdmin ? (data.assignedTo ?? member.id) : member.id;
 
-  /* Sucursal dueña del lead: la del vendedor; si trabaja en todas (admins),
-     la sucursal por defecto. Sin sucursal el seguimiento automático no puede
-     salir por el número de la sucursal y volvería a caer en plantillas pagas. */
-  let branchId = member.branch_id;
-  if (!branchId) {
-    const { data: defaultBranch } = await supabase
-      .from("branches")
-      .select("id")
-      .eq("agency_id", agency.id)
-      .eq("is_default", true)
-      .eq("is_active", true)
-      .limit(1)
-      .maybeSingle();
-    branchId = defaultBranch?.id ?? null;
-  }
+  const branchId = await resolveBranchId(supabase, agency.id, member.branch_id);
 
   // contacto: dedupe por teléfono dentro de la agencia (RLS filtra)
   let contactId: string | null = null;

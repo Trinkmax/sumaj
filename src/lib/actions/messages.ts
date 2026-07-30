@@ -22,6 +22,59 @@ export type SentMessage = { id: string; status: MessageStatus; createdAt: string
 const CONVERSATION_WITH_CHANNEL =
   "id, last_inbound_at, wa_id, branch_id, contact:contacts(id, full_name, phone), channel_ref:wa_channels(id, kind, status, phone_number_id, label)";
 
+/* Motivos por los que un mensaje no puede salir. Son textos distintos a
+   propósito: el vendedor tiene que saber si le falta el teléfono del cliente,
+   si el número de la sucursal está sin vincular o si todavía no hay número
+   madre — cada caso lo arregla otra persona en otra pantalla. */
+const NO_PHONE =
+  "Este contacto no tiene teléfono cargado. Agregalo en su ficha y volvé a escribirle.";
+const NO_CHANNEL =
+  "Esta conversación no tiene número de WhatsApp asignado. Vinculá el de la sucursal en Configuración · Sucursales.";
+const BRANCH_UNLINKED =
+  "El WhatsApp de esa sucursal no está vinculado. Escaneá el QR en Configuración · Sucursales.";
+const WORKER_DOWN =
+  "El servicio que maneja los números de las sucursales no está disponible. Avisale a quien administra el sistema.";
+const MOTHER_MISSING =
+  "El número madre todavía no está conectado a la API de WhatsApp. Conectalo en Configuración · WhatsApp o derivá el chat a una sucursal.";
+
+/** Por dónde sale el mensaje una vez resuelto el canal. */
+type SendRoute =
+  | { via: "baileys"; channelId: string; to: string }
+  | { via: "cloud"; phoneNumberId: string; to: string };
+
+/**
+ * Resuelve la salida del mensaje o el motivo por el que NO sale.
+ *
+ * Antes, sin worker ni Cloud API, el mensaje se guardaba con status 'enviado'
+ * y `metadata.simulated`: el vendedor veía el tilde y el cliente nunca recibía
+ * nada. Ahora falta de infraestructura = error explícito, sin escribir en el
+ * hilo (el mensaje nunca salió: ensuciarlo no aporta).
+ */
+function resolveRoute(
+  channel: {
+    id: string;
+    kind: string;
+    status: string;
+    phone_number_id: string | null;
+  } | null,
+  to: string | null,
+): { ok: true; route: SendRoute } | { ok: false; error: string } {
+  if (!to) return { ok: false, error: NO_PHONE };
+  if (!channel) return { ok: false, error: NO_CHANNEL };
+
+  if (channel.kind === "baileys") {
+    // El orden importa: primero el estado del número (lo resuelve la agencia
+    // escaneando el QR), después la infraestructura (la resuelve el sistema).
+    if (channel.status !== "conectado") return { ok: false, error: BRANCH_UNLINKED };
+    if (!hasWorker()) return { ok: false, error: WORKER_DOWN };
+    return { ok: true, route: { via: "baileys", channelId: channel.id, to } };
+  }
+
+  if (!hasCloudApi() || !channel.phone_number_id)
+    return { ok: false, error: MOTHER_MISSING };
+  return { ok: true, route: { via: "cloud", phoneNumberId: channel.phone_number_id, to } };
+}
+
 /* ───────────────────────────────────────────
    sendMessage — texto libre.
    · Sucursal (Baileys): sale por el número de la sucursal, SIN ventana de
@@ -49,13 +102,18 @@ export async function sendMessage(input: {
     .maybeSingle();
   if (!conversation) return fail("No encontramos la conversación.");
 
-  const channel = conversation.channel_ref;
-  const to = conversation.contact?.phone ?? conversation.wa_id;
-  const isBaileys = channel?.kind === "baileys";
+  const routed = resolveRoute(
+    conversation.channel_ref,
+    conversation.contact?.phone ?? conversation.wa_id,
+  );
+  if (!routed.ok) return fail(routed.error);
+  const route = routed.route;
 
-  // La ventana de 24 hs es una regla de la API oficial: por el número de la
-  // sucursal no aplica.
-  if (!isBaileys) {
+  // La ventana de 24 hs es una regla de la Cloud API: se exige SOLO cuando el
+  // mensaje sale de verdad por el número madre. Por el número de una sucursal
+  // (Baileys) se escribe siempre, y si el madre no está conectado el envío ya
+  // falló arriba: exigirla antes dejaba el primer mensaje del CRM imposible.
+  if (route.via === "cloud") {
     const inWindow =
       conversation.last_inbound_at != null &&
       Date.now() - new Date(conversation.last_inbound_at).getTime() < WINDOW_MS;
@@ -65,37 +123,32 @@ export async function sendMessage(input: {
       );
   }
 
-  /* envío real según el canal */
+  /* envío real: el mensaje se guarda recién con la respuesta de WhatsApp */
   let status: MessageStatus = "enviado";
   let waMessageId: string | null = null;
   let errorDetail: string | null = null;
-  let simulated = false;
 
-  if (isBaileys && hasWorker() && to) {
-    if (channel?.status !== "conectado") {
-      return fail("El WhatsApp de esa sucursal no está vinculado. Vinculalo en Configuración.");
-    }
-    const res = await sendViaBaileys(channel.id, to, parsed.data.body);
+  if (route.via === "baileys") {
+    const res = await sendViaBaileys(route.channelId, route.to, parsed.data.body);
     if (res.ok) {
       waMessageId = res.data.waMessageId;
     } else {
       status = "fallido";
       errorDetail = res.error;
     }
-  } else if (!isBaileys && hasCloudApi() && channel?.phone_number_id && to) {
-    const res = await sendCloudText(channel.phone_number_id, to, parsed.data.body);
+  } else {
+    const res = await sendCloudText(route.phoneNumberId, route.to, parsed.data.body);
     if (res.ok) {
       waMessageId = res.waMessageId;
     } else {
       status = "fallido";
       errorDetail = res.error;
     }
-  } else {
-    // sin canal conectado el mensaje queda registrado igual (modo simulado)
-    simulated = true;
   }
 
-  // El trigger de DB actualiza last_message_at / preview de la conversación.
+  // Acá sí hubo intento real: el rechazo de WhatsApp queda en el hilo con
+  // error_detail para poder reclamarlo. El trigger de DB actualiza
+  // last_message_at / preview de la conversación.
   const { data: message, error } = await supabase
     .from("messages")
     .insert({
@@ -108,7 +161,7 @@ export async function sendMessage(input: {
       status,
       wa_message_id: waMessageId,
       error_detail: errorDetail,
-      metadata: simulated ? { simulated: true } : {},
+      metadata: {},
     })
     .select("id, status, created_at")
     .single();
@@ -280,34 +333,32 @@ export async function sendTemplate(input: {
   if (!template) return fail("No encontramos la plantilla.");
   if (!template.is_approved) return fail("Esa plantilla todavía no está aprobada por Meta.");
 
-  const channel = conversation.channel_ref;
-  const to = conversation.contact?.phone ?? conversation.wa_id;
+  const routed = resolveRoute(
+    conversation.channel_ref,
+    conversation.contact?.phone ?? conversation.wa_id,
+  );
+  if (!routed.ok) return fail(routed.error);
+  const route = routed.route;
 
   let status: MessageStatus = "enviado";
   let waMessageId: string | null = null;
   let errorDetail: string | null = null;
-  let simulated = false;
 
-  if (channel?.kind === "baileys" && hasWorker() && to) {
+  if (route.via === "baileys") {
     // por el número de la sucursal no hace falta plantilla: va como texto
-    if (channel.status !== "conectado") {
-      return fail("El WhatsApp de esa sucursal no está vinculado.");
-    }
-    const res = await sendViaBaileys(channel.id, to, parsed.data.body);
+    const res = await sendViaBaileys(route.channelId, route.to, parsed.data.body);
     if (res.ok) waMessageId = res.data.waMessageId;
     else {
       status = "fallido";
       errorDetail = res.error;
     }
-  } else if (hasCloudApi() && channel?.phone_number_id && to) {
-    const res = await sendCloudTemplate(channel.phone_number_id, to, template.meta_name);
+  } else {
+    const res = await sendCloudTemplate(route.phoneNumberId, route.to, template.meta_name);
     if (res.ok) waMessageId = res.waMessageId;
     else {
       status = "fallido";
       errorDetail = res.error;
     }
-  } else {
-    simulated = true;
   }
 
   const { data: message, error } = await supabase
@@ -323,9 +374,7 @@ export async function sendTemplate(input: {
       status,
       wa_message_id: waMessageId,
       error_detail: errorDetail,
-      metadata: simulated
-        ? { simulated: true, template_id: template.id }
-        : { template_id: template.id },
+      metadata: { template_id: template.id },
     })
     .select("id, status, created_at")
     .single();

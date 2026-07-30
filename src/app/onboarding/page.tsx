@@ -30,6 +30,10 @@ export default async function OnboardingPage() {
     user.email?.split("@")[0] ??
     "";
 
+  // members.email se guarda normalizado: es la vara con la que el alta de equipo
+  // busca duplicados y lo que se muestra en /config y /config/equipo
+  const email = user.email?.trim().toLowerCase() || null;
+
   return (
     <div className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-cream px-4 py-10">
       {/* halo editorial de marca, sutil en ambos temas */}
@@ -49,6 +53,7 @@ export default async function OnboardingPage() {
         </div>
         <OnboardingForm
           userId={user.id}
+          email={email}
           fullName={fullName}
           invitation={
             invitation

@@ -3,7 +3,14 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Banknote, Check, CheckCircle2, Copy, MessageCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  Banknote,
+  Check,
+  CheckCircle2,
+  Copy,
+  MessageCircle,
+} from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -50,6 +57,8 @@ type SuccessInfo = {
   receiptCode: string;
   receiptToken: string;
   newBalance: number;
+  /** venta total del file después del cobro: 0 = sigue sin servicios cargados */
+  totalSale: number;
 };
 
 /**
@@ -70,6 +79,8 @@ export function PaymentDialog({
     currency: string;
     contact_id: string | null;
     contact_name: string;
+    /** venta total del file: 0 = todavía no tiene servicios cargados */
+    total_sale: number;
     balance: number;
   };
   onSuccess?: () => void;
@@ -92,6 +103,8 @@ export function PaymentDialog({
   const rateNum = parseAmount(rate);
   const converted = isCross && rateNum > 0 ? round2(amountNum / rateNum) : amountNum;
   const canSubmit = amountNum > 0 && (!isCross || rateNum > 0) && !loading;
+  /** sin servicios cargados el file no tiene venta: se cobra a cuenta y se avisa */
+  const noServices = file.total_sale <= 0.004;
 
   // reset + traer cotización default y teléfono del cliente al abrir
   React.useEffect(() => {
@@ -174,7 +187,9 @@ export function PaymentDialog({
     }
   }
 
-  const settled = success ? success.newBalance <= 0 : false;
+  // saldado de verdad = la venta tiene monto y ya no queda nada por cobrar
+  const settled = success ? success.totalSale > 0.004 && success.newBalance <= 0.004 : false;
+  const successWithoutServices = success ? success.totalSale <= 0.004 : false;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -201,6 +216,10 @@ export function PaymentDialog({
             {settled ? (
               <p className="mt-2 rounded-full border border-money-tint-line bg-money-tint px-3 py-1 text-sm font-medium text-money-text animate-fade-in">
                 {file.contact_name} no debe nada más
+              </p>
+            ) : successWithoutServices ? (
+              <p className="mt-1 max-w-[280px] text-sm text-ink-soft">
+                Quedó a cuenta: el saldo se calcula cuando cargues los servicios del file.
               </p>
             ) : (
               <p className="mt-1 text-sm text-ink-soft">
@@ -245,13 +264,23 @@ export function PaymentDialog({
         ) : (
           /* ── formulario ── */
           <div className="flex flex-col gap-4">
-            {/* saldo pendiente */}
-            <div className="flex items-center justify-between rounded-2xl border border-line bg-sand-soft/60 px-4 py-3">
-              <span className="text-[13px] text-ink-soft">Saldo pendiente</span>
-              <span className="font-display text-xl font-semibold tabular-nums text-ink">
-                {fmtMoney(file.balance, file.currency)}
-              </span>
-            </div>
+            {/* saldo pendiente — o el aviso de que la venta todavía no tiene monto */}
+            {noServices ? (
+              <div className="flex items-start gap-2.5 rounded-2xl border border-tone-amber-line bg-tone-amber-soft px-3.5 py-3 text-tone-amber-text">
+                <AlertTriangle className="mt-0.5 size-4.5 shrink-0" strokeWidth={1.9} aria-hidden />
+                <p className="text-[13px] leading-snug">
+                  Este file todavía no tiene servicios cargados: no hay total de venta. Podés
+                  registrar la seña igual y el saldo cierra cuando cargues los servicios.
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between rounded-2xl border border-line bg-sand-soft/60 px-4 py-3">
+                <span className="text-[13px] text-ink-soft">Saldo pendiente</span>
+                <span className="font-display text-xl font-semibold tabular-nums text-ink">
+                  {fmtMoney(file.balance, file.currency)}
+                </span>
+              </div>
+            )}
 
             {/* monto */}
             <div>
@@ -259,13 +288,15 @@ export function PaymentDialog({
                 <Label className="mb-0" htmlFor="pd-amount">
                   Monto
                 </Label>
-                <button
-                  type="button"
-                  onClick={fillFullBalance}
-                  className="rounded-full border border-line bg-paper px-2.5 py-1 text-xs font-medium text-brand-text transition-colors hover:border-brand-tint-line hover:bg-brand-tint tap-highlight-none active:scale-[0.97]"
-                >
-                  Saldo total
-                </button>
+                {file.balance > 0.004 && (
+                  <button
+                    type="button"
+                    onClick={fillFullBalance}
+                    className="rounded-full border border-line bg-paper px-2.5 py-1 text-xs font-medium text-brand-text transition-colors hover:border-brand-tint-line hover:bg-brand-tint tap-highlight-none active:scale-[0.97]"
+                  >
+                    Saldo total
+                  </button>
+                )}
               </div>
               <div className="relative">
                 <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base font-medium text-ink-faint">

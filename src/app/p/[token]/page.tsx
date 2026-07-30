@@ -120,6 +120,7 @@ export default async function PresupuestoPublicoPage({
     agencyName: quote.agency.name,
     agencyLogoUrl: quote.agency.logo_url,
     agencyPhone: quote.agency.phone,
+    agencyEmail: quote.agency.email,
     sellerName: quote.seller_name,
     items: quote.items,
     options: options.map((o) => ({

@@ -71,12 +71,16 @@ export function addMoney(acc: MoneyByCurrency, currency: string, amount: number)
   acc[currency] = (acc[currency] ?? 0) + amount;
 }
 
-/** líneas formateadas de un MoneyByCurrency, USD primero. ["USD 12.400", "$ 350.000"] */
-export function moneyLines(m: MoneyByCurrency): string[] {
+/**
+ * Líneas formateadas de un MoneyByCurrency, USD primero. ["USD 12.400", "$ 350.000"]
+ * Sin montos devuelve el cero en `zeroCurrency` (la moneda con la que más se opera);
+ * si no hay ninguna, un guion: no inventamos una moneda que la agencia no usa.
+ */
+export function moneyLines(m: MoneyByCurrency, zeroCurrency?: string | null): string[] {
   const keys = Object.keys(m).sort((a, b) =>
     a === "USD" ? -1 : b === "USD" ? 1 : a.localeCompare(b),
   );
-  if (keys.length === 0) return [fmtMoney(0, "USD")];
+  if (keys.length === 0) return [zeroCurrency ? fmtMoney(0, zeroCurrency) : "—"];
   return keys.map((k) => fmtMoney(m[k], k));
 }
 

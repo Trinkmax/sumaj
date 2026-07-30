@@ -205,9 +205,13 @@ export function RadarSection({
             </Link>
           }
         >
-          <div className="pt-1">
-            <FunnelBars rows={funnel} />
-          </div>
+          {funnel.every((s) => s.count === 0) ? (
+            <RadarEmpty text="Todavía no hay leads en el pipeline. Cargá el primero desde el CRM." />
+          ) : (
+            <div className="pt-1">
+              <FunnelBars rows={funnel} />
+            </div>
+          )}
         </RadarCard>
       </div>
     </section>

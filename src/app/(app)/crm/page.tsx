@@ -2,12 +2,14 @@ import { requireMember } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { CrmBoard, type CrmView } from "@/components/crm/crm-board";
 import type { BoardLead, LeadConversation, MemberOption } from "@/components/crm/types";
+import type { WaSendCapability } from "@/components/chats/embedded-chat";
 import {
   CONVERSATION_SELECT,
   type BranchOption,
   type ConversationRow,
 } from "@/components/chats/types";
-import type { AgencySettings } from "@/lib/types";
+import { hasCloudApi } from "@/lib/wa/cloud";
+import { hasWorker } from "@/lib/wa/worker";
 
 export const metadata = { title: "CRM" };
 
@@ -52,10 +54,17 @@ export default async function CrmPage({
 
   const conversations = (convsRes.data ?? []) as unknown as ConversationRow[];
 
-  // conversación whatsapp por contacto (1 por contacto+canal)
+  /* Conversación de WhatsApp por contacto para las tarjetas del kanban.
+     Un contacto puede tener DOS hilos (número madre y sucursal): la tarjeta
+     tiene que abrir el MISMO que ensureConversation — la sucursal manda y,
+     entre iguales, el del último mensaje (el sort es estable y la query ya
+     viene por last_message_at desc). */
   const convByContact = new Map<string, LeadConversation>();
-  for (const conv of conversations) {
-    if (conv.channel !== "whatsapp") continue;
+  const whatsappConvs = conversations
+    .filter((c) => c.channel === "whatsapp")
+    .sort((a, b) => Number(b.branch_id != null) - Number(a.branch_id != null));
+  for (const conv of whatsappConvs) {
+    if (convByContact.has(conv.contact_id)) continue;
     convByContact.set(conv.contact_id, {
       id: conv.id,
       last_message_preview: conv.last_message_preview,
@@ -102,8 +111,11 @@ export default async function CrmPage({
     };
   });
 
-  const settings = (agency.settings ?? {}) as Partial<AgencySettings>;
-  const waConnected = settings.whatsapp?.connected === true;
+  /* Capacidad REAL de enviar por WhatsApp. `settings.whatsapp.connected` es una
+     preferencia guardada, no la infraestructura viva: sin worker el número de
+     una sucursal no manda nada y sin Cloud API el madre tampoco. El chat lo
+     cruza con el canal de cada conversación. */
+  const waSend: WaSendCapability = { worker: hasWorker(), cloud: hasCloudApi() };
 
   // ?vista= manda; un deep link con ?c= solo también abre Chats.
   // null = sin preferencia en la URL → el board usa la última vista guardada.
@@ -123,7 +135,7 @@ export default async function CrmPage({
       meId={member.id}
       isAdmin={isAdmin}
       agencyId={agency.id}
-      waConnected={waConnected}
+      waSend={waSend}
       initialView={initialView}
       initialConversationId={c ?? null}
     />

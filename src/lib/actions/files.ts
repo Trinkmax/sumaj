@@ -167,6 +167,19 @@ export async function updateFileStatus(
   if (!parsed.success) return fail("Estado inválido.");
   const { supabase, member, agency } = await requireAction();
 
+  // "pagado" exige una venta con monto: sin servicios cargados el saldo del file
+  // es negativo desde la primera seña y el estado quedaría diciendo una mentira
+  if (parsed.data.status === "pagado") {
+    const { data: totals } = await supabase
+      .from("file_totals")
+      .select("total_sale")
+      .eq("file_id", parsed.data.fileId)
+      .maybeSingle();
+    if (Number(totals?.total_sale ?? 0) <= 0.004) {
+      return fail("Cargá los servicios del file antes de marcarlo como pagado.");
+    }
+  }
+
   const { data: file, error } = await supabase
     .from("files")
     .update({ status: parsed.data.status })

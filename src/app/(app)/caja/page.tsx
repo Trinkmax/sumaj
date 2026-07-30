@@ -26,6 +26,11 @@ function addAll(target: MoneyByCurrency, source: MoneyByCurrency) {
   for (const [currency, amount] of Object.entries(source)) add(target, currency, amount);
 }
 
+/** suma todas las monedas del mapa sin convertirlas: sirve para ordenar, no para mostrar */
+function totalAcrossCurrencies(m: MoneyByCurrency): number {
+  return Object.values(m).reduce((acc, v) => acc + v, 0);
+}
+
 export default async function CajaPage({
   searchParams,
 }: {
@@ -139,30 +144,34 @@ export default async function CajaPage({
   const activeFiles = files.filter((f) => f.status !== "cancelado");
 
   const receivable: MoneyByCurrency = {};
-  const debtors: DebtorFile[] = activeFiles
-    .map((f) => {
-      const t = totalsByFile.get(f.id);
-      const balance = round2(Number(t?.balance ?? 0));
-      return { f, t, balance };
-    })
-    .filter(({ balance }) => balance > 0)
-    .map(({ f, t, balance }) => {
+  const debtors: DebtorFile[] = [];
+  /** files todavía sin servicios cargados: no tienen saldo, pero se les cobra la seña */
+  const withoutServices: DebtorFile[] = [];
+
+  for (const f of activeFiles) {
+    const t = totalsByFile.get(f.id);
+    const totalSale = round2(Number(t?.total_sale ?? 0));
+    const balance = round2(Number(t?.balance ?? 0));
+    const row: DebtorFile = {
+      id: f.id,
+      code: f.code,
+      destination: f.destination,
+      currency: f.currency,
+      departure_date: f.departure_date,
+      contact_id: f.contact?.id ?? null,
+      contact_name: f.contact?.full_name ?? "Cliente",
+      contact_phone: f.contact?.phone ?? null,
+      total_sale: totalSale,
+      paid_total: round2(Number(t?.paid_total ?? 0)),
+      balance,
+    };
+    if (totalSale <= 0.004) withoutServices.push(row);
+    else if (balance > 0) {
       add(receivable, f.currency, balance);
-      return {
-        id: f.id,
-        code: f.code,
-        destination: f.destination,
-        currency: f.currency,
-        departure_date: f.departure_date,
-        contact_id: f.contact?.id ?? null,
-        contact_name: f.contact?.full_name ?? "Cliente",
-        contact_phone: f.contact?.phone ?? null,
-        total_sale: round2(Number(t?.total_sale ?? 0)),
-        paid_total: round2(Number(t?.paid_total ?? 0)),
-        balance,
-      };
-    })
-    .sort((a, b) => b.balance - a.balance);
+      debtors.push(row);
+    }
+  }
+  debtors.sort((a, b) => b.balance - a.balance);
 
   // ── comisiones: files creados en el mes ──
   const startIso = monthStart.toISOString();
@@ -251,8 +260,7 @@ export default async function CajaPage({
     },
   );
   commissions.sort(
-    (a, b) =>
-      (b.utility.USD ?? 0) + (b.utility.ARS ?? 0) - ((a.utility.USD ?? 0) + (a.utility.ARS ?? 0)),
+    (a, b) => totalAcrossCurrencies(b.utility) - totalAcrossCurrencies(a.utility),
   );
   // pendiente de cada vendedor antes de filtrar: el admin lo usa para precargar el pago
   const pendingByMember = new Map(commissions.map((c) => [c.memberId, c.pending] as const));
@@ -292,6 +300,15 @@ export default async function CajaPage({
     pending: pendingByMember.get(m.id) ?? {},
   }));
 
+  // a quién se le puede cobrar hoy: primero los saldos, después los files sin servicios
+  const chargeable: DebtorFile[] = [...debtors, ...withoutServices];
+
+  // moneda con la que más se opera: cuando no hay movimientos, los KPIs no inventan USD
+  const currencyUse = new Map<string, number>();
+  for (const f of activeFiles) currencyUse.set(f.currency, (currencyUse.get(f.currency) ?? 0) + 1);
+  for (const p of payments) currencyUse.set(p.currency, (currencyUse.get(p.currency) ?? 0) + 1);
+  const mainCurrency = [...currencyUse.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
   return (
     <div>
       <PageHeader title="Caja" subtitle="Cobros, saldos y comisiones, sin vueltas" />
@@ -302,10 +319,12 @@ export default async function CajaPage({
         stats={stats}
         movements={movements}
         debtors={debtors}
+        chargeable={chargeable}
         commissions={commissions}
         suppliers={suppliers}
         sellers={sellers}
         fileOptions={fileOptions}
+        mainCurrency={mainCurrency}
         isAdmin={isAdmin}
       />
     </div>

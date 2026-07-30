@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowUpFromLine } from "lucide-react";
+import { ArrowUpFromLine, Handshake, Luggage, type LucideIcon } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -36,6 +37,33 @@ const METHOD_OPTIONS = (Object.keys(PAYMENT_METHODS) as PaymentMethod[]).map((k)
   label: PAYMENT_METHODS[k].label,
   icon: PAYMENT_METHODS[k].icon,
 }));
+
+/** un combo con una sola opción vacía no explica nada: en su lugar, el estado real y el atajo */
+function PickerEmpty({
+  icon: Icon,
+  text,
+  href,
+  cta,
+}: {
+  icon: LucideIcon;
+  text: string;
+  href: string;
+  cta: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-line-strong/70 bg-sand-soft/30 px-3.5 py-3">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-sand-soft text-ink-faint">
+        <Icon className="size-4.5" strokeWidth={1.9} />
+      </span>
+      <p className="min-w-0 flex-1 text-[13px] text-ink-soft">{text}</p>
+      <Link href={href}>
+        <Button variant="secondary" size="sm">
+          {cta}
+        </Button>
+      </Link>
+    </div>
+  );
+}
 
 /** Registrar un pago a proveedor (siempre en la moneda del file). */
 export function SupplierPaymentDialog({
@@ -103,31 +131,49 @@ export function SupplierPaymentDialog({
       >
         <div className="flex flex-col gap-4">
           <div>
-            <Label htmlFor="sp-supplier">Proveedor</Label>
-            <Select
-              id="sp-supplier"
-              value={supplierId}
-              onChange={(e) => setSupplierId(e.target.value)}
-            >
-              <option value="">Elegí un proveedor…</option>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
+            <Label htmlFor={suppliers.length === 0 ? undefined : "sp-supplier"}>Proveedor</Label>
+            {suppliers.length === 0 ? (
+              <PickerEmpty
+                icon={Handshake}
+                text="Todavía no cargaste proveedores."
+                href="/config/proveedores"
+                cta="Cargar proveedores"
+              />
+            ) : (
+              <Select
+                id="sp-supplier"
+                value={supplierId}
+                onChange={(e) => setSupplierId(e.target.value)}
+              >
+                <option value="">Elegí un proveedor…</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+            )}
           </div>
 
           <div>
-            <Label htmlFor="sp-file">File</Label>
-            <Select id="sp-file" value={fileId} onChange={(e) => setFileId(e.target.value)}>
-              <option value="">Elegí el file…</option>
-              {files.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.code} · {f.contact_name} — {f.destination} ({f.currency})
-                </option>
-              ))}
-            </Select>
+            <Label htmlFor={files.length === 0 ? undefined : "sp-file"}>File</Label>
+            {files.length === 0 ? (
+              <PickerEmpty
+                icon={Luggage}
+                text="El pago va contra una venta y todavía no hay files."
+                href="/files"
+                cta="Ir a Files"
+              />
+            ) : (
+              <Select id="sp-file" value={fileId} onChange={(e) => setFileId(e.target.value)}>
+                <option value="">Elegí el file…</option>
+                {files.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.code} · {f.contact_name} — {f.destination} ({f.currency})
+                  </option>
+                ))}
+              </Select>
+            )}
           </div>
 
           <div>

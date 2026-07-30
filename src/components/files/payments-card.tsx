@@ -45,6 +45,8 @@ export function PaymentsCard({
       ? Math.min(1, Math.max(0, totals.paid_total / totals.total_sale))
       : 0;
   const settled = totals.total_sale > 0 && totals.balance <= 0;
+  /** sin servicios cargados no hay venta: lo cobrado es a cuenta y el saldo todavía no existe */
+  const noServices = totals.total_sale <= 0;
 
   return (
     <section className={cn("card animate-slide-up p-4 md:p-5", className)}>
@@ -66,7 +68,7 @@ export function PaymentsCard({
           className="shrink-0 text-money-700"
         >
           <span className="text-[13px] font-bold tabular-nums text-ink">
-            {Math.round(pct * 100)}%
+            {noServices ? "—" : `${Math.round(pct * 100)}%`}
           </span>
         </ProgressRing>
 
@@ -75,16 +77,26 @@ export function PaymentsCard({
             {fmtMoney(totals.paid_total, file.currency)}
           </p>
           <p className="text-[13px] text-ink-faint">
-            cobrado de{" "}
-            <span className="font-medium tabular-nums text-ink-soft">
-              {fmtMoney(totals.total_sale, file.currency)}
-            </span>
+            {noServices ? (
+              "cobrado a cuenta"
+            ) : (
+              <>
+                cobrado de{" "}
+                <span className="font-medium tabular-nums text-ink-soft">
+                  {fmtMoney(totals.total_sale, file.currency)}
+                </span>
+              </>
+            )}
           </p>
           {settled ? (
             <span className="mt-1.5 inline-flex animate-pop items-center gap-1 rounded-full border border-tone-emerald-line bg-tone-emerald-soft px-2.5 py-0.5 text-xs font-semibold text-tone-emerald-text">
               <CheckCircle2 className="size-3.5" strokeWidth={2} />
               Saldado
             </span>
+          ) : noServices ? (
+            <p className="mt-1 text-[13px] text-ink-faint">
+              El saldo aparece cuando cargues los servicios.
+            </p>
           ) : (
             <p className="mt-1 text-[13px]">
               <span className="text-ink-faint">Saldo</span>{" "}
@@ -131,7 +143,7 @@ export function PaymentsCard({
       <PaymentDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        file={file}
+        file={{ ...file, total_sale: totals.total_sale }}
         onSuccess={() => router.refresh()}
       />
     </section>

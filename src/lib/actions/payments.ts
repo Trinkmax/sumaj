@@ -23,6 +23,15 @@ const PAYMENT_METHOD_KEYS = [
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * Un file recién creado no tiene servicios: `file_totals.total_sale` es 0 y la
+ * primera seña deja el balance en negativo. Eso no es un file pagado, es plata
+ * a cuenta — por eso el estado "pagado" exige que la venta tenga monto.
+ */
+function isFullyPaid(totalSale: number, balance: number): boolean {
+  return totalSale > 0.004 && balance <= 0.004;
+}
+
 /* ───────────────────────────────────────────
    Registrar un cobro (dirección: cobro)
    ─────────────────────────────────────────── */
@@ -44,6 +53,8 @@ export async function registerPayment(
     receiptCode: string;
     receiptToken: string;
     newBalance: number;
+    /** venta total del file: si es 0 todavía no hay servicios cargados */
+    totalSale: number;
   }>
 > {
   const parsed = registerPaymentSchema.safeParse(input);
@@ -90,12 +101,13 @@ export async function registerPayment(
 
   const { data: totals } = await supabase
     .from("file_totals")
-    .select("balance")
+    .select("total_sale, balance")
     .eq("file_id", file.id)
     .maybeSingle();
   const newBalance = round2(Number(totals?.balance ?? 0));
+  const totalSale = round2(Number(totals?.total_sale ?? 0));
 
-  if (newBalance <= 0 && file.status === "vendido") {
+  if (file.status === "vendido" && isFullyPaid(totalSale, newBalance)) {
     await supabase.from("files").update({ status: "pagado" }).eq("id", file.id);
   }
 
@@ -117,6 +129,7 @@ export async function registerPayment(
     receiptCode: payment.receipt_code ?? "",
     receiptToken: payment.receipt_token,
     newBalance,
+    totalSale,
   });
 }
 
@@ -287,14 +300,18 @@ export async function deletePayment(
 
   const fileId = payment.file_id;
 
-  // si el file estaba "pagado" y volvió a tener saldo, lo devolvemos a "vendido"
+  // si el file estaba "pagado" y el saldo ya no lo justifica, vuelve a "vendido"
   if (fileId && payment.direction === "cobro" && payment.file?.status === "pagado") {
     const { data: totals } = await supabase
       .from("file_totals")
-      .select("balance")
+      .select("total_sale, balance")
       .eq("file_id", fileId)
       .maybeSingle();
-    if (Number(totals?.balance ?? 0) > 0) {
+    const stillPaid = isFullyPaid(
+      round2(Number(totals?.total_sale ?? 0)),
+      round2(Number(totals?.balance ?? 0)),
+    );
+    if (!stillPaid) {
       await supabase.from("files").update({ status: "vendido" }).eq("id", fileId);
     }
   }

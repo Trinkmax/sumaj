@@ -5,7 +5,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getMemberContext, type MemberContext } from "@/lib/auth";
 import { round2 } from "@/lib/domain";
-import type { ActivityType, TablesInsert } from "@/lib/types";
+import type { ActivityType, LeadStage, TablesInsert } from "@/lib/types";
 
 export type ActionResult<T = null> =
   | { ok: true; data: T }
@@ -50,6 +50,47 @@ export async function logActivity(input: {
     body: input.body,
     metadata: (input.metadata ?? {}) as TablesInsert<"activities">["metadata"],
   });
+}
+
+/** Posición nueva arriba de todo en una columna: min − 1 (0 si está vacía). */
+export async function topPosition(
+  supabase: Awaited<ReturnType<typeof requireAction>>["supabase"],
+  stage: LeadStage,
+  excludeLeadId?: string,
+): Promise<number> {
+  let query = supabase
+    .from("leads")
+    .select("position")
+    .eq("stage", stage)
+    .order("position", { ascending: true })
+    .limit(1);
+  if (excludeLeadId) query = query.neq("id", excludeLeadId);
+  const { data } = await query;
+  return data && data.length > 0 ? Number(data[0].position) - 1 : 0;
+}
+
+/**
+ * Sucursal dueña de un lead: la del vendedor; si trabaja en todas (los admins),
+ * la sucursal por defecto activa. Sin sucursal el seguimiento automático no
+ * puede salir por el número de la sucursal y volvería a caer en plantillas pagas,
+ * así que todo alta de lead tiene que pasar por acá.
+ */
+export async function resolveBranchId(
+  supabase: Awaited<ReturnType<typeof requireAction>>["supabase"],
+  agencyId: string,
+  memberBranchId: string | null,
+): Promise<string | null> {
+  if (memberBranchId) return memberBranchId;
+
+  const { data: defaultBranch } = await supabase
+    .from("branches")
+    .select("id")
+    .eq("agency_id", agencyId)
+    .eq("is_default", true)
+    .eq("is_active", true)
+    .limit(1)
+    .maybeSingle();
+  return defaultBranch?.id ?? null;
 }
 
 /** Devuelve (o crea) la conversación de WhatsApp de un contacto. */

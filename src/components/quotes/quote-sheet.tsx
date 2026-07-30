@@ -22,6 +22,7 @@ export type QuoteSheetOption = {
 };
 
 export type QuoteSheetData = {
+  /** vacío mientras el presupuesto no se guardó: el código lo pone la DB */
   code: string;
   title: string | null;
   destination: string;
@@ -42,6 +43,8 @@ export type QuoteSheetData = {
   agencyName: string;
   agencyLogoUrl: string | null;
   agencyPhone: string | null;
+  /** opcional: si la agencia no tiene teléfono, el mail es el único contacto del pie */
+  agencyEmail?: string | null;
   sellerName: string | null;
   items: QuoteSheetItem[];
   /** alternativas comparables: "con este hotel vale 10, con este otro 15" */
@@ -79,6 +82,19 @@ export function QuoteSheet({ data, className }: { data: QuoteSheetData; classNam
   const softInk = { color: color.ink, opacity: 0.62 };
   const hasOptions = data.options.length > 0;
 
+  /* del código y del contacto de la agencia va lo que exista: nada de separadores
+     colgados cuando falta el teléfono o el presupuesto todavía no tiene número */
+  const codeLine = [data.code, fmtDate(data.createdAt ?? new Date())]
+    .filter(Boolean)
+    .join(" · ");
+  const contactLine = [
+    data.agencyName,
+    data.agencyPhone ? fmtPhone(data.agencyPhone) : null,
+    data.agencyEmail,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <div
       className={`mx-auto w-full max-w-[420px] rounded-[4px] px-8 py-10 shadow-[0_2px_24px_rgb(33_29_24/0.10)] sm:px-10 sm:py-12 ${className ?? ""}`}
@@ -113,7 +129,7 @@ export function QuoteSheet({ data, className }: { data: QuoteSheetData; classNam
           Presupuesto
         </p>
         <p className="mt-1.5 text-[11px] uppercase tracking-[0.18em]" style={softInk}>
-          {data.code} · {fmtDate(data.createdAt ?? new Date())}
+          {codeLine}
         </p>
       </div>
 
@@ -313,8 +329,7 @@ export function QuoteSheet({ data, className }: { data: QuoteSheetData; classNam
       <div className="mt-6 text-center">
         {data.sellerName && <p className="text-[13px]">{data.sellerName}</p>}
         <p className="text-[12px] tabular-nums" style={softInk}>
-          {data.agencyName}
-          {data.agencyPhone ? ` · ${fmtPhone(data.agencyPhone)}` : ""}
+          {contactLine}
         </p>
         <p className="mt-4 text-[10px] uppercase tracking-[0.24em]" style={{ ...softInk, opacity: 0.45 }}>
           hecho con viajerOS

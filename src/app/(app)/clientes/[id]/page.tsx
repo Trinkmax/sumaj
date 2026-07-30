@@ -64,11 +64,18 @@ export default async function ClienteDetallePage({
       .from("travelers")
       .select("id, relationship, owner:contacts!travelers_contact_id_fkey(id, full_name)")
       .eq("linked_contact_id", id),
+    // Un contacto puede tener DOS hilos de WhatsApp (número madre y sucursal):
+    // sin limit(1) maybeSingle devolvía error y la ficha actuaba como si no
+    // hubiera chat — el presupuesto dejaba de publicarse en la conversación.
+    // Misma prioridad de desempate que ensureConversation.
     supabase
       .from("conversations")
       .select("id")
       .eq("contact_id", id)
       .eq("channel", "whatsapp")
+      .order("branch_id", { ascending: false, nullsFirst: false })
+      .order("last_message_at", { ascending: false, nullsFirst: false })
+      .limit(1)
       .maybeSingle(),
     supabase
       .from("leads")

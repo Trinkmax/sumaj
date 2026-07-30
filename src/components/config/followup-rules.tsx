@@ -1,16 +1,39 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { toast } from "sonner";
-import { AlarmClock, MessageCircleOff, MessageCircleReply } from "lucide-react";
+import {
+  AlarmClock,
+  MessageCircleOff,
+  MessageCircleReply,
+  Plus,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch, EmptyState } from "@/components/ui/misc";
-import { updateFollowupRule } from "@/lib/actions/settings";
-import { STAGES } from "@/lib/domain";
+import { ConfirmDialog } from "@/components/config/confirm-dialog";
+import {
+  createFollowupRule,
+  deleteFollowupRule,
+  updateFollowupRule,
+} from "@/lib/actions/settings";
+import { STAGES, STAGE_BY_KEY } from "@/lib/domain";
 import type { LeadStage, Tables } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Rule = Tables<"followup_rules">;
+type Row = Rule & { hoursDraft: string };
+
+/** Etapas en las que app.enqueue_followups() encola (ver 0006_automation.sql). */
+const ENQUEUED_STAGES: LeadStage[] = ["contactado", "presupuestado", "negociacion"];
+
+/** Espejo del tope de createFollowupRule: no ofrecemos un botón que va a fallar. */
+const MAX_TOUCHES = 6;
+
+const toRow = (r: Rule): Row => ({ ...r, hoursDraft: String(r.hours_after_silence) });
 
 function fmtHours(h: number): string {
   if (h >= 72 && h % 24 === 0) return `${h / 24} días`;
@@ -18,19 +41,77 @@ function fmtHours(h: number): string {
   return `${h} h`;
 }
 
-export function FollowupRules({ rules }: { rules: Rule[] }) {
-  const [state, setState] = React.useState(
-    rules.map((r) => ({
-      ...r,
-      hoursDraft: String(r.hours_after_silence),
-    })),
-  );
+/** "contactado y presupuestado" — para nombrar etapas dentro de una oración. */
+function stageList(stages: LeadStage[]): string {
+  const labels = stages.map((s) => STAGE_BY_KEY[s].label.toLowerCase());
+  if (labels.length <= 1) return labels[0] ?? "";
+  return `${labels.slice(0, -1).join(", ")} y ${labels[labels.length - 1]}`;
+}
 
-  function patch(id: string, p: Partial<(typeof state)[number]>) {
+/** Aviso de que el toque, así configurado, no va a salir. */
+function Aviso({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mt-4 flex items-start gap-2 rounded-xl border border-tone-amber-line bg-tone-amber-soft px-3.5 py-2.5 text-[12px] leading-relaxed text-tone-amber-text animate-fade-in">
+      <TriangleAlert className="mt-px size-3.5 shrink-0" strokeWidth={1.9} />
+      <span>{children}</span>
+    </p>
+  );
+}
+
+export function FollowupRules({
+  rules,
+  approvedStages,
+  hasGenericTemplate,
+}: {
+  rules: Rule[];
+  /** etapas con al menos una plantilla aprobada */
+  approvedStages: LeadStage[];
+  /** hay una plantilla aprobada sin etapa: sirve para cualquier lead */
+  hasGenericTemplate: boolean;
+}) {
+  const [state, setState] = React.useState(() => rules.map(toRow));
+  const [adding, setAdding] = React.useState(false);
+  const [toDelete, setToDelete] = React.useState<Row | null>(null);
+
+  /**
+   * Etapas del toque que realmente se programan y, de esas, las que no tienen
+   * plantilla aprobada: sin plantilla el seguimiento se encola con template_id
+   * null y la edge function lo cancela, así que nunca le llega nada al cliente.
+   */
+  function alcance(rule: Row) {
+    const programadas = rule.applies_to_stages.filter((s) => ENQUEUED_STAGES.includes(s));
+    return {
+      programadas,
+      sinPlantilla: hasGenericTemplate
+        ? []
+        : programadas.filter((s) => !approvedStages.includes(s)),
+    };
+  }
+
+  function patch(id: string, p: Partial<Row>) {
     setState((s) => s.map((r) => (r.id === id ? { ...r, ...p } : r)));
   }
 
-  async function saveHours(rule: (typeof state)[number]) {
+  async function addTouch() {
+    // el toque nuevo entra después del último: 48 h el primero, ×3 de ahí en más
+    const maxHours = state.reduce((m, r) => Math.max(m, r.hours_after_silence), 0);
+    const hours = maxHours === 0 ? 48 : Math.min(maxHours * 3, 2160);
+
+    setAdding(true);
+    const res = await createFollowupRule({
+      hours_after_silence: hours,
+      applies_to_stages: ENQUEUED_STAGES,
+    });
+    setAdding(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    setState((s) => [...s, toRow(res.data)]);
+    toast.success(`Toque ${res.data.touch_number}: a las ${fmtHours(hours)} de silencio.`);
+  }
+
+  async function saveHours(rule: Row) {
     const n = Math.round(Number(rule.hoursDraft.replace(",", ".")));
     if (isNaN(n) || n < 1 || n > 2160) {
       toast.error("Poné una cantidad de horas entre 1 y 2160.");
@@ -52,7 +133,7 @@ export function FollowupRules({ rules }: { rules: Rule[] }) {
     toast.success(`Toque ${rule.touch_number}: ahora a las ${fmtHours(n)} de silencio.`);
   }
 
-  async function toggleStage(rule: (typeof state)[number], stage: LeadStage) {
+  async function toggleStage(rule: Row, stage: LeadStage) {
     const has = rule.applies_to_stages.includes(stage);
     const next = has
       ? rule.applies_to_stages.filter((s) => s !== stage)
@@ -70,7 +151,7 @@ export function FollowupRules({ rules }: { rules: Rule[] }) {
     }
   }
 
-  async function toggleActive(rule: (typeof state)[number], next: boolean) {
+  async function toggleActive(rule: Row, next: boolean) {
     const prev = rule.is_active;
     patch(rule.id, { is_active: next }); // optimista
     const res = await updateFollowupRule({ id: rule.id, is_active: next });
@@ -84,30 +165,50 @@ export function FollowupRules({ rules }: { rules: Rule[] }) {
     return (
       <EmptyState
         icon={AlarmClock}
-        title="No hay reglas de seguimiento"
-        description="Las reglas se crean con la agencia. Si no las ves, avisale a soporte."
+        title="Todavía no hay toques"
+        description="Sin toques, un lead que deja de responder no vuelve a recibir nada. Armá el primero y después lo ajustás."
+        action={
+          <Button onClick={addTouch} loading={adding}>
+            <Plus />
+            Agregar el primer toque
+          </Button>
+        }
       />
     );
   }
 
+  // la línea de tiempo va en orden cronológico: es un eje de horas, no de números
   const activeSorted = [...state]
     .filter((r) => r.is_active)
-    .sort((a, b) => a.touch_number - b.touch_number);
+    .sort((a, b) => a.hours_after_silence - b.hours_after_silence || a.touch_number - b.touch_number);
 
   return (
     <div className="space-y-4">
       {/* Cadencia: línea de tiempo horizontal */}
       <section className="card p-5 animate-slide-up">
-        <div className="flex items-start gap-3">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-tint text-brand-text">
-            <MessageCircleReply className="size-4.5" strokeWidth={1.75} />
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-tint text-brand-text">
+              <MessageCircleReply className="size-4.5" strokeWidth={1.75} />
+            </div>
+            <div className="min-w-0">
+              <h2 className="font-display text-lg font-semibold text-ink">Cadencia de toques</h2>
+              <p className="text-sm text-ink-soft">
+                Si el cliente no responde, viajerOS reabre la charla solo con una plantilla según la etapa.
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="font-display text-lg font-semibold text-ink">Cadencia de toques</h2>
-            <p className="text-sm text-ink-soft">
-              Si el cliente no responde, viajerOS reabre la charla solo con una plantilla según la etapa.
+          {state.length < MAX_TOUCHES ? (
+            <Button onClick={addTouch} loading={adding} className="shrink-0">
+              <Plus />
+              <span className="hidden sm:inline">Agregar toque</span>
+              <span className="sm:hidden">Agregar</span>
+            </Button>
+          ) : (
+            <p className="shrink-0 text-xs text-ink-faint">
+              Son {MAX_TOUCHES} toques: el máximo.
             </p>
-          </div>
+          )}
         </div>
 
         {activeSorted.length > 0 ? (
@@ -155,6 +256,7 @@ export function FollowupRules({ rules }: { rules: Rule[] }) {
             const stageOptions = STAGES.filter(
               (s) => s.active || rule.applies_to_stages.includes(s.key),
             );
+            const { programadas, sinPlantilla } = alcance(rule);
             return (
               <section
                 key={rule.id}
@@ -182,11 +284,22 @@ export function FollowupRules({ rules }: { rules: Rule[] }) {
                       </span>
                     </h3>
                   </div>
-                  <Switch
-                    checked={rule.is_active}
-                    onCheckedChange={(v) => toggleActive(rule, v)}
-                    aria-label={`Toque ${rule.touch_number} activo`}
-                  />
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Switch
+                      checked={rule.is_active}
+                      onCheckedChange={(v) => toggleActive(rule, v)}
+                      aria-label={`Toque ${rule.touch_number} activo`}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-11 text-tone-red-text hover:bg-tone-red-soft sm:size-9"
+                      onClick={() => setToDelete(rule)}
+                      aria-label={`Quitar el toque ${rule.touch_number}`}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-4">
@@ -239,6 +352,21 @@ export function FollowupRules({ rules }: { rules: Rule[] }) {
                     </div>
                   </div>
                 </div>
+
+                {programadas.length === 0 ? (
+                  <Aviso>
+                    El seguimiento automático solo corre en {stageList(ENQUEUED_STAGES)}: con estas
+                    etapas el toque no se programa nunca.
+                  </Aviso>
+                ) : sinPlantilla.length > 0 ? (
+                  <Aviso>
+                    No hay plantilla aprobada para {stageList(sinPlantilla)}: el toque se programa
+                    pero no llega a salir.{" "}
+                    <Link href="/config/plantillas" className="font-medium underline">
+                      Cargar plantilla
+                    </Link>
+                  </Aviso>
+                ) : null}
               </section>
             );
           })}
@@ -248,6 +376,25 @@ export function FollowupRules({ rules }: { rules: Rule[] }) {
         Los toques se cancelan solos apenas el cliente responde. La plantilla que se envía es la de la
         etapa del lead (o una genérica).
       </p>
+
+      <ConfirmDialog
+        open={toDelete !== null}
+        onOpenChange={(o) => !o && setToDelete(null)}
+        title={toDelete ? `¿Quitar el toque ${toDelete.touch_number}?` : ""}
+        description="Dejamos de programarlo de acá en adelante. Los seguimientos que ya estaban en la cola salen igual."
+        confirmLabel="Quitar"
+        onConfirm={async () => {
+          if (!toDelete) return;
+          const res = await deleteFollowupRule({ id: toDelete.id });
+          if (!res.ok) {
+            toast.error(res.error);
+          } else {
+            setState((s) => s.filter((r) => r.id !== toDelete.id));
+            toast.success(`Toque ${toDelete.touch_number} quitado.`);
+          }
+          setToDelete(null);
+        }}
+      />
     </div>
   );
 }

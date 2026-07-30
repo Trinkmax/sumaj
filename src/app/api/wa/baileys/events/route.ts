@@ -1,11 +1,13 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import { hasAdminClient } from "@/lib/supabase/admin";
 import { handleInboundMessage } from "@/lib/wa/inbound";
 import type { Enums } from "@/lib/types";
 
 /**
  * Eventos del worker de Baileys (los números de las sucursales).
  * El worker firma el body con HMAC-SHA256 y el mismo secreto compartido.
+ * Sin WA_WEBHOOK_SECRET no se acepta nada: /api/wa es público en el proxy.
  */
 
 export const runtime = "nodejs";
@@ -38,6 +40,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Firma inválida" }, { status: 401 });
   }
 
+  if (!hasAdminClient()) {
+    return NextResponse.json(
+      { ok: false, error: "Falta SUPABASE_SERVICE_ROLE_KEY" },
+      { status: 503 },
+    );
+  }
+
   let event: WorkerEvent;
   try {
     event = JSON.parse(raw) as WorkerEvent;
@@ -59,8 +68,11 @@ export async function POST(request: Request) {
     timestamp: event.timestamp ?? Date.now(),
   });
 
-  // 200 siempre que el evento sea válido: el worker no tiene por qué reintentar
-  // un error nuestro de negocio, queda registrado en el log.
-  if (!result.ok) console.error("[wa/baileys] ", result.error);
-  return NextResponse.json({ ok: result.ok, error: result.error });
+  if (!result.ok) {
+    // Con un 200 el worker daría el mensaje por avisado y la consulta se perdería
+    // en silencio; con el error a la vista lo escribe en el canal (last_error).
+    console.error("[wa/baileys] ", result.error);
+    return NextResponse.json({ ok: false, error: result.error }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true });
 }

@@ -11,7 +11,7 @@ import {
 import { createAnonClient } from "@/lib/supabase/server";
 import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
 import { TAG_COLORS, TAG_CATEGORIES } from "@/lib/domain";
-import type { AgencySettings, TablesUpdate } from "@/lib/types";
+import type { AgencySettings, Tables, TablesUpdate } from "@/lib/types";
 import type { Json } from "@/lib/database.types";
 
 const ADMIN_ONLY = "Esto lo maneja un admin de la agencia.";
@@ -648,6 +648,82 @@ export async function deleteTemplate(input: { id: string }): Promise<ActionResul
 /* ───────────────────────────────────────────
    Seguimiento automático
    ─────────────────────────────────────────── */
+
+/** Tope de toques por agencia: más que esto ya es perseguir al cliente. */
+const MAX_TOUCHES = 6;
+
+const newFollowupSchema = z.object({
+  hours_after_silence: z.number().int().min(1, "Mínimo 1 hora").max(2160),
+  applies_to_stages: z
+    .array(z.enum(["nuevo", "contactado", "presupuestado", "negociacion", "ganado", "perdido"]))
+    .min(1, "Elegí al menos una etapa"),
+});
+
+/**
+ * Agrega un toque a la cadencia. El `touch_number` lo decide el server: toma el
+ * primer número libre desde el 1, así la numeración queda compacta y no choca
+ * contra unique(agency_id, touch_number) cuando antes se borró un toque del medio.
+ */
+export async function createFollowupRule(
+  input: z.infer<typeof newFollowupSchema>,
+): Promise<ActionResult<Tables<"followup_rules">>> {
+  const parsed = newFollowupSchema.safeParse(input);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0]?.message ?? "Datos inválidos.";
+    return fail(first);
+  }
+  const { supabase, agency, isAdmin } = await requireAction();
+  if (!isAdmin) return fail(ADMIN_ONLY);
+
+  const { data: taken } = await supabase
+    .from("followup_rules")
+    .select("touch_number")
+    .eq("agency_id", agency.id);
+
+  const used = new Set((taken ?? []).map((r) => r.touch_number));
+  if (used.size >= MAX_TOUCHES)
+    return fail(`Ya tenés ${MAX_TOUCHES} toques. Ajustá los que hay en lugar de sumar otro.`);
+
+  let touchNumber = 1;
+  while (used.has(touchNumber)) touchNumber++;
+
+  const { data, error } = await supabase
+    .from("followup_rules")
+    .insert({
+      agency_id: agency.id,
+      touch_number: touchNumber,
+      hours_after_silence: parsed.data.hours_after_silence,
+      applies_to_stages: parsed.data.applies_to_stages,
+    })
+    .select("*")
+    .single();
+  if (error || !data) return fail("No se pudo agregar el toque. Probá de nuevo.");
+
+  revalidatePath("/config/seguimiento");
+  return succeed(data);
+}
+
+/**
+ * Quita un toque de la cadencia. Los seguimientos que ya estaban en la cola no
+ * se tocan (followups.rule_id queda en null): lo que se corta es la programación
+ * de acá en adelante.
+ */
+export async function deleteFollowupRule(input: { id: string }): Promise<ActionResult<null>> {
+  const parsed = z.object({ id: z.uuid() }).safeParse(input);
+  if (!parsed.success) return fail("Datos inválidos.");
+  const { supabase, agency, isAdmin } = await requireAction();
+  if (!isAdmin) return fail(ADMIN_ONLY);
+
+  const { error } = await supabase
+    .from("followup_rules")
+    .delete()
+    .eq("id", parsed.data.id)
+    .eq("agency_id", agency.id);
+  if (error) return fail("No se pudo quitar el toque.");
+
+  revalidatePath("/config/seguimiento");
+  return succeed(null);
+}
 
 const followupSchema = z.object({
   id: z.uuid(),

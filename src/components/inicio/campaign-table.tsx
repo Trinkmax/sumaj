@@ -19,7 +19,8 @@ export function CampaignTable({ rows }: { rows: CampaignRow[] }) {
         </div>
         <p className="font-medium text-ink">Sin campañas este mes</p>
         <p className="max-w-xs text-sm text-ink-faint">
-          Conectá tus anuncios de Meta para ver el rendimiento acá.
+          Acá se agrupan los leads del mes por su origen: los que entran desde un anuncio traen
+          el nombre del aviso, el resto queda agrupado por canal.
         </p>
       </div>
     );

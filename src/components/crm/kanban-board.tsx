@@ -22,7 +22,10 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { Kanban, Plus, SearchX } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/misc";
 import { STAGES, STAGE_BY_KEY } from "@/lib/domain";
 import { fmtMoney } from "@/lib/format";
 import type { LeadStage } from "@/lib/types";
@@ -74,14 +77,20 @@ function budgetSummary(leads: BoardLead[]): string | null {
 
 export function KanbanBoard({
   leads,
+  totalLeads,
   onPatch,
   onOpenLead,
+  onNewLead,
 }: {
   leads: BoardLead[];
+  /** leads del board SIN filtrar: distingue el primer uso de "sin resultados" */
+  totalLeads: number;
   /** actualiza el estado del lead en el padre (optimista) */
   onPatch: (id: string, patch: Partial<BoardLead>) => void;
   /** click en la tarjeta → abre el drawer operativo del lead */
   onOpenLead: (lead: BoardLead) => void;
+  /** abre el diálogo de alta del board (empty state del primer uso) */
+  onNewLead: () => void;
 }) {
   const [columns, setColumns] = React.useState<ColumnsMap>(() => buildColumns(leads));
   const [activeLead, setActiveLead] = React.useState<BoardLead | null>(null);
@@ -243,6 +252,37 @@ export function KanbanBoard({
     // y además justDraggedRef bloquea el click fantasma post-drop
     if (justDraggedRef.current) return;
     onOpenLead(lead);
+  }
+
+  /* Tablero sin tarjetas: seis columnas repitiendo "Sin leads" no le dicen nada
+     a nadie, y con la agencia recién arrancada esta es la primera pantalla del
+     sistema. Con filtro puesto el mensaje es otro: hay leads, no matchean. */
+  if (leads.length === 0) {
+    return (
+      <div className="px-4 pb-3 md:px-6">
+        {totalLeads === 0 ? (
+          <EmptyState
+            icon={Kanban}
+            title="Tu pipeline arranca acá"
+            description="Cargá la primera consulta y seguila por las etapas: contactado, presupuestado, negociación y cierre."
+            action={
+              <Button onClick={onNewLead}>
+                <Plus />
+                Cargar el primer lead
+              </Button>
+            }
+            className="py-14 md:py-20"
+          />
+        ) : (
+          <EmptyState
+            icon={SearchX}
+            title="Ningún lead coincide"
+            description="Probá con otro nombre o destino, o pasá el filtro a Todos."
+            className="py-14 md:py-20"
+          />
+        )}
+      </div>
+    );
   }
 
   return (

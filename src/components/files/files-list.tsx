@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ClipboardCheck, Luggage, PlaneTakeoff, Search, SearchX } from "lucide-react";
+import { ClipboardCheck, Luggage, PlaneTakeoff, Plus, Search, SearchX } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import {
   moneyLines,
   type MoneyByCurrency,
 } from "./helpers";
+import { openNewFileDialog } from "./new-file-dialog";
 import type { FileListRow } from "./types";
 
 type StatusFilter = "todos" | FileStatus;
@@ -46,6 +47,9 @@ export function FilesList({
 
   const stats = React.useMemo(() => computeStats(byOwner), [byOwner]);
 
+  // moneda con la que más se trabaja: los KPIs sin datos no inventan una moneda
+  const mainCurrency = React.useMemo(() => mostUsedCurrency(byOwner), [byOwner]);
+
   const pendingReview = React.useMemo(
     () => byOwner.filter((r) => r.review_status === "pendiente").length,
     [byOwner],
@@ -70,14 +74,23 @@ export function FilesList({
       <EmptyState
         icon={Luggage}
         title="Todavía no hay files"
-        description="Las ventas nacen del CRM al ganar un lead, o cargá una directa con el botón de arriba."
+        description="Las ventas nacen del CRM al ganar un lead, o cargá una directa acá mismo."
+        action={
+          <Button onClick={openNewFileDialog}>
+            <Plus /> Nuevo file
+          </Button>
+        }
       />
     );
   }
 
   return (
     <div className="animate-slide-up space-y-3">
-      <StatTiles stats={stats} ownerFiltered={owner === "mios"} />
+      <StatTiles
+        stats={stats}
+        ownerFiltered={owner === "mios"}
+        zeroCurrency={mainCurrency}
+      />
 
       {/* búsqueda */}
       <div className="relative">
@@ -202,19 +215,38 @@ function computeStats(rows: FileListRow[]): Stats {
   return { salesMonth, utilityMonth, receivable, upcoming };
 }
 
-function StatTiles({ stats, ownerFiltered }: { stats: Stats; ownerFiltered: boolean }) {
+/** la moneda que más aparece en los files visibles (null si no hay files) */
+function mostUsedCurrency(rows: FileListRow[]): string | null {
+  const uses = new Map<string, number>();
+  for (const r of rows) uses.set(r.currency, (uses.get(r.currency) ?? 0) + 1);
+  return [...uses.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+function StatTiles({
+  stats,
+  ownerFiltered,
+  zeroCurrency,
+}: {
+  stats: Stats;
+  ownerFiltered: boolean;
+  /** moneda del cero cuando el mes no tuvo ventas */
+  zeroCurrency: string | null;
+}) {
   const suffix = ownerFiltered ? " · míos" : "";
   return (
     <div className="grid grid-cols-3 gap-2.5 md:grid-cols-4 md:gap-3">
-      <StatTile label={`Ventas del mes${suffix}`} lines={moneyLines(stats.salesMonth)} />
+      <StatTile
+        label={`Ventas del mes${suffix}`}
+        lines={moneyLines(stats.salesMonth, zeroCurrency)}
+      />
       <StatTile
         label={`Utilidad del mes${suffix}`}
-        lines={moneyLines(stats.utilityMonth)}
+        lines={moneyLines(stats.utilityMonth, zeroCurrency)}
         valueClass="text-money-text"
       />
       <StatTile
         label="Por cobrar"
-        lines={moneyLines(stats.receivable)}
+        lines={moneyLines(stats.receivable, zeroCurrency)}
         valueClass={
           Object.keys(stats.receivable).length > 0 ? "text-tone-amber-text" : "text-money-text"
         }

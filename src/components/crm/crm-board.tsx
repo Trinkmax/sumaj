@@ -13,6 +13,7 @@ import {
   type BranchOption,
   type ConversationRow,
 } from "@/components/chats/types";
+import type { WaSendCapability } from "@/components/chats/embedded-chat";
 import type { Tables } from "@/lib/types";
 import { KanbanBoard } from "./kanban-board";
 import { FunnelView } from "./funnel-view";
@@ -38,7 +39,7 @@ export function CrmBoard({
   meId,
   isAdmin,
   agencyId,
-  waConnected,
+  waSend,
   initialView,
   initialConversationId,
 }: {
@@ -50,7 +51,8 @@ export function CrmBoard({
   meId: string;
   isAdmin: boolean;
   agencyId: string;
-  waConnected: boolean;
+  /** capacidad real de enviar por WhatsApp (worker / Cloud API) */
+  waSend: WaSendCapability;
   /** null = la URL no trae ?vista= → se usa la última vista guardada en localStorage */
   initialView: CrmView | null;
   initialConversationId: string | null;
@@ -228,6 +230,9 @@ export function CrmBoard({
                   .eq("id", row.assigned_to)
                   .maybeSingle()
               : Promise.resolve({ data: null }),
+            // un contacto puede tener DOS hilos (número madre y sucursal): la
+            // tarjeta abre el mismo que ensureConversation — la sucursal manda
+            // y, entre iguales, el del último mensaje
             supabase
               .from("conversations")
               .select(
@@ -235,6 +240,9 @@ export function CrmBoard({
               )
               .eq("contact_id", row.contact_id)
               .eq("channel", "whatsapp")
+              .order("branch_id", { ascending: false, nullsFirst: false })
+              .order("last_message_at", { ascending: false, nullsFirst: false })
+              .limit(1)
               .maybeSingle(),
           ]);
           if (!contact) return;
@@ -408,8 +416,10 @@ export function CrmBoard({
         <div className="pt-3">
           <KanbanBoard
             leads={filtered}
+            totalLeads={leads.length}
             onPatch={patchLead}
             onOpenLead={(lead) => setOpenLeadId(lead.id)}
+            onNewLead={() => setNewOpen(true)}
           />
         </div>
       ) : view === "chats" ? (
@@ -419,7 +429,7 @@ export function CrmBoard({
           agencyId={agencyId}
           meId={meId}
           isAdmin={isAdmin}
-          waConnected={waConnected}
+          waSend={waSend}
           members={members}
           branches={branches}
           initialConversationId={chatConvId}
@@ -459,7 +469,7 @@ export function CrmBoard({
         members={members}
         meId={meId}
         isAdmin={isAdmin}
-        waConnected={waConnected}
+        waSend={waSend}
         onLeadChanged={patchLead}
       />
     </>

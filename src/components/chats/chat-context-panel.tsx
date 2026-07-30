@@ -77,6 +77,23 @@ function PanelSkeleton() {
   );
 }
 
+/** Sin contacto no hay nada que cargar: se dice, no se deja girando el skeleton. */
+function PanelNoContact() {
+  return (
+    <div className="px-4 py-6">
+      <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-wa-line px-4 py-10 text-center">
+        <span className="mb-1 flex size-12 items-center justify-center rounded-full bg-wa-panel-alt text-wa-ink-faint">
+          <UserRound className="size-5" strokeWidth={1.75} />
+        </span>
+        <p className="text-[14px] font-medium text-wa-ink">No pudimos cargar el contacto</p>
+        <p className="max-w-[240px] text-[12.5px] leading-relaxed text-wa-ink-faint">
+          Puede que el chat ya no exista. Volvé a la lista y elegí otra conversación.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Panel de herramientas del chat (estilo "info del contacto" de WhatsApp Web):
  * contacto + etiquetas, oportunidad con stepper de etapa, próxima acción,
@@ -266,6 +283,7 @@ export function ChatContextPanel({
 
   const currentIdx = lead ? ACTIVE_STAGES.findIndex((s) => s.key === lead.stage) : -1;
   const due = lead?.next_action_at ? fmtDue(lead.next_action_at) : null;
+  // skeleton SOLO mientras hay algo cargándose de verdad
   const loading = contact != null && data == null;
 
   return (
@@ -287,7 +305,9 @@ export function ChatContextPanel({
       )}
 
       <div className={cn(showHeader && "min-h-0 flex-1 overflow-y-auto overscroll-contain")}>
-        {loading || !contact ? (
+        {!contact ? (
+          <PanelNoContact />
+        ) : loading ? (
           <PanelSkeleton />
         ) : (
           <>

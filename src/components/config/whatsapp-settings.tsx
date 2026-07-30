@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Bot,
@@ -11,6 +12,7 @@ import {
   KeyRound,
   Megaphone,
   MessageSquareReply,
+  Plus,
   Smartphone,
   Store,
   TriangleAlert,
@@ -20,7 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { EmptyState, Switch } from "@/components/ui/misc";
-import { updateChannelSettings } from "@/lib/actions/branches";
+import { createMotherChannel, updateChannelSettings } from "@/lib/actions/branches";
 import { fmtPhone, fmtRelative } from "@/lib/format";
 import type { Enums } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -171,8 +173,10 @@ export function WhatsappSettings({
   const [autoText, setAutoText] = React.useState(channel?.autoReplyText ?? "");
   const [savingNumber, setSavingNumber] = React.useState(false);
   const [savingReply, setSavingReply] = React.useState(false);
+  const [creating, setCreating] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
   const copyTimer = React.useRef<number | null>(null);
+  const router = useRouter();
   const origin = React.useSyncExternalStore<string | null>(
     subscribeOrigin,
     clientOrigin,
@@ -189,6 +193,18 @@ export function WhatsappSettings({
   const base = webhookBase ?? origin;
   const webhookUrl = base ? `${base}${WEBHOOK_PATH}` : null;
 
+  async function createMother() {
+    setCreating(true);
+    const res = await createMotherChannel();
+    setCreating(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    toast.success("Número madre listo. Cargale el número y el phone number ID.");
+    router.refresh();
+  }
+
   if (!channel) {
     return (
       <div className="space-y-4">
@@ -196,7 +212,19 @@ export function WhatsappSettings({
         <EmptyState
           icon={Smartphone}
           title="Todavía no hay número madre"
-          description="Se crea junto con la agencia. Si no lo ves, escribile a soporte y lo dejamos listo."
+          description={
+            isAdmin
+              ? "Crealo acá y después le cargás el número y los datos de Meta. Hasta entonces las consultas nuevas no tienen por dónde entrar."
+              : "Lo tiene que crear un admin de la agencia. Mientras tanto los leads se cargan a mano y se contesta desde el número de cada sucursal."
+          }
+          action={
+            isAdmin ? (
+              <Button onClick={createMother} loading={creating}>
+                <Plus />
+                Crear el número madre
+              </Button>
+            ) : undefined
+          }
         />
       </div>
     );

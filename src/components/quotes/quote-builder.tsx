@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -8,12 +9,15 @@ import {
   Bus,
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Columns2,
+  Handshake,
   MapPin,
   Palette,
   Plane,
   Plus,
+  ReceiptText,
   RotateCcw,
   Search,
   Send,
@@ -30,6 +34,7 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import {
   AnimatedNumber,
   ChoiceGrid,
+  EmptyState,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -259,7 +264,13 @@ export function QuoteBuilder({
   suppliers: BuilderSupplier[];
   savedNotes: string[];
   defaultTheme: { color: string; font: string };
-  agency: { name: string; logoUrl: string | null; phone: string | null };
+  /** el mail es opcional: entra al pie de la hoja solo si la agencia lo tiene cargado */
+  agency: {
+    name: string;
+    logoUrl: string | null;
+    phone: string | null;
+    email?: string | null;
+  };
   sellerName: string;
   /** la comisión solo la ve el administrador; el vendedor ve un estimado */
   isAdmin: boolean;
@@ -457,10 +468,18 @@ export function QuoteBuilder({
   const nights = nightsBetween(dateFrom || null, dateTo || null);
   const totalPax = paxCount(pax);
 
+  /* la hoja del cliente recién se muestra cuando dice algo real: destino puesto y
+     al menos un servicio con importe. Antes de eso sería una hoja inventada. */
+  const hasPricedItem = rows.some(
+    (r) => parseNum(r.gross) > 0 || (r.costManual && parseNum(r.cost) > 0),
+  );
+  const previewReady = destination.trim().length > 0 && hasPricedItem;
+
   const previewData: QuoteSheetData = {
-    code: initial?.code ?? "P-····",
+    // el código lo pone la DB al guardar: hasta entonces el presupuesto no tiene número
+    code: initial?.code ?? "",
     title: title.trim() || null,
-    destination: destination.trim() || "Tu próximo destino",
+    destination: destination.trim(),
     currency,
     pax,
     nights,
@@ -479,6 +498,7 @@ export function QuoteBuilder({
     agencyName: agency.name,
     agencyLogoUrl: agency.logoUrl,
     agencyPhone: agency.phone,
+    agencyEmail: agency.email ?? null,
     sellerName,
     items: commonRows
       .filter((r) => r.description.trim())
@@ -1104,6 +1124,25 @@ export function QuoteBuilder({
             )}
           </section>
 
+          {/* sin proveedores cargados la comisión del mayorista no se autocompleta */}
+          {suppliers.length === 0 && (
+            <Link
+              href="/config/proveedores"
+              className="flex items-center gap-3 rounded-2xl border border-dashed border-line-strong/70 bg-sand-soft/30 px-4 py-3.5 transition-all tap-highlight-none hover:border-brand-500 hover:bg-brand-tint/40 active:scale-[0.99]"
+            >
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-brand-tint text-brand-text">
+                <Handshake className="size-5" strokeWidth={1.9} />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-ink">Cargá tus proveedores</span>
+                <span className="block text-xs text-ink-faint">
+                  Con el mayorista elegido, el % de comisión de cada ítem sale solo.
+                </span>
+              </span>
+              <ChevronRight className="ml-auto size-4 shrink-0 text-ink-faint" />
+            </Link>
+          )}
+
           {/* ítems: aéreos */}
           <section className={cn(sectionCard, "@container")}>
             <ItemGroupHeader
@@ -1591,7 +1630,21 @@ export function QuoteBuilder({
             >
               Así lo ve tu cliente
             </p>
-            <QuoteSheet data={previewData} />
+            {previewReady ? (
+              <QuoteSheet data={previewData} />
+            ) : (
+              <div className="mx-auto w-full max-w-[420px]">
+                <EmptyState
+                  icon={ReceiptText}
+                  title="Todavía no hay nada que mostrar"
+                  description={
+                    destination.trim()
+                      ? "Cargá el importe de un servicio y acá aparece la hoja tal cual la recibe tu cliente."
+                      : "Poné el destino y el importe de un servicio: acá aparece la hoja tal cual la recibe tu cliente."
+                  }
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

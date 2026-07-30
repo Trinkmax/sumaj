@@ -34,8 +34,28 @@ export const CONSEJOS: string[] = [
   "La constancia le gana al talento, sobre todo los lunes.",
 ];
 
-/** Índice estable por día del año + member id (sin aleatoriedad en render). */
-export function consejoDelDia(memberId: string, date: Date): string {
+/**
+ * Frases para los primeros días: sin cartera cargada, "reflotá un presupuesto dormido"
+ * suena a hueco. Estas hablan de lo único que se puede hacer todavía: llenar el sistema.
+ */
+export const CONSEJOS_ARRANQUE: string[] = [
+  "Pipeline vacío no es un problema: es la hoja en blanco de la temporada.",
+  "Empezá por el lead más caliente que tengas dando vueltas en el WhatsApp.",
+  "Vinculá el número de la sucursal: desde ahí las consultas entran solas.",
+  "Cargá los clientes que ya viajaron con vos. En un mes lo vas a agradecer.",
+  "Armá el primer presupuesto y mandalo con link: el cliente lo abre del celular.",
+  "Dejá la respuesta automática lista antes de que llegue la primera consulta.",
+  "Invitá al equipo desde Configuración y que todos miren el mismo tablero.",
+  "Cargá una venta que ya cerraste y mirá cómo queda el file con sus pagos.",
+  "Revisá proveedores y etiquetas hoy: cuando entren los leads no hay tiempo.",
+  "Lo que cargás ahora es lo que después vas a poder medir.",
+];
+
+/**
+ * Índice estable por día del año + member id (sin aleatoriedad en render).
+ * `arranque` cambia el mazo mientras la agencia todavía no tiene nada cargado.
+ */
+export function consejoDelDia(memberId: string, date: Date, arranque = false): string {
   const startOfYear = new Date(date.getFullYear(), 0, 1);
   const dayOfYear = Math.floor(
     (date.getTime() - startOfYear.getTime()) / 86_400_000,
@@ -44,5 +64,6 @@ export function consejoDelDia(memberId: string, date: Date): string {
   for (let i = 0; i < memberId.length; i++) {
     hash = (hash * 31 + memberId.charCodeAt(i)) % 9973;
   }
-  return CONSEJOS[(dayOfYear + hash) % CONSEJOS.length];
+  const frases = arranque ? CONSEJOS_ARRANQUE : CONSEJOS;
+  return frases[(dayOfYear + hash) % frases.length];
 }

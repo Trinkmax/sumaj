@@ -1,8 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, Search, SearchX } from "lucide-react";
+import Link from "next/link";
+import { CheckCircle2, Luggage, Plus, Search, SearchX } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/misc";
 import { Avatar } from "@/components/ui/avatar";
@@ -11,18 +13,22 @@ import { cn } from "@/lib/utils";
 import type { DebtorFile } from "./types";
 
 /**
- * Mini-picker: elegir a quién cobrarle (files con saldo > 0)
- * antes de abrir el PaymentDialog.
+ * Mini-picker: elegir a quién cobrarle antes de abrir el PaymentDialog.
+ * Lista los files con saldo y también los que todavía no tienen servicios
+ * cargados: el día que se vende se cobra la seña y los servicios vienen después.
  */
 export function FilePickerDialog({
   open,
   onOpenChange,
-  debtors,
+  files,
+  hasAnyFile,
   onPick,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
-  debtors: DebtorFile[];
+  files: DebtorFile[];
+  /** para distinguir "no hay ninguna venta cargada" de "están todos al día" */
+  hasAnyFile: boolean;
   onPick: (f: DebtorFile) => void;
 }) {
   const [query, setQuery] = React.useState("");
@@ -33,17 +39,17 @@ export function FilePickerDialog({
 
   const q = query.trim().toLowerCase();
   const filtered = q
-    ? debtors.filter(
+    ? files.filter(
         (d) =>
           d.contact_name.toLowerCase().includes(q) ||
           d.code.toLowerCase().includes(q) ||
           d.destination.toLowerCase().includes(q),
       )
-    : debtors;
+    : files;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title="¿A quién le cobrás?" description="Files con saldo pendiente" size="md">
+      <DialogContent title="¿A quién le cobrás?" description="Elegí el file del cobro" size="md">
         <div className="flex flex-col gap-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-ink-faint" />
@@ -57,13 +63,32 @@ export function FilePickerDialog({
           </div>
 
           {filtered.length === 0 ? (
-            <EmptyState
-              icon={q ? SearchX : CheckCircle2}
-              title={q ? "No encontramos nada con eso" : "Nadie debe nada"}
-              description={
-                q ? "Probá con otro nombre o código de file." : "Todos los files están al día."
-              }
-            />
+            q ? (
+              <EmptyState
+                icon={SearchX}
+                title="No encontramos nada con eso"
+                description="Probá con otro nombre o código de file."
+              />
+            ) : hasAnyFile ? (
+              <EmptyState
+                icon={CheckCircle2}
+                title="Nadie debe nada"
+                description="Todos los files están al día."
+              />
+            ) : (
+              <EmptyState
+                icon={Luggage}
+                title="Todavía no hay files"
+                description="Los cobros van sobre un file. Te llevamos a Files para crear el primero."
+                action={
+                  <Link href="/files">
+                    <Button variant="brand">
+                      <Plus /> Crear el primer file
+                    </Button>
+                  </Link>
+                }
+              />
+            )
           ) : (
             <div
               className={cn(
@@ -87,12 +112,18 @@ export function FilePickerDialog({
                       {d.destination}
                     </p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold tabular-nums text-tone-amber-text">
-                      {fmtMoney(d.balance, d.currency)}
-                    </p>
-                    <p className="text-[11px] text-ink-faint">debe</p>
-                  </div>
+                  {d.total_sale > 0.004 ? (
+                    <div className="text-right">
+                      <p className="text-sm font-semibold tabular-nums text-tone-amber-text">
+                        {fmtMoney(d.balance, d.currency)}
+                      </p>
+                      <p className="text-[11px] text-ink-faint">debe</p>
+                    </div>
+                  ) : (
+                    <span className="shrink-0 rounded-full border border-line bg-sand-soft px-2 py-0.5 text-[11px] font-medium text-ink-faint">
+                      Sin servicios
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

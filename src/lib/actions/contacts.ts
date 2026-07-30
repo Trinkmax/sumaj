@@ -8,6 +8,8 @@ import {
   fail,
   logActivity,
   ensureConversation,
+  resolveBranchId,
+  topPosition,
   type ActionResult,
 } from "@/lib/actions/core";
 import { normalizePhone } from "@/lib/format";
@@ -430,26 +432,22 @@ export async function createLeadForContact(
   const { supabase, member, agency } = await requireAction();
   const d = parsed.data;
 
-  // al final de la columna "nuevo" del kanban
-  const { data: top } = await supabase
-    .from("leads")
-    .select("position")
-    .eq("agency_id", agency.id)
-    .eq("stage", "nuevo")
-    .order("position", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // misma sucursal y misma posición que un lead creado desde el CRM: si no,
+  // la consulta queda fuera del ruteo por sucursal y última en la columna
+  const branchId = await resolveBranchId(supabase, agency.id, member.branch_id);
+  const position = await topPosition(supabase, "nuevo");
 
   const { data: lead, error } = await supabase
     .from("leads")
     .insert({
       agency_id: agency.id,
       contact_id: d.contactId,
+      branch_id: branchId,
       stage: "nuevo",
+      position,
       origin_channel: "manual",
       assigned_to: member.id,
       destination: d.destination || null,
-      position: (Number(top?.position) || 0) + 1000,
     })
     .select("id")
     .single();

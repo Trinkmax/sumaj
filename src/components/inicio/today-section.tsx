@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { Clock, MessageCircle, Sparkles, Sun, type LucideIcon } from "lucide-react";
+import { Clock, MessageCircle, Plus, Sparkles, Sun, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmtDue } from "@/lib/format";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 
 export type AgendaItem = {
@@ -28,12 +29,15 @@ export function TodaySection({
   overdueCount,
   unread,
   agenda,
+  emptyPipeline,
 }: {
   newLeads: number;
   followupsCount: number;
   overdueCount: number;
   unread: number;
   agenda: AgendaItem[];
+  /** true cuando no hay cartera todavía: el vacío invita a cargar, no a seguir */
+  emptyPipeline: boolean;
 }) {
   return (
     <section className="flex h-full flex-col">
@@ -75,12 +79,28 @@ export function TodaySection({
       {/* agenda del día */}
       <div className="mt-3 flex min-h-0 flex-1 flex-col md:mt-4">
         {agenda.length === 0 ? (
-          <EmptyState
-            icon={Sun}
-            title="Día despejado"
-            description="No tenés seguimientos pendientes. ¿Un toque a los presupuestados?"
-            className="h-full flex-1 py-6"
-          />
+          emptyPipeline ? (
+            <EmptyState
+              icon={Sparkles}
+              title="Todo listo para arrancar"
+              description="Cargá tu primer lead y acá te van a aparecer los seguimientos del día."
+              action={
+                <Link href="/crm">
+                  <Button variant="brand">
+                    <Plus /> Cargar el primer lead
+                  </Button>
+                </Link>
+              }
+              className="h-full flex-1 py-6"
+            />
+          ) : (
+            <EmptyState
+              icon={Sun}
+              title="Día despejado"
+              description="No tenés seguimientos pendientes. ¿Un toque a los presupuestados?"
+              className="h-full flex-1 py-6"
+            />
+          )
         ) : (
           <div className="card flex min-h-0 flex-1 flex-col overflow-hidden">
             <p className="shrink-0 border-b border-line px-3.5 py-2 text-[13px] font-medium text-ink-soft">

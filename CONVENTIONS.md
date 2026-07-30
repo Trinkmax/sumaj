@@ -48,7 +48,7 @@ Contratos:
 - Envío: `sendMessage()` de `lib/actions/messages.ts` resuelve el canal solo. Handoff: `deriveToBranch({ conversationId, branchId })` (admin) abre/reusa el hilo de la sucursal y devuelve su `conversationId`.
 - Alta/vinculación de números: `lib/actions/branches.ts` (`linkChannel` → QR, `unlinkChannel`, `syncChannel`, `getChannelState` para el polling).
 - `members.branch_id` = sucursal del vendedor (null = ve todas, típico admin). **La asignación de vendedores y la derivación son admin-only.**
-- Si falta el worker o la Cloud API, todo sigue andando: el mensaje se registra con `metadata.simulated` y la UI lo dice.
+- Si falta el worker o la Cloud API, el envío **falla explícito**: `sendMessage`/`sendTemplate` devuelven el motivo (sin teléfono, sucursal no vinculada, worker caído, número madre sin configurar) y no se guarda ninguna fila. Nunca se registra un mensaje como enviado si no salió.
 - `quotes` + `quote_items`: el cotizador. Ítem: `gross` (Bruto comisionable = **lo que se carga a mano**), `cost` (Final = lo que se paga = bruto + fee del grupo), `commission_pct` (comisión mayorista, sale sola del proveedor). Totales SIEMPRE con `computeQuoteTotals()` de `src/lib/domain.ts` — única fuente de verdad. Al guardar, persistir `total_cost`, `total_price`, `commission_total`.
   - **Pasajeros desglosados**: `pax_adults` / `pax_children` / `pax_infants` + `children_ages` (jsonb). `pax` = total (lo mantiene la app). El infante paga el **30%** (`INFANT_FACTOR`): `paxUnits()` da las "unidades de precio" y el precio por persona sale de ahí.
   - **Opciones comparables** (`quote_options`): dos hoteles en un mismo presupuesto. `quote_items.option_id` nulo = servicio común a todas las opciones. Totales por opción con `computeOptionTotals(comunes, opciones, calc)`; cada `quote_options` guarda `total_cost/total_price/per_person`. `quotes.accepted_option_id` = la opción vigente (con la que se vende).
@@ -82,7 +82,7 @@ Contratos:
   export function EmbeddedChat(props: {
     conversationId: string;
     meId: string;            // member.id actual
-    waConnected: boolean;    // agency.settings.whatsapp.connected
+    waSend: WaSendCapability; // { worker, cloud }: infraestructura VIVA, no la preferencia guardada
     onQuoteRequest?: () => void; // si viene, muestra botón 🧾 para abrir el popup de presupuesto
     className?: string;
   })

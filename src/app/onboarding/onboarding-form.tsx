@@ -59,10 +59,13 @@ function ErrorNote({ children }: { children: React.ReactNode }) {
 
 export function OnboardingForm({
   userId,
+  email,
   fullName,
   invitation,
 }: {
   userId: string;
+  /** el de la cuenta, ya normalizado en el server */
+  email: string | null;
   fullName: string;
   invitation: Invitation | null;
 }) {
@@ -83,6 +86,7 @@ export function OnboardingForm({
       user_id: userId,
       role: invitation.role,
       display_name: invitation.displayName ?? displayName ?? fullName,
+      email,
       commission_pct: invitation.commissionPct,
     });
     if (memberError) {
@@ -123,6 +127,7 @@ export function OnboardingForm({
       user_id: userId,
       role: "admin",
       display_name: displayName.trim() || fullName,
+      email,
     });
 
     if (memberError) {

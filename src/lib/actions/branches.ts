@@ -356,6 +356,76 @@ export async function updateChannelSettings(
   return succeed(null);
 }
 
+/**
+ * Respuesta automática con la que nace el número madre: la misma que dejó el
+ * backfill de la 0014, así todas las agencias arrancan con el mismo texto.
+ */
+const MOTHER_AUTO_REPLY =
+  "¡Hola! Gracias por escribirnos. En un ratito te contacta uno de nuestros asesores para armarte el viaje. Contanos destino y fechas mientras tanto y vamos adelantando.";
+
+/**
+ * Crea el número madre de la agencia (Cloud API) si todavía no lo tiene. Es la
+ * puerta por donde entran las consultas nuevas: sin esa fila, /config/whatsapp
+ * no tiene nada que configurar y el webhook no sabe a qué canal atribuir el
+ * mensaje. Idempotente a propósito — hay un índice único parcial de un solo
+ * madre por agencia, así que si dos clicks corren a la vez devolvemos el que ganó.
+ */
+export async function createMotherChannel(): Promise<ActionResult<{ channelId: string }>> {
+  const { supabase, agency, isAdmin } = await requireAction();
+  if (!isAdmin) return fail(ADMIN_ONLY);
+
+  async function findMother() {
+    const { data } = await supabase
+      .from("wa_channels")
+      .select("id")
+      .eq("agency_id", agency.id)
+      .eq("is_mother", true)
+      .maybeSingle();
+    return data?.id ?? null;
+  }
+
+  const already = await findMother();
+  if (already) return succeed({ channelId: already });
+
+  const { data: created, error } = await supabase
+    .from("wa_channels")
+    .insert({
+      agency_id: agency.id,
+      branch_id: null,
+      kind: "cloud_api",
+      is_mother: true,
+      label: "Número madre",
+      status: "desconectado",
+      auto_reply_enabled: true,
+      auto_reply_text: MOTHER_AUTO_REPLY,
+    })
+    .select("id")
+    .single();
+
+  if (error || !created) {
+    // 23505 = unique_violation del índice de un solo madre: releemos al ganador
+    if (error?.code === "23505") {
+      const winner = await findMother();
+      if (winner) {
+        revalidatePath("/config/whatsapp");
+        revalidateBranches();
+        return succeed({ channelId: winner });
+      }
+    }
+    return fail("No se pudo crear el número madre. Probá de nuevo.");
+  }
+
+  await logActivity({
+    agencyId: agency.id,
+    type: "sistema",
+    body: "Se creó el número madre de la agencia",
+  });
+
+  revalidatePath("/config/whatsapp");
+  revalidateBranches();
+  return succeed({ channelId: created.id });
+}
+
 /* ───────────────────────────────────────────
    Reglas de derivación del número madre
    ─────────────────────────────────────────── */

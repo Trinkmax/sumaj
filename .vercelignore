@@ -1,0 +1,4 @@
+# El worker de WhatsApp (Baileys) se despliega aparte: necesita un proceso
+# persistente con el WebSocket abierto, no anda en serverless. Sus dependencias
+# tampoco están en el package.json de la app.
+worker

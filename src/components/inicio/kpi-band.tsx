@@ -3,7 +3,7 @@
 import * as React from "react";
 import { TrendingDown, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { fmtMoney } from "@/lib/format";
+import { fmtMoney, fmtNumber } from "@/lib/format";
 import { AnimatedNumber, Segmented } from "@/components/ui/misc";
 import { moneyEntries, type MoneyByCurrency } from "@/components/inicio/money-multi";
 
@@ -26,6 +26,7 @@ export function KpiBand({
   mineStats,
   agencyStats,
   currency,
+  currencyKnown,
 }: {
   /** true para vendedores: pueden alternar Míos / Agencia */
   showToggle: boolean;
@@ -33,6 +34,8 @@ export function KpiBand({
   agencyStats: MonthStats;
   /** moneda dominante del mes */
   currency: string;
+  /** false sin ningún file cargado: mostramos el 0 pelado en vez de inventarle moneda */
+  currencyKnown: boolean;
 }) {
   const [scope, setScope] = React.useState<"mine" | "agency">(
     showToggle && mineStats ? "mine" : "agency",
@@ -63,6 +66,7 @@ export function KpiBand({
           label="Ventas del mes"
           amounts={stats.sales}
           currency={currency}
+          currencyKnown={currencyKnown}
           extra={
             delta !== null ? (
               <span
@@ -81,14 +85,25 @@ export function KpiBand({
             ) : undefined
           }
         />
-        <KpiTile label="Utilidad" amounts={stats.utility} currency={currency} />
+        <KpiTile
+          label="Utilidad"
+          amounts={stats.utility}
+          currency={currency}
+          currencyKnown={currencyKnown}
+        />
         <KpiTile
           label="Cobrado"
           amounts={stats.collected}
           currency={currency}
+          currencyKnown={currencyKnown}
           valueClassName="text-money-text"
         />
-        <KpiTile label="Por cobrar" amounts={stats.receivable} currency={currency} />
+        <KpiTile
+          label="Por cobrar"
+          amounts={stats.receivable}
+          currency={currency}
+          currencyKnown={currencyKnown}
+        />
       </div>
     </section>
   );
@@ -98,12 +113,14 @@ function KpiTile({
   label,
   amounts,
   currency,
+  currencyKnown,
   extra,
   valueClassName,
 }: {
   label: string;
   amounts: MoneyByCurrency;
   currency: string;
+  currencyKnown: boolean;
   extra?: React.ReactNode;
   valueClassName?: string;
 }) {
@@ -117,7 +134,9 @@ function KpiTile({
         <AnimatedNumber
           value={primary}
           from={0}
-          format={(n) => fmtMoney(Math.round(n), currency)}
+          format={(n) =>
+            currencyKnown ? fmtMoney(Math.round(n), currency) : fmtNumber(Math.round(n))
+          }
           className={cn(
             "min-w-0 text-lg font-semibold leading-none text-ink md:text-xl",
             valueClassName,

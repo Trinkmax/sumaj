@@ -7,6 +7,8 @@ export type PaymentFile = {
   currency: string;
   contact_id: string | null;
   contact_name: string;
+  /** venta total del file: 0 = todavía no tiene servicios cargados */
+  total_sale: number;
   balance: number;
 };
 

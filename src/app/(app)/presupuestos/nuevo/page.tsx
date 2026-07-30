@@ -84,7 +84,12 @@ export default async function NuevoPresupuestoPage({
         suppliers={suppliers}
         savedNotes={settings.quote_saved_notes ?? []}
         defaultTheme={settings.quote_theme ?? { color: "sand", font: "editorial" }}
-        agency={{ name: agency.name, logoUrl: agency.logo_url, phone: agency.phone }}
+        agency={{
+          name: agency.name,
+          logoUrl: agency.logo_url,
+          phone: agency.phone,
+          email: agency.email,
+        }}
         sellerName={member.display_name}
         isAdmin={isAdmin}
         fees={settings.quote_fees ?? DEFAULT_QUOTE_FEES}

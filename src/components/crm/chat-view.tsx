@@ -21,7 +21,7 @@ import { Select } from "@/components/ui/input";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { EmptyState, Tooltip } from "@/components/ui/misc";
 import { ConversationList } from "@/components/chats/conversation-list";
-import { EmbeddedChat } from "@/components/chats/embedded-chat";
+import { EmbeddedChat, type WaSendCapability } from "@/components/chats/embedded-chat";
 import { ChatContextPanel } from "@/components/chats/chat-context-panel";
 import {
   CONVERSATION_SELECT,
@@ -90,7 +90,7 @@ export function ChatView({
   agencyId,
   meId,
   isAdmin,
-  waConnected,
+  waSend,
   members,
   branches,
   initialConversationId,
@@ -103,7 +103,8 @@ export function ChatView({
   meId: string;
   /** la asignación de vendedores y la derivación son solo de admins */
   isAdmin: boolean;
-  waConnected: boolean;
+  /** capacidad real de enviar por WhatsApp (worker / Cloud API) */
+  waSend: WaSendCapability;
   members: MemberOption[];
   /** sucursales activas con su número (filtro de la lista + derivar) */
   branches: BranchOption[];
@@ -201,8 +202,15 @@ export function ChatView({
         .maybeSingle();
       if (cancelled) return;
       const fresh = (data ?? null) as unknown as ConversationRow | null;
+      /* ?c= de un chat que ya no existe (bookmark viejo): sin esto el header
+         quedaba vacío para siempre esperando una conversación fantasma */
+      if (!fresh) {
+        toast.error("Ese chat ya no existe. Elegí otra conversación de la lista.");
+        select(null);
+        return;
+      }
       setConv(fresh);
-      if (!fresh?.contact_id) return;
+      if (!fresh.contact_id) return;
       const { data: leadData } = await supabase
         .from("leads")
         .select("id, destination, stage")
@@ -216,7 +224,7 @@ export function ChatView({
     return () => {
       cancelled = true;
     };
-  }, [selectedId]);
+  }, [selectedId, select]);
 
   // mientras carga el refetch, el header se pinta con la fila de la lista
   const listRow = selectedId
@@ -407,7 +415,7 @@ export function ChatView({
                   <EmbeddedChat
                     conversationId={selectedId}
                     meId={meId}
-                    waConnected={waConnected}
+                    waSend={waSend}
                     onQuoteRequest={() => setQuoteOpen(true)}
                     className="flex-1"
                   />
@@ -498,7 +506,7 @@ export function ChatView({
           <EmbeddedChat
             conversationId={selectedId}
             meId={meId}
-            waConnected={waConnected}
+            waSend={waSend}
             onQuoteRequest={() => setQuoteOpen(true)}
             className="flex-1"
           />

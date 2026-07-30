@@ -1,8 +1,17 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Rutas que no requieren sesión
-const PUBLIC_PREFIXES = ["/login", "/registro", "/p/", "/r/", "/api/public"];
+/**
+ * Rutas que no requieren sesión.
+ *
+ * `/api/wa` son los webhooks de WhatsApp: los llama Meta (Cloud API), el worker
+ * de Baileys y el cron, ninguno con cookie de usuario. Si el proxy los mandara
+ * al login, la verificación del webhook de Meta fallaría y no entraría ninguna
+ * consulta. Cada uno valida lo suyo por su cuenta y RECHAZA si le falta el
+ * secreto: firma con el App Secret de Meta (verify token en el GET de
+ * verificación), firma HMAC del worker y x-cron-secret del cron.
+ */
+const PUBLIC_PREFIXES = ["/login", "/registro", "/p/", "/r/", "/api/public", "/api/wa"];
 
 function isPublic(pathname: string) {
   return PUBLIC_PREFIXES.some(

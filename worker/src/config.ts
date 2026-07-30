@@ -14,8 +14,12 @@ export const config = {
   /** Supabase con service role: el worker escribe estado de sesión y credenciales. */
   supabaseUrl: required("SUPABASE_URL"),
   supabaseServiceKey: required("SUPABASE_SERVICE_ROLE_KEY"),
-  /** La app viajerOS, para avisarle de los mensajes entrantes. */
-  appUrl: (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, ""),
+  /**
+   * La app viajerOS, para avisarle de los mensajes entrantes. Sin valor por
+   * defecto a propósito: un worker apuntando a un localhost que no existe
+   * arranca "sano" y pierde cada consulta en un console.error.
+   */
+  appUrl: required("APP_URL").replace(/\/$/, ""),
   /** Secreto compartido: firma HMAC de los eventos que manda el worker. */
   webhookSecret: required("WA_WEBHOOK_SECRET"),
   /** Secreto compartido: la app se autentica contra el worker con este bearer. */

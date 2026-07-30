@@ -74,7 +74,21 @@ export default async function PublicReceiptPage({
 
   const isCross = r.currency !== r.file_currency && !!r.exchange_rate;
   const converted = isCross ? round2(Number(r.amount) / Number(r.exchange_rate)) : null;
-  const settled = Number(r.balance) <= 0.004;
+
+  const totalSale = Number(r.total_sale);
+  const paidTotal = Number(r.paid_total);
+  /** sin servicios cargados el file no tiene venta: no hay estado de cuenta que mostrar
+      (y el balance queda negativo, así que el sello de saldado sería falso) */
+  const hasSale = totalSale > 0.004;
+  const settled = hasSale && Number(r.balance) <= 0.004;
+  /** el acumulado solo suma información si este cobro no es el único */
+  const hasEarlierPayments = round2(paidTotal - (converted ?? Number(r.amount))) > 0.004;
+
+  const contactLines = [
+    r.agency.name,
+    r.agency.phone ? fmtPhone(r.agency.phone) : null,
+    r.agency.email,
+  ].filter(Boolean);
 
   return (
     <main
@@ -155,55 +169,72 @@ export default async function PublicReceiptPage({
           </p>
         )}
 
-        <div className="my-6">
-          <Divider color={color.accent} />
-        </div>
-
-        {/* estado de cuenta */}
-        <p
-          className="mb-3 text-[11px] uppercase"
-          style={{ color: color.accent, letterSpacing: "0.25em" }}
-        >
-          Estado de cuenta
-        </p>
-        <div className="mx-auto flex max-w-[320px] flex-col gap-1.5 text-sm">
-          <div className="flex items-baseline justify-between">
-            <span style={{ opacity: 0.7 }}>Total del viaje</span>
-            <span className="tabular-nums">
-              {fmtMoney(Number(r.total_sale), r.file_currency)}
-            </span>
-          </div>
-          <div className="flex items-baseline justify-between">
-            <span style={{ opacity: 0.7 }}>Pagado</span>
-            <span className="tabular-nums">
-              {fmtMoney(Number(r.paid_total), r.file_currency)}
-            </span>
-          </div>
-          {settled ? (
-            <p
-              className="mx-auto mt-3 inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-semibold uppercase"
-              style={{
-                color: color.accent,
-                borderColor: `${color.accent}55`,
-                letterSpacing: "0.2em",
-              }}
-            >
-              <CheckCircle2
-                className="size-4 shrink-0"
-                strokeWidth={1.5}
-                aria-hidden
-              />
-              Saldado
-            </p>
-          ) : (
-            <div className="flex items-baseline justify-between text-base font-semibold">
-              <span>Saldo</span>
-              <span className="tabular-nums">
-                {fmtMoney(Number(r.balance), r.file_currency)}
-              </span>
+        {/* estado de cuenta — solo cuando el viaje ya tiene monto cargado */}
+        {hasSale ? (
+          <>
+            <div className="my-6">
+              <Divider color={color.accent} />
             </div>
-          )}
-        </div>
+            <p
+              className="mb-3 text-[11px] uppercase"
+              style={{ color: color.accent, letterSpacing: "0.25em" }}
+            >
+              Estado de cuenta
+            </p>
+            <div className="mx-auto flex max-w-[320px] flex-col gap-1.5 text-sm">
+              <div className="flex items-baseline justify-between">
+                <span style={{ opacity: 0.7 }}>Total del viaje</span>
+                <span className="tabular-nums">{fmtMoney(totalSale, r.file_currency)}</span>
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span style={{ opacity: 0.7 }}>Pagado</span>
+                <span className="tabular-nums">{fmtMoney(paidTotal, r.file_currency)}</span>
+              </div>
+              {settled ? (
+                <p
+                  className="mx-auto mt-3 inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-semibold uppercase"
+                  style={{
+                    color: color.accent,
+                    borderColor: `${color.accent}55`,
+                    letterSpacing: "0.2em",
+                  }}
+                >
+                  <CheckCircle2
+                    className="size-4 shrink-0"
+                    strokeWidth={1.5}
+                    aria-hidden
+                  />
+                  Saldado
+                </p>
+              ) : (
+                <div className="flex items-baseline justify-between text-base font-semibold">
+                  <span>Saldo</span>
+                  <span className="tabular-nums">
+                    {fmtMoney(Number(r.balance), r.file_currency)}
+                  </span>
+                </div>
+              )}
+            </div>
+          </>
+        ) : hasEarlierPayments ? (
+          <>
+            <div className="my-6">
+              <Divider color={color.accent} />
+            </div>
+            <p
+              className="mb-2 text-[11px] uppercase"
+              style={{ color: color.accent, letterSpacing: "0.25em" }}
+            >
+              A cuenta
+            </p>
+            <p className="text-sm" style={{ opacity: 0.75 }}>
+              Pagado hasta hoy{" "}
+              <span className="font-semibold tabular-nums" style={{ opacity: 1 }}>
+                {fmtMoney(paidTotal, r.file_currency)}
+              </span>
+            </p>
+          </>
+        ) : null}
 
         <div className="my-6">
           <Divider color={color.accent} />
@@ -211,8 +242,7 @@ export default async function PublicReceiptPage({
 
         {/* pie */}
         <p className="text-sm" style={{ opacity: 0.75 }}>
-          {r.agency.name}
-          {r.agency.phone ? ` · ${fmtPhone(r.agency.phone)}` : ""}
+          {contactLines.join(" · ")}
         </p>
         <p className="mt-4 text-[11px]" style={{ color: color.accent, opacity: 0.9 }}>
           hecho con viajerOS

@@ -33,7 +33,12 @@ type QuotePublic = {
   theme: { color?: string; font?: string } | null;
   created_at: string;
   contact_name: string | null;
-  agency: { name: string; logo_url: string | null; phone: string | null };
+  agency: {
+    name: string;
+    logo_url: string | null;
+    phone: string | null;
+    email: string | null;
+  };
   seller_name: string | null;
   items: { type: ServiceType; description: string }[];
 };
@@ -308,7 +313,13 @@ export async function GET(
         >
           {divider}
           <div style={{ display: "flex", marginTop: 10, fontSize: 15, ...soft }}>
-            {[quote.seller_name, quote.agency.name, quote.agency.phone ? fmtPhone(quote.agency.phone) : null]
+            {/* del contacto de la agencia va lo que exista: sin teléfono no queda un separador colgado */}
+            {[
+              quote.seller_name,
+              quote.agency.name,
+              quote.agency.phone ? fmtPhone(quote.agency.phone) : null,
+              quote.agency.email,
+            ]
               .filter(Boolean)
               .join(" · ")}
           </div>

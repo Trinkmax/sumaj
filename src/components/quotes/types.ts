@@ -18,7 +18,12 @@ export type QuoteBuilderData = {
   suppliers: BuilderSupplier[];
   savedNotes: string[];
   defaultTheme: { color: string; font: string };
-  agency: { name: string; logoUrl: string | null; phone: string | null };
+  agency: {
+    name: string;
+    logoUrl: string | null;
+    phone: string | null;
+    email: string | null;
+  };
   sellerName: string;
   /** la comisión solo la ve el admin; el vendedor ve el estimado sobre el markup */
   isAdmin: boolean;

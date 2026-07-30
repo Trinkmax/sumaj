@@ -25,7 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { EmptyState, Segmented, Skeleton, Tooltip } from "@/components/ui/misc";
-import { EmbeddedChat } from "@/components/chats/embedded-chat";
+import { EmbeddedChat, type WaSendCapability } from "@/components/chats/embedded-chat";
 import { QuoteDialog } from "@/components/quotes/quote-dialog";
 import { getLeadConversationId, reassignLead, updateLeadStage } from "@/lib/actions/leads";
 import type { LeadStage, TripType } from "@/lib/types";
@@ -63,7 +63,7 @@ export function LeadDrawer({
   members,
   meId,
   isAdmin,
-  waConnected,
+  waSend,
   onLeadChanged,
 }: {
   lead: BoardLead | null;
@@ -73,7 +73,8 @@ export function LeadDrawer({
   meId: string;
   /** la asignación de vendedores la maneja un admin */
   isAdmin: boolean;
-  waConnected: boolean;
+  /** capacidad real de enviar por WhatsApp (worker / Cloud API) */
+  waSend: WaSendCapability;
   onLeadChanged: (id: string, patch: Partial<BoardLead>) => void;
 }) {
   const router = useRouter();
@@ -399,7 +400,7 @@ export function LeadDrawer({
                     <EmbeddedChat
                       conversationId={conversationId}
                       meId={meId}
-                      waConnected={waConnected}
+                      waSend={waSend}
                       onQuoteRequest={() => setQuoteOpen(true)}
                       className="flex-1"
                     />

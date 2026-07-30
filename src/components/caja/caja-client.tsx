@@ -17,8 +17,11 @@ import {
   HandCoins,
   Hourglass,
   Link2,
+  Luggage,
   MessageCircle,
   PartyPopper,
+  Plus,
+  ReceiptText,
   Shuffle,
   Trash2,
   TrendingUp,
@@ -81,15 +84,20 @@ function moneyEntries(m: MoneyByCurrency): [string, number][] {
 function MoneyMulti({
   amounts,
   className,
-  zeroCurrency = "USD",
+  zeroCurrency,
 }: {
   amounts: MoneyByCurrency;
   className?: string;
-  zeroCurrency?: string;
+  /** moneda del cero cuando no hay montos; sin ella se muestra un guion */
+  zeroCurrency?: string | null;
 }) {
   const entries = moneyEntries(amounts);
   if (entries.length === 0) {
-    return <span className={cn("tabular-nums", className)}>{fmtMoney(0, zeroCurrency)}</span>;
+    return (
+      <span className={cn("tabular-nums", className)}>
+        {zeroCurrency ? fmtMoney(0, zeroCurrency) : "—"}
+      </span>
+    );
   }
   const [first, ...rest] = entries;
   return (
@@ -125,6 +133,7 @@ function StatTile({
   label,
   amounts,
   numberClass,
+  zeroCurrency,
   compact = false,
   className,
 }: {
@@ -133,12 +142,15 @@ function StatTile({
   label: string;
   amounts: MoneyByCurrency;
   numberClass: string;
+  /** moneda del cero cuando el período no tuvo movimientos; sin ella, un guion */
+  zeroCurrency?: string | null;
   /** para grillas de 4 en mobile: círculo y número más chicos, la plata no se corta */
   compact?: boolean;
   className?: string;
 }) {
   const entries = moneyEntries(amounts);
-  const [cur, val] = entries[0] ?? (["USD", 0] as [string, number]);
+  const empty = entries.length === 0;
+  const [cur, val] = entries[0] ?? ([zeroCurrency ?? "USD", 0] as [string, number]);
   const rest = entries.slice(1);
   const isInt = Math.abs(val % 1) <= 0.004;
   return (
@@ -160,16 +172,28 @@ function StatTile({
       </div>
       <div className="min-w-0">
         <p className="text-xs text-ink-faint">{label}</p>
-        <AnimatedNumber
-          value={val}
-          from={0}
-          format={(n) => fmtMoney(isInt ? Math.round(n) : n, cur)}
-          className={cn(
-            "block truncate font-display text-xl font-semibold md:text-2xl",
-            compact && "text-lg md:text-2xl",
-            numberClass,
-          )}
-        />
+        {empty && !zeroCurrency ? (
+          <p
+            className={cn(
+              "block truncate font-display text-xl font-semibold md:text-2xl",
+              compact && "text-lg md:text-2xl",
+              "text-ink-faint",
+            )}
+          >
+            —
+          </p>
+        ) : (
+          <AnimatedNumber
+            value={val}
+            from={0}
+            format={(n) => fmtMoney(isInt ? Math.round(n) : n, cur)}
+            className={cn(
+              "block truncate font-display text-xl font-semibold md:text-2xl",
+              compact && "text-lg md:text-2xl",
+              numberClass,
+            )}
+          />
+        )}
         {rest.map(([c, v]) => (
           <span key={c} className="block text-xs font-medium tabular-nums text-ink-faint">
             + {fmtMoney(v, c)}
@@ -223,10 +247,12 @@ export function CajaClient({
   stats,
   movements,
   debtors,
+  chargeable,
   commissions,
   suppliers,
   sellers,
   fileOptions,
+  mainCurrency,
   isAdmin,
 }: {
   monthKey: string;
@@ -234,11 +260,16 @@ export function CajaClient({
   initialTab: CajaTab;
   stats: CajaStats;
   movements: Movement[];
+  /** files con saldo: la cuenta corriente y el total por cobrar */
   debtors: DebtorFile[];
+  /** a quién se le puede cobrar: los saldos + los files sin servicios cargados */
+  chargeable: DebtorFile[];
   commissions: CommissionRow[];
   suppliers: SupplierOption[];
   sellers: SellerOption[];
   fileOptions: FileOption[];
+  /** moneda con la que más opera la agencia; null cuando todavía no hay nada cargado */
+  mainCurrency: string | null;
   isAdmin: boolean;
 }) {
   const router = useRouter();
@@ -282,6 +313,7 @@ export function CajaClient({
       currency: d.currency,
       contact_id: d.contact_id,
       contact_name: d.contact_name,
+      total_sale: d.total_sale,
       balance: d.balance,
     });
     setPaymentOpen(true);
@@ -290,7 +322,8 @@ export function CajaClient({
   /** sin fila: liquidación libre · con fila: vendedor + pendiente precargados */
   function openCommission(row?: CommissionRow) {
     if (row) {
-      const [cur, amt] = moneyEntries(row.pending)[0] ?? (["USD", 0] as [string, number]);
+      const [cur, amt] =
+        moneyEntries(row.pending)[0] ?? ([mainCurrency ?? "USD", 0] as [string, number]);
       setCommissionPreset({
         memberId: row.memberId,
         name: row.name,
@@ -339,6 +372,8 @@ export function CajaClient({
   const visibleMovements = movements.filter((m) => !hidden.has(m.id));
   const totalReceivable = moneyEntries(stats.receivable);
   const hasReceivable = totalReceivable.length > 0;
+  /** files ya cargados pero sin servicios: no tienen saldo todavía, y hay que decirlo */
+  const filesWithoutServices = chargeable.filter((f) => f.total_sale <= 0.004).length;
 
   // lo que falta liquidar en el período (suma de las filas visibles)
   const commissionsPending = React.useMemo(() => {
@@ -395,6 +430,7 @@ export function CajaClient({
           label="Cobrado del período"
           amounts={stats.collected}
           numberClass="text-money-text"
+          zeroCurrency={mainCurrency}
           className="col-span-2 md:col-span-1"
         />
         <StatTile
@@ -403,6 +439,7 @@ export function CajaClient({
           label="Pagado a proveedores"
           amounts={stats.supplierPaid}
           numberClass="text-ink"
+          zeroCurrency={mainCurrency}
         />
         <StatTile
           icon={Hourglass}
@@ -410,6 +447,7 @@ export function CajaClient({
           label="Por cobrar total"
           amounts={stats.receivable}
           numberClass={hasReceivable ? "text-tone-amber-text" : "text-ink"}
+          zeroCurrency={mainCurrency}
         />
       </div>
 
@@ -592,11 +630,39 @@ export function CajaClient({
       {/* ── CUENTA CORRIENTE ── */}
       {tab === "cuenta" &&
         (debtors.length === 0 ? (
-          <EmptyState
-            icon={PartyPopper}
-            title="Nadie debe nada"
-            description="Todos los files están saldados. ¡A vender más viajes!"
-          />
+          fileOptions.length === 0 ? (
+            <EmptyState
+              icon={Luggage}
+              title="Todavía no hay ventas cargadas"
+              description="Cuando cargues un file con sus servicios, acá ves lo que falta cobrar."
+              action={
+                <Link href="/files">
+                  <Button variant="brand">
+                    <Plus /> Crear el primer file
+                  </Button>
+                </Link>
+              }
+            />
+          ) : filesWithoutServices > 0 ? (
+            <EmptyState
+              icon={ReceiptText}
+              title="Todavía no hay saldos"
+              description={`${filesWithoutServices} ${
+                filesWithoutServices === 1 ? "file está" : "files están"
+              } sin servicios cargados: el saldo aparece cuando les pongas precio.`}
+              action={
+                <Link href="/files">
+                  <Button variant="secondary">Ir a Files</Button>
+                </Link>
+              }
+            />
+          ) : (
+            <EmptyState
+              icon={PartyPopper}
+              title="Nadie debe nada"
+              description="Todos los files están saldados."
+            />
+          )
         ) : (
           <div className="flex flex-col gap-3 animate-fade-in">
             <div
@@ -709,7 +775,7 @@ export function CajaClient({
               <span className="text-right">
                 {totalReceivable.length === 0 ? (
                   <span className="font-display text-lg font-semibold tabular-nums text-ink">
-                    {fmtMoney(0, "USD")}
+                    {mainCurrency ? fmtMoney(0, mainCurrency) : "—"}
                   </span>
                 ) : (
                   totalReceivable.map(([c, v]) => (
@@ -745,6 +811,7 @@ export function CajaClient({
                 label="Utilidad"
                 amounts={stats.utility}
                 numberClass="text-ink"
+                zeroCurrency={mainCurrency}
               />
               <StatTile
                 compact
@@ -753,6 +820,7 @@ export function CajaClient({
                 label="Comisiones"
                 amounts={stats.commissionsDue}
                 numberClass="text-ink"
+                zeroCurrency={mainCurrency}
               />
               <StatTile
                 compact
@@ -761,6 +829,7 @@ export function CajaClient({
                 label="Pagadas"
                 amounts={stats.commissionsPaid}
                 numberClass="text-money-text"
+                zeroCurrency={mainCurrency}
               />
               <StatTile
                 compact
@@ -769,6 +838,7 @@ export function CajaClient({
                 label="Pendiente"
                 amounts={commissionsPending}
                 numberClass={hasPendingCommissions ? "text-tone-amber-text" : "text-ink"}
+                zeroCurrency={mainCurrency}
               />
             </div>
 
@@ -949,7 +1019,8 @@ export function CajaClient({
       <FilePickerDialog
         open={pickerOpen}
         onOpenChange={setPickerOpen}
-        debtors={debtors}
+        files={chargeable}
+        hasAnyFile={fileOptions.length > 0}
         onPick={openPaymentFor}
       />
       <SupplierPaymentDialog

@@ -221,7 +221,7 @@ export function RoutingRulesManager({
           className="mt-4"
           icon={Route}
           title="Todavía no hay reglas"
-          description='Sirven para que cada consulta caiga en la sucursal correcta: si el mensaje dice "bariloche", que la atienda Centro.'
+          description="Sirven para que cada consulta caiga en la sucursal correcta: si el mensaje nombra un destino, que lo atienda la sucursal que lo vende."
           action={
             canCreate ? (
               <Button onClick={openNew}>

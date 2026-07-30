@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Banknote, Check, DollarSign, Plus, Search } from "lucide-react";
+import { Banknote, Check, DollarSign, Plus, Search, UserPlus } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -13,6 +14,13 @@ import { createFile } from "@/lib/actions/files";
 import { fmtPhone } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ContactOption, MemberOption } from "./types";
+
+/** el botón vive en el PageHeader: esto lo abre desde cualquier lado de la página */
+const OPEN_EVENT = "viajeros:new-file";
+
+export function openNewFileDialog() {
+  window.dispatchEvent(new CustomEvent(OPEN_EVENT));
+}
 
 export function NewFileButton({
   contacts,
@@ -24,6 +32,13 @@ export function NewFileButton({
   myMemberId: string;
 }) {
   const [open, setOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener(OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_EVENT, onOpen);
+  }, []);
+
   return (
     <>
       <Button onClick={() => setOpen(true)}>
@@ -149,9 +164,22 @@ function NewFileDialog({
                 </div>
                 <div className="max-h-48 overflow-y-auto p-1">
                   {filteredContacts.length === 0 ? (
-                    <p className="px-3 py-4 text-center text-[13px] text-ink-faint">
-                      No encontramos contactos. Crealo primero desde Clientes.
-                    </p>
+                    /* sin cliente no hay file: el atajo tiene que ser una acción, no un texto */
+                    <div className="px-3 py-4 text-center">
+                      <p className="text-[13px] text-ink-faint">
+                        {contacts.length === 0
+                          ? "Todavía no cargaste clientes."
+                          : "No encontramos contactos con eso."}
+                      </p>
+                      <Link href="/clientes" className="mt-2.5 inline-block">
+                        <Button variant="secondary" size="sm">
+                          <UserPlus /> Crear el cliente
+                        </Button>
+                      </Link>
+                      <p className="mt-1.5 text-[11px] text-ink-faint">
+                        Te llevamos a Clientes para cargar la ficha.
+                      </p>
+                    </div>
                   ) : (
                     filteredContacts.map((c) => (
                       <button

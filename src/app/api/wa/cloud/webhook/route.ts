@@ -14,6 +14,10 @@ import type { Enums } from "@/lib/types";
  *   URL: {NEXT_PUBLIC_APP_URL}/api/wa/cloud/webhook
  *   Verify token: WA_CLOUD_VERIFY_TOKEN
  *   Campo suscripto: messages
+ *
+ * WA_CLOUD_APP_SECRET (App Secret de la app de Meta) es OBLIGATORIA para recibir
+ * mensajes: sin ella se rechaza todo POST. La verificación (GET) no la usa, así
+ * que la suscripción en Meta se puede configurar antes de cargarla.
  */
 
 export const runtime = "nodejs";
@@ -33,10 +37,19 @@ export async function GET(request: Request) {
   return new NextResponse("Forbidden", { status: 403 });
 }
 
-/** Si está configurado el app secret de Meta, validamos la firma del body. */
+/**
+ * Firma del body con el App Secret de Meta. Sin secreto NO se acepta nada:
+ * /api/wa es público en el proxy y este handler escribe con service role, así que
+ * confiar en el payload sin firma dejaría a cualquiera creando contactos, leads y
+ * mensajes falsos (y gastando la respuesta automática paga de Meta) con solo
+ * adivinar un phone_number_id.
+ */
 function validMetaSignature(raw: string, header: string | null): boolean {
   const secret = process.env.WA_CLOUD_APP_SECRET;
-  if (!secret) return true; // sin app secret configurado no exigimos firma
+  if (!secret) {
+    console.error("[wa/cloud] falta WA_CLOUD_APP_SECRET: no se acepta el webhook");
+    return false;
+  }
   if (!header?.startsWith("sha256=")) return false;
   const expected = createHmac("sha256", secret).update(raw).digest("hex");
   const a = Buffer.from(expected, "utf8");
@@ -85,8 +98,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
   if (!hasAdminClient()) {
+    // 503 y no 200: con un 200 Meta da el mensaje por entregado y no reintenta,
+    // así que la consulta se perdería para siempre. Acá todavía no procesamos
+    // nada del payload y handleInboundMessage deduplica por wa_message_id, así
+    // que el reintento no duplica ni contesta dos veces.
     console.error("[wa/cloud] falta SUPABASE_SERVICE_ROLE_KEY");
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: false }, { status: 503 });
   }
 
   let payload: CloudPayload;
@@ -168,6 +185,7 @@ export async function POST(request: Request) {
     }
   }
 
-  // Meta exige 200 rápido: si devolvemos error reintenta y duplica.
+  // 200: lo que entró ya quedó guardado. Un mensaje suelto que falló queda en el
+  // log y no se pide reintento del lote entero (el resto se procesó bien).
   return NextResponse.json({ ok: true });
 }

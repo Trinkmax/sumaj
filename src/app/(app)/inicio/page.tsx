@@ -184,14 +184,17 @@ export default async function InicioPage() {
   };
 
   const monthFilesAll = files.filter((f) => new Date(f.created_at) >= startMonth);
-  const currency =
+  // sin un solo file cargado no hay forma de saber en qué moneda opera la agencia:
+  // "USD" queda solo como clave interna de los mapas y los KPIs muestran el 0 pelado
+  const dominantCurrency =
     monthFilesAll.map((f) => f.currency).sort(
       (a, b) =>
         monthFilesAll.filter((f) => f.currency === b).length -
         monthFilesAll.filter((f) => f.currency === a).length,
     )[0] ??
     files[0]?.currency ??
-    "USD";
+    null;
+  const currency = dominantCurrency ?? "USD";
 
   // cobros del mes (por paid_at, normalizados a la moneda del file)
   type CobroRow = { amount: number; sellerId: string | null; currency: string };
@@ -362,6 +365,10 @@ export default async function InicioPage() {
     bar: s.headerBar,
   }));
 
+  // sin cartera (ni leads, ni seguimientos, ni chats sin leer) los vacíos invitan a cargar
+  const activeLeads = funnel.reduce((acc, s) => acc + s.count, 0);
+  const emptyPipeline = activeLeads === 0 && followupsCount === 0 && unread === 0;
+
   /* ── header ── */
   const rawToday = now.toLocaleDateString("es-AR", {
     weekday: "long",
@@ -370,7 +377,8 @@ export default async function InicioPage() {
   });
   const todayLabel = rawToday.charAt(0).toUpperCase() + rawToday.slice(1);
   const firstName = member.display_name.trim().split(/\s+/)[0];
-  const consejo = consejoDelDia(member.id, now);
+  // sistema recién estrenado: ni cartera ni ventas, el consejo del día habla de arrancar
+  const consejo = consejoDelDia(member.id, now, emptyPipeline && files.length === 0);
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-6 md:px-6">
@@ -391,6 +399,7 @@ export default async function InicioPage() {
             mineStats={mineStats}
             agencyStats={agencyStats}
             currency={currency}
+            currencyKnown={dominantCurrency !== null}
           />
         </div>
 
@@ -402,6 +411,7 @@ export default async function InicioPage() {
               overdueCount={overdueCount}
               unread={unread}
               agenda={agenda}
+              emptyPipeline={emptyPipeline}
             />
           </div>
           <div className="lg:col-span-7">

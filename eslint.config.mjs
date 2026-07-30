@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // El worker de WhatsApp es un paquete aparte: tiene su package.json,
+    // su tsconfig y sus dependencias (Baileys). No entra en el build de la app.
+    "worker/**",
   ]),
 ]);
 

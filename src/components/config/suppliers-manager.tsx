@@ -24,7 +24,7 @@ export function SuppliersManager({ suppliers }: { suppliers: Supplier[] }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-ink-soft">
-          El % de comisión se autocompleta al cotizar. Tucano Tours ya viene cargado.
+          El % de comisión que le cargues a cada proveedor se autocompleta al cotizar.
         </p>
         <Button onClick={() => setCreateOpen(true)} className="shrink-0">
           <Plus />
@@ -222,7 +222,7 @@ function SupplierDialog({
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Ej: Tucano Tours"
+              placeholder="Nombre del mayorista"
               maxLength={120}
               autoFocus
             />
@@ -234,7 +234,7 @@ function SupplierDialog({
                 id="sup-web"
                 value={website}
                 onChange={(e) => setWebsite(e.target.value)}
-                placeholder="tucanotours.com.ar"
+                placeholder="mayorista.com.ar"
                 inputMode="url"
                 maxLength={200}
               />

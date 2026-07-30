@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import {
   AlarmClock,
@@ -860,6 +861,19 @@ function ServiceDialog({
                   </option>
                 ))}
               </Select>
+              {/* el combo vacío no explica nada: sin proveedores no hay a quién imputarle el pago */}
+              {suppliers.length === 0 && (
+                <p className="mt-1.5 text-[11px] text-ink-faint">
+                  Todavía no cargaste proveedores.{" "}
+                  <Link
+                    href="/config/proveedores"
+                    className="font-medium text-brand-text underline-offset-2 hover:underline"
+                  >
+                    Cargalos en Configuración
+                  </Link>{" "}
+                  y sabés a quién le debés cada reserva.
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor="sv-code">Código de reserva</Label>

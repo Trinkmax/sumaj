@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Clock, ReceiptText, Send, StickyNote } from "lucide-react";
+import Link from "next/link";
+import { Clock, ReceiptText, Send, StickyNote, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Tooltip } from "@/components/ui/misc";
@@ -16,14 +17,103 @@ import type { ActiveLead, MessageRow, TemplateRow } from "./types";
 
 const MAX_COMPOSER_HEIGHT = 132; // ~5 líneas
 
+/** Placeholders de una plantilla: `{{destino}}` — mismo patrón que fillTemplate. */
+const TEMPLATE_VAR_RE = /\{\{(\w+)\}\}/g;
+
+/** Cómo nombrarle al vendedor cada variable que falta. */
+const VAR_LABELS: Record<string, string> = {
+  nombre: "el nombre del contacto",
+  vendedor: "tu nombre",
+  destino: "el destino del lead",
+  fecha: "la fecha del presupuesto",
+};
+
+/**
+ * Capacidad REAL de enviar por WhatsApp, calculada en el server (donde se leen
+ * las envs del worker y de la Cloud API). `agency.settings.whatsapp.connected`
+ * no alcanza: es una preferencia guardada, no la infraestructura viva.
+ */
+export type WaSendCapability = {
+  /** worker de Baileys configurado: los números de las sucursales */
+  worker: boolean;
+  /** Cloud API de Meta configurada: el número madre */
+  cloud: boolean;
+};
+
 type EmbeddedConversation = Pick<
   Tables<"conversations">,
   "id" | "agency_id" | "contact_id" | "status" | "wa_id" | "last_inbound_at" | "unread_count"
 > & {
   contact: Pick<Tables<"contacts">, "id" | "full_name" | "phone"> | null;
   /** por qué número sale el mensaje: define si aplica la ventana de 24 hs */
-  channel_ref: Pick<Tables<"wa_channels">, "id" | "kind" | "label" | "status"> | null;
+  channel_ref: Pick<
+    Tables<"wa_channels">,
+    "id" | "kind" | "label" | "status" | "phone_number_id"
+  > | null;
 };
+
+/** Aviso persistente cuando el mensaje no puede salir. */
+type SendBlock = {
+  title: string;
+  detail: string;
+  link: { href: string; label: string } | null;
+};
+
+/**
+ * Espejo de resolveRoute (lib/actions/messages): el vendedor se entera de que
+ * el mensaje no va a salir ANTES de escribirlo, no con un toast rojo después.
+ */
+function sendBlock(
+  conversation: EmbeddedConversation | null,
+  waSend: WaSendCapability,
+): SendBlock | null {
+  if (!conversation) return null;
+  const channel = conversation.channel_ref;
+  const to = conversation.contact?.phone ?? conversation.wa_id;
+
+  if (!to)
+    return {
+      title: "Sin teléfono",
+      detail: "Este contacto no tiene número cargado, así que el mensaje no puede salir.",
+      link: conversation.contact
+        ? { href: `/clientes/${conversation.contact.id}`, label: "Cargalo en su ficha" }
+        : null,
+    };
+
+  if (!channel)
+    return {
+      title: "Sin número de salida",
+      detail: "Este chat todavía no tiene un WhatsApp asignado para responder.",
+      link: { href: "/config/sucursales", label: "Configuración · Sucursales" },
+    };
+
+  if (channel.kind === "baileys") {
+    if (channel.status !== "conectado")
+      return {
+        title: "Número sin vincular",
+        detail: `El WhatsApp de ${channel.label} no está vinculado, así que no sale nada por acá.`,
+        link: { href: "/config/sucursales", label: "Vinculalo con el QR" },
+      };
+    if (!waSend.worker)
+      return {
+        title: "Servicio de WhatsApp caído",
+        detail:
+          "El servicio que maneja los números de las sucursales no está disponible. Avisale a quien administra el sistema.",
+        link: null,
+      };
+    return null;
+  }
+
+  if (!waSend.cloud || !channel.phone_number_id)
+    return {
+      title: "Número madre sin conectar",
+      detail:
+        "Todavía no está conectada la API de WhatsApp del número madre, así que los mensajes no salen.",
+      link: { href: "/config/whatsapp", label: "Configuración · WhatsApp" },
+    };
+
+  return null;
+}
 
 /**
  * Chat autocontenido para embeber en cualquier lado (drawer del CRM, etc.).
@@ -34,13 +124,13 @@ type EmbeddedConversation = Pick<
 export function EmbeddedChat({
   conversationId,
   meId,
-  waConnected,
+  waSend,
   onQuoteRequest,
   className,
 }: {
   conversationId: string;
   meId: string;
-  waConnected: boolean;
+  waSend: WaSendCapability;
   onQuoteRequest?: () => void;
   className?: string;
 }) {
@@ -71,16 +161,15 @@ export function EmbeddedChat({
   }
 
   const loading = loadedId !== conversationId;
-  /* La ventana de 24 hs es una regla de la API oficial (número madre).
-     Por el número de una sucursal (Baileys) se escribe siempre: es la razón
-     de ser de la arquitectura — el seguimiento no se paga. */
-  const channelKind = conversation?.channel_ref?.kind ?? null;
-  const windowApplies = channelKind !== "baileys";
-  /* ¿el número por el que sale este chat está realmente conectado? */
-  const channelReady =
-    channelKind === "baileys"
-      ? conversation?.channel_ref?.status === "conectado"
-      : waConnected;
+  /* ¿puede salir el mensaje? Mismo criterio que el server: si no, el composer
+     avisa y no deja mandar (antes se guardaba como "enviado" sin salir). */
+  const blocked = useMemo(() => sendBlock(conversation, waSend), [conversation, waSend]);
+  const canSend = conversation != null && blocked == null;
+  /* La ventana de 24 hs es una regla de la Cloud API: se exige SOLO cuando el
+     mensaje va a salir de verdad por el número madre. Por el número de una
+     sucursal (Baileys) se escribe siempre — el seguimiento no se paga — y si el
+     madre no está conectado, la ventana no puede tapar el primer mensaje. */
+  const windowApplies = canSend && conversation?.channel_ref?.kind !== "baileys";
   const windowOpen =
     !windowApplies ||
     (lastInboundAt != null && now - new Date(lastInboundAt).getTime() < WINDOW_MS);
@@ -107,7 +196,7 @@ export function EmbeddedChat({
         supabase
           .from("conversations")
           .select(
-            "id, agency_id, contact_id, status, wa_id, last_inbound_at, unread_count, contact:contacts(id, full_name, phone), channel_ref:wa_channels(id, kind, label, status)",
+            "id, agency_id, contact_id, status, wa_id, last_inbound_at, unread_count, contact:contacts(id, full_name, phone), channel_ref:wa_channels(id, kind, label, status, phone_number_id)",
           )
           .eq("id", conversationId)
           .maybeSingle(),
@@ -287,13 +376,21 @@ export function EmbeddedChat({
   async function handleSend() {
     const text = draft.trim();
     if (!text) return;
-    resetComposer();
     if (noteMode) {
+      // la nota interna no sale de la app: no depende de WhatsApp
+      resetComposer();
       const tempId = makeOptimistic(text, "nota_interna", null);
       const res = await sendInternalNote({ conversationId, body: text });
       if (reconcile(tempId, res)) setNoteMode(false);
       return;
     }
+    if (blocked) {
+      // sin capacidad de envío no inventamos una burbuja: el texto queda
+      // escrito para que no se pierda mientras se arregla el número
+      toast.error(`${blocked.title}. ${blocked.detail}`);
+      return;
+    }
+    resetComposer();
     const tempId = makeOptimistic(text, "texto", null);
     const res = await sendMessage({ conversationId, body: text });
     reconcile(tempId, res);
@@ -307,16 +404,37 @@ export function EmbeddedChat({
     return ok;
   }
 
-  /* ── variables de plantilla (mismo criterio que el hilo completo) ── */
-  const templateVars = useMemo(
-    () => ({
-      nombre: conversation?.contact?.full_name.split(/\s+/)[0] ?? "cliente",
-      vendedor: meName,
-      destino: lead?.destination ?? "tu viaje",
-      fecha: quoteValidUntil ? fmtDate(quoteValidUntil) : "los próximos días",
-    }),
-    [conversation, meName, lead, quoteValidUntil],
-  );
+  /* ── variables de plantilla ──
+     Solo las que se pueden completar de verdad: mandarle "tu viaje" o "los
+     próximos días" a un cliente real es peor que no mandar nada. Lo que falta
+     queda afuera del mapa y la plantilla que lo necesita no se ofrece. */
+  const templateVars = useMemo(() => {
+    const vars: Record<string, string> = {};
+    const nombre = conversation?.contact?.full_name.trim().split(/\s+/)[0];
+    if (nombre) vars.nombre = nombre;
+    if (meName.trim()) vars.vendedor = meName.trim();
+    if (lead?.destination?.trim()) vars.destino = lead.destination.trim();
+    if (quoteValidUntil) vars.fecha = fmtDate(quoteValidUntil);
+    return vars;
+  }, [conversation, meName, lead, quoteValidUntil]);
+
+  /* Plantillas enviables (todas sus variables resueltas) y qué datos faltan
+     para las otras: nunca se manda un placeholder inventado. */
+  const { readyTemplates, missingVars } = useMemo(() => {
+    const missing = new Set<string>();
+    const ready = templates.filter((t) => {
+      const holes = [...t.body.matchAll(TEMPLATE_VAR_RE)]
+        .map((m) => m[1])
+        .filter((v) => templateVars[v] == null);
+      for (const v of holes) missing.add(v);
+      return holes.length === 0;
+    });
+    return { readyTemplates: ready, missingVars: [...missing] };
+  }, [templates, templateVars]);
+
+  const missingVarsLabel = missingVars
+    .map((v) => VAR_LABELS[v] ?? `{{${v}}}`)
+    .join(", ");
 
   const dayGroups = useMemo(() => groupMessagesIntoDayGroups(messages), [messages]);
 
@@ -354,6 +472,32 @@ export function EmbeddedChat({
     </Tooltip>
   );
 
+  /* Aviso persistente: queda arriba del composer todo el tiempo que el chat no
+     pueda enviar. Un placeholder no alcanza — desaparece al primer tecleo. */
+  const sendNotice = blocked && (
+    <div className="flex items-start gap-2.5 border-b border-wa-line bg-wa-panel-alt px-4 py-2.5 text-[12.5px] leading-snug text-wa-ink-soft">
+      <TriangleAlert
+        className="mt-0.5 size-4 shrink-0 text-tone-amber-text"
+        strokeWidth={1.9}
+      />
+      <p className="flex-1">
+        <span className="font-semibold text-wa-ink">{blocked.title}</span> —{" "}
+        {blocked.detail}
+        {blocked.link && (
+          <>
+            {" "}
+            <Link
+              href={blocked.link.href}
+              className="font-medium text-wa-accent-deep underline underline-offset-2"
+            >
+              {blocked.link.label}
+            </Link>
+          </>
+        )}
+      </p>
+    </div>
+  );
+
   const composerBar = (
     <div className="shrink-0 bg-wa-panel-alt px-2.5 py-2 md:px-4">
       <div className="flex items-end gap-1">
@@ -383,13 +527,7 @@ export function EmbeddedChat({
               }
             }}
             rows={1}
-            placeholder={
-              noteMode
-                ? "Escribí una nota interna…"
-                : channelReady
-                  ? "Escribí un mensaje"
-                  : "Escribí un mensaje (envío simulado)"
-            }
+            placeholder={noteMode ? "Escribí una nota interna…" : "Escribí un mensaje"}
             aria-label={noteMode ? "Nota interna" : "Mensaje"}
             className="max-h-[132px] min-h-[44px] w-full resize-none bg-transparent px-3.5 py-[11px] text-[15px] leading-snug text-wa-ink outline-none placeholder:text-wa-ink-faint"
           />
@@ -493,7 +631,10 @@ export function EmbeddedChat({
           </p>
         )}
         {windowOpen ? (
-          composerBar
+          <>
+            {!noteMode && sendNotice}
+            {composerBar}
+          </>
         ) : noteMode ? (
           composerBar
         ) : (
@@ -529,11 +670,26 @@ export function EmbeddedChat({
               )}
             </div>
             <div className="border-t border-wa-line bg-wa-panel-alt px-3 py-3 md:px-4">
-              <TemplatePicker
-                templates={templates}
-                vars={templateVars}
-                onSend={handleSendTemplate}
-              />
+              {templates.length > 0 && readyTemplates.length === 0 ? (
+                <p className="px-1 py-2 text-center text-[13px] leading-relaxed text-wa-ink-faint">
+                  Las plantillas aprobadas necesitan datos que todavía no están
+                  cargados ({missingVarsLabel}). Completalos en el lead para poder
+                  usarlas.
+                </p>
+              ) : (
+                <>
+                  <TemplatePicker
+                    templates={readyTemplates}
+                    vars={templateVars}
+                    onSend={handleSendTemplate}
+                  />
+                  {missingVars.length > 0 && (
+                    <p className="mt-2 px-1 text-[11.5px] leading-snug text-wa-ink-faint">
+                      Hay plantillas que no aparecen porque falta {missingVarsLabel}.
+                    </p>
+                  )}
+                </>
+              )}
             </div>
           </>
         )}
