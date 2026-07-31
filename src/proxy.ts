@@ -11,7 +11,16 @@ import { NextResponse, type NextRequest } from "next/server";
  * secreto: firma con el App Secret de Meta (verify token en el GET de
  * verificación), firma HMAC del worker y x-cron-secret del cron.
  */
-const PUBLIC_PREFIXES = ["/login", "/registro", "/p/", "/r/", "/api/public", "/api/wa"];
+const PUBLIC_PREFIXES = [
+  "/login",
+  "/registro",
+  "/p/",
+  "/r/",
+  "/api/public",
+  "/api/wa",
+  // política de privacidad: Meta la exige pública para publicar la app de WhatsApp
+  "/privacidad",
+];
 
 function isPublic(pathname: string) {
   return PUBLIC_PREFIXES.some(
