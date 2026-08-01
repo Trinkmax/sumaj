@@ -13,6 +13,7 @@ import {
   Megaphone,
   MessageSquareReply,
   Plus,
+  ShieldCheck,
   Smartphone,
   Store,
   TriangleAlert,
@@ -22,7 +23,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { EmptyState, Switch } from "@/components/ui/misc";
-import { createMotherChannel, updateChannelSettings } from "@/lib/actions/branches";
+import {
+  createMotherChannel,
+  registerMotherNumber,
+  updateChannelSettings,
+} from "@/lib/actions/branches";
 import { fmtPhone, fmtRelative } from "@/lib/format";
 import type { Enums } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -70,10 +75,10 @@ const STATUS_META: Record<
     hint: "Las consultas nuevas entran solas y el sistema contesta al toque.",
   },
   listo: {
-    label: "Listo para recibir",
-    chip: "border-tone-emerald-line bg-tone-emerald-soft text-tone-emerald-text",
-    dot: "bg-wa-accent ring-4 ring-wa-accent/15 animate-pulse-dot",
-    hint: "Están cargados el número y la Cloud API. Terminá el webhook en Meta y la primera consulta te aparece en el CRM.",
+    label: "Falta registrarlo en Meta",
+    chip: "border-tone-amber-line bg-tone-amber-soft text-tone-amber-text",
+    dot: "bg-amber-500 ring-4 ring-tone-amber-soft",
+    hint: "Están cargados el número y la Cloud API. Falta el último paso: registrarlo acá abajo. Hasta que no lo hagas, Meta no te entrega ninguna consulta.",
   },
   vinculando: {
     label: "Vinculando",
@@ -174,6 +179,8 @@ export function WhatsappSettings({
   const [savingNumber, setSavingNumber] = React.useState(false);
   const [savingReply, setSavingReply] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
+  const [pin, setPin] = React.useState("");
+  const [registering, setRegistering] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
   const copyTimer = React.useRef<number | null>(null);
   const router = useRouter();
@@ -239,9 +246,11 @@ export function WhatsappSettings({
   const status = STATUS_META[view] ?? STATUS_META.desconectado;
   // el server normaliza el teléfono a dígitos: si comparáramos el texto crudo,
   // el botón Guardar quedaba habilitado para siempre después de guardar
-  const numberDirty =
-    digits(phone) !== digits(channel.phone ?? "") ||
-    phoneNumberId.trim() !== (channel.phoneNumberId ?? "");
+  // el registro sale contra el ID que está en la base, no contra el del input:
+  // con un ID editado y sin guardar, registrar el viejo pasa desapercibido
+  const pnidDirty = phoneNumberId.trim() !== (channel.phoneNumberId ?? "");
+  const numberDirty = digits(phone) !== digits(channel.phone ?? "") || pnidDirty;
+  const registered = channel.status === "conectado";
   const replyDirty = autoText.trim() !== (channel.autoReplyText ?? "").trim();
   const overLimit = autoText.length > AUTO_REPLY_MAX;
 
@@ -262,6 +271,27 @@ export function WhatsappSettings({
       return;
     }
     toast.success("Datos del número madre guardados.");
+  }
+
+  async function register() {
+    if (pnidDirty) {
+      toast.error("Guardá el phone number ID antes de registrar.");
+      return;
+    }
+    if (!/^\d{6}$/.test(pin)) {
+      toast.error("El PIN son 6 números, sin letras ni espacios.");
+      return;
+    }
+    setRegistering(true);
+    const res = await registerMotherNumber({ channelId: ch.id, pin });
+    setRegistering(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    setPin("");
+    toast.success("Número registrado. Ya puede recibir consultas.");
+    router.refresh();
   }
 
   async function toggleAuto(next: boolean) {
@@ -395,6 +425,84 @@ export function WhatsappSettings({
           </p>
         )}
       </section>
+
+      {/* Registro en la Cloud API — el paso que Meta no deja hacer desde su panel.
+          Queda visible aun registrado: si Meta lo da de baja o cambia el phone
+          number ID, este es el único lugar de la app para volver a registrarlo. */}
+      {isAdmin && cloudApiReady && channel.phoneNumberId && (
+        <section className="card p-5 animate-fade-in">
+          <div className="flex items-start gap-3">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-tint text-brand-text">
+              <ShieldCheck className="size-4.5" strokeWidth={1.75} />
+            </div>
+            <div className="min-w-0">
+              <h2 className="font-display text-lg font-semibold text-ink">
+                {registered ? "Volver a registrar el número" : "Registrar el número"}
+              </h2>
+              <p className="text-sm leading-relaxed text-ink-soft">
+                {registered ? (
+                  <>
+                    Ya está registrado. Solo hace falta repetirlo si cambiaste el número, la
+                    cuenta de Meta o si Meta te lo dio de baja.
+                  </>
+                ) : (
+                  <>
+                    Meta da de alta y verifica el número, pero el registro final va por API: en
+                    su panel el botón queda gris y el número se queda en{" "}
+                    <span className="font-medium text-ink">Pendiente</span>. Hasta que no lo
+                    registres acá, no te entrega ninguna consulta.
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 sm:max-w-xs">
+            <Label htmlFor="wa-pin">PIN de 6 dígitos</Label>
+            <Input
+              id="wa-pin"
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder="000000"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={6}
+              aria-describedby="wa-pin-hint"
+              className="font-mono text-[15px] tracking-[0.35em]"
+            />
+            <p id="wa-pin-hint" className="mt-1.5 text-xs leading-relaxed text-ink-faint">
+              Es la verificación en dos pasos del número. Si ya la tenés activa, poné{" "}
+              <span className="font-medium text-ink-soft">ese mismo</span> PIN. Si no, el que
+              cargues queda fijado — anotalo, Meta te lo vuelve a pedir. No queda guardado en el
+              sistema.
+            </p>
+            <p className="mt-1.5 text-xs leading-relaxed text-ink-faint">
+              Si no te acordás, cambialo en{" "}
+              <Crumb parts={["WhatsApp Manager", "el número", "Verificación en dos pasos"]} /> antes
+              de reintentar. No pruebes PINs al azar: a los 10 intentos Meta bloquea el registro
+              del número por 72 horas.
+            </p>
+          </div>
+
+          {pnidDirty && (
+            <p className="mt-3 text-xs text-tone-amber-text">
+              Tenés cambios sin guardar en el phone number ID. Guardalos arriba antes de
+              registrar, o el registro sale con el ID anterior.
+            </p>
+          )}
+
+          <div className="mt-4 flex justify-end">
+            <Button
+              onClick={register}
+              loading={registering}
+              variant={registered ? "secondary" : "primary"}
+              disabled={pin.length !== 6 || pnidDirty}
+            >
+              {registered ? "Volver a registrar" : "Registrar número"}
+            </Button>
+          </div>
+        </section>
+      )}
 
       {/* Respuesta automática */}
       <section className="card p-5 animate-fade-in">

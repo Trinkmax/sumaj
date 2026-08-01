@@ -70,7 +70,19 @@ y mensajes falsos. Por eso el orden importa — primero el secreto, después el 
    campo suscripto `messages`. La verificación (GET) no usa la firma, así que la
    suscripción se puede dejar armada antes de tener el App Secret.
 4. Cargar el `phone_number_id` del número madre en Configuración → WhatsApp.
-5. Vincular por QR el número de cada sucursal en Configuración → Sucursales (pide el worker vivo).
+5. **Registrar el número** en Configuración → WhatsApp. Meta da de alta y verifica el número,
+   pero el registro final va por API (`POST /{phone_number_id}/register`): en el panel nuevo
+   de Meta el botón "Registrarte" queda gris ("number registration is unavailable for this
+   account now") y el número se queda en **Pendiente** para siempre. Mientras esté pendiente
+   Meta **no entrega nada al webhook**, por más que el número esté verificado y la
+   suscripción a `messages` armada.
+   El PIN son los 6 dígitos de la **verificación en dos pasos del número**: si ya está
+   activa hay que mandar el PIN existente (si no, Meta contesta 133005); si no lo está, el
+   que se carga queda fijado. No se guarda en la base, así que hay que anotarlo aparte.
+   Si nadie lo recuerda, resetearlo en WhatsApp Manager → el número → Verificación en dos
+   pasos **antes** de reintentar: Meta permite 10 registros por número cada 72 hs y al
+   pasarse devuelve 133016 y bloquea el número tres días.
+6. Vincular por QR el número de cada sucursal en Configuración → Sucursales (pide el worker vivo).
 
 **Qué falta hoy**: en `.env.local` solo están `NEXT_PUBLIC_SUPABASE_URL`,
 `NEXT_PUBLIC_SUPABASE_ANON_KEY` y `NEXT_PUBLIC_APP_URL`. Faltan cargar
