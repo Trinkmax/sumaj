@@ -72,6 +72,21 @@ const agencySchema = z.object({
         })
         .optional(),
       quote_seller_commission_pct: z.number().min(0).max(100).optional(),
+      legal: z
+        .object({
+          legal_name: z.string().trim().max(160).nullable().optional(),
+          cuit: z.string().trim().max(20).nullable().optional(),
+          address: z.string().trim().max(200).nullable().optional(),
+          city: z.string().trim().max(80).nullable().optional(),
+          province: z.string().trim().max(80).nullable().optional(),
+          postal_code: z.string().trim().max(20).nullable().optional(),
+          country: z.string().trim().max(80).nullable().optional(),
+          phone: z.string().trim().max(40).nullable().optional(),
+          email: z.string().trim().max(160).nullable().optional(),
+          website: z.string().trim().max(200).nullable().optional(),
+          evyt: z.string().trim().max(40).nullable().optional(),
+        })
+        .optional(),
     })
     .optional(),
 });
@@ -106,6 +121,10 @@ export async function updateAgency(
       ...(settingsPatch.quote_fees && { quote_fees: settingsPatch.quote_fees }),
       ...(settingsPatch.quote_seller_commission_pct !== undefined && {
         quote_seller_commission_pct: settingsPatch.quote_seller_commission_pct,
+      }),
+      // merge campo a campo: un patch parcial no tiene que borrar el resto
+      ...(settingsPatch.legal && {
+        legal: { ...(current.legal ?? {}), ...settingsPatch.legal },
       }),
       ...(settingsPatch.whatsapp && {
         whatsapp: {

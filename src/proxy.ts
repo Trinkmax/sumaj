@@ -20,6 +20,10 @@ const PUBLIC_PREFIXES = [
   "/api/wa",
   // política de privacidad: Meta la exige pública para publicar la app de WhatsApp
   "/privacidad",
+  // ficha registral de la agencia: se le pasa el link a quien pida corroborar
+  // los datos (Meta al verificar el negocio, mayoristas, bancos). Sin login,
+  // porque un tercero que verifica no tiene usuario.
+  "/empresa",
 ];
 
 function isPublic(pathname: string) {

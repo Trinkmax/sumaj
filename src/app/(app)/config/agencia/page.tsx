@@ -3,6 +3,7 @@ import { requireMember } from "@/lib/auth";
 import { PageHeader } from "@/components/shell/page-header";
 import { ConfigNav } from "@/components/config/config-nav";
 import { AgencyForm } from "@/components/config/agency-form";
+import { LegalDataForm } from "@/components/config/legal-data-form";
 import { DEFAULT_QUOTE_FEES, DEFAULT_SELLER_MARKUP_PCT } from "@/lib/domain";
 import type { AgencySettings } from "@/lib/types";
 
@@ -38,6 +39,23 @@ export default async function AgenciaPage() {
             },
             quote_seller_commission_pct:
               settings.quote_seller_commission_pct ?? DEFAULT_SELLER_MARKUP_PCT,
+          }}
+        />
+
+        <LegalDataForm
+          isAdmin={isAdmin}
+          initial={{
+            legal_name: settings.legal?.legal_name ?? "",
+            cuit: settings.legal?.cuit ?? "",
+            address: settings.legal?.address ?? "",
+            city: settings.legal?.city ?? "",
+            province: settings.legal?.province ?? "",
+            postal_code: settings.legal?.postal_code ?? "",
+            country: settings.legal?.country ?? "",
+            phone: settings.legal?.phone ?? "",
+            email: settings.legal?.email ?? "",
+            website: settings.legal?.website ?? "",
+            evyt: settings.legal?.evyt ?? "",
           }}
         />
       </div>

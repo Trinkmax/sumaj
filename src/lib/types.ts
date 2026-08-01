@@ -43,6 +43,30 @@ export type AgencySettings = {
     connected: boolean;
   };
   usd_rate?: number | null;
+  /**
+   * Datos registrales de la sociedad — los que piden Meta (verificación del
+   * negocio), ARCA y los que van al pie de los comprobantes. Van acá y no en
+   * columnas de `agencies` porque `name`/`address` son el nombre y la dirección
+   * COMERCIALES (los que ve el cliente), que rara vez coinciden con los del
+   * estatuto. Se publican en /empresa.
+   */
+  legal?: {
+    /** razón social exacta del estatuto, con el tipo societario (S.A.S., S.R.L.) */
+    legal_name?: string | null;
+    cuit?: string | null;
+    /** domicilio de la sede social, como figura en el instrumento constitutivo */
+    address?: string | null;
+    city?: string | null;
+    province?: string | null;
+    postal_code?: string | null;
+    country?: string | null;
+    /** teléfono que figura en los papeles (puede no ser el de WhatsApp) */
+    phone?: string | null;
+    email?: string | null;
+    website?: string | null;
+    /** legajo EVyT: las agencias de viaje argentinas tienen que publicarlo */
+    evyt?: string | null;
+  };
 };
 
 /** imagen adjunta a un servicio del file (voucher, comprobante de reserva) */
