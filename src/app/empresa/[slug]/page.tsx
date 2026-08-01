@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
 import { CopyValue } from "@/components/public/copy-value";
 import type { AgencySettings } from "@/lib/types";
@@ -17,6 +18,11 @@ import type { AgencySettings } from "@/lib/types";
  * usuario logueado. Solo se publica lo que ya es información registral de una
  * sociedad (razón social, CUIT, domicilio legal, contacto): nada de clientes,
  * ventas ni equipo.
+ *
+ * Va scopeada por `slug` y NO por "la primera agencia": leer con service role
+ * saltea RLS, así que sin el slug en la URL una agencia publicaría los datos
+ * registrales de otra — y encima con `revalidate` ese HTML se cachea igual para
+ * todos. El slug ya es unique y not null en `agencies`.
  */
 
 export const metadata: Metadata = {
@@ -35,13 +41,12 @@ type Agencia = {
   settings: AgencySettings | null;
 };
 
-async function getAgencia(): Promise<Agencia | null> {
+async function getAgencia(slug: string): Promise<Agencia | null> {
   if (!hasAdminClient()) return null;
   const { data } = await createAdminClient()
     .from("agencies")
     .select("name, logo_url, email, phone, settings")
-    .order("created_at", { ascending: true })
-    .limit(1)
+    .eq("slug", slug)
     .maybeSingle();
   return (data as Agencia | null) ?? null;
 }
@@ -60,9 +65,17 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default async function EmpresaPage() {
-  const agencia = await getAgencia();
-  const legal = agencia?.settings?.legal ?? {};
+export default async function EmpresaPage({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+  const agencia = await getAgencia(slug);
+  // sin service role no podemos distinguir "no existe" de "no pudimos leer":
+  // un 404 es más honesto que una ficha vacía que parece la de la agencia
+  if (!agencia) notFound();
+  const legal = agencia.settings?.legal ?? {};
 
   // el domicilio se arma con lo que haya cargado, sin comas huérfanas
   const domicilio = [
@@ -75,27 +88,32 @@ export default async function EmpresaPage() {
     .filter(Boolean)
     .join(", ");
 
+  const razonSocial = legal.legal_name?.trim() ?? "";
+
   const rows: { label: string; value: string }[] = [
-    { label: "Razón social", value: legal.legal_name ?? "" },
+    { label: "Razón social", value: razonSocial },
     { label: "CUIT", value: legal.cuit ?? "" },
     { label: "Domicilio legal", value: domicilio },
     { label: "Legajo EVyT", value: legal.evyt ?? "" },
-    { label: "Teléfono", value: legal.phone ?? agencia?.phone ?? "" },
-    { label: "Email", value: legal.email ?? agencia?.email ?? "" },
+    { label: "Teléfono", value: legal.phone ?? agencia.phone ?? "" },
+    { label: "Email", value: legal.email ?? agencia.email ?? "" },
     { label: "Sitio web", value: legal.website ?? "" },
   ].filter((r) => r.value.trim().length > 0);
 
-  const nombreComercial = agencia?.name?.trim() ?? "";
+  const nombreComercial = agencia.name?.trim() ?? "";
+  // exige razón social cargada: sin eso el subtítulo prometería una razón social
+  // que abajo no figura en ningún lado
   const distintoDelLegal =
     nombreComercial.length > 0 &&
-    nombreComercial.toLowerCase() !== (legal.legal_name ?? "").trim().toLowerCase();
+    razonSocial.length > 0 &&
+    nombreComercial.toLowerCase() !== razonSocial.toLowerCase();
 
   return (
     <main className="mx-auto min-h-dvh max-w-xl px-5 py-12 sm:py-16">
       <header className="flex flex-col items-center text-center">
         {/* <img> y no next/image: el resto del repo hace lo mismo y el logo vive
             en el storage de Supabase, que no está en remotePatterns */}
-        {agencia?.logo_url && (
+        {agencia.logo_url && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={agencia.logo_url}

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Check, Copy } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 /**
  * Botón de copiar de la ficha pública. El valor igual está escrito al lado en
@@ -34,21 +34,19 @@ export function CopyValue({ value, label }: { value: string; label: string }) {
   }
 
   return (
-    <button
+    <Button
       type="button"
+      size="icon"
+      variant="secondary"
       onClick={copy}
       aria-label={copied ? `${label} copiado` : `Copiar ${label}`}
-      className={cn(
-        "inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-line",
-        "text-ink-faint transition-colors hover:bg-sand-soft hover:text-ink-soft",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
-      )}
+      className="size-11 shrink-0 sm:size-9"
     >
       {copied ? (
-        <Check className="size-4 text-money-700 animate-check-pop" aria-hidden />
+        <Check className="text-money-700 animate-check-pop" aria-hidden />
       ) : (
-        <Copy className="size-4" aria-hidden />
+        <Copy aria-hidden />
       )}
-    </button>
+    </Button>
   );
 }

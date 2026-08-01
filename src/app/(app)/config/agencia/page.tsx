@@ -44,6 +44,7 @@ export default async function AgenciaPage() {
 
         <LegalDataForm
           isAdmin={isAdmin}
+          slug={agency.slug}
           initial={{
             legal_name: settings.legal?.legal_name ?? "",
             cuit: settings.legal?.cuit ?? "",
