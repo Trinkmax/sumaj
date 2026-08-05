@@ -11,10 +11,14 @@
  *     en el hilo de ese número. Sin ventana de 24 hs, sin plantillas pagas.
  *
  * SOLO SERVIDOR y con service role: los webhooks no tienen sesión de usuario.
+ *
+ * Las credenciales de Meta llegan ya resueltas desde el webhook (`creds`): acá
+ * no se toca `cloud-credentials` porque quien recibe el POST es el único que
+ * sabe de qué agencia es el mensaje (por el slug de la URL o el phone number ID).
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
-import { sendCloudText } from "@/lib/wa/cloud";
+import { sendCloudText, type CloudCreds, type CloudResult } from "@/lib/wa/cloud";
 import { hasWorker, sendViaBaileys } from "@/lib/wa/worker";
 import { fmtPhone } from "@/lib/format";
 import type { Database } from "@/lib/database.types";
@@ -168,7 +172,16 @@ export async function alertBranchOperators(
 
 /* ───────────────────────── entrada de mensajes ───────────────────────── */
 
-export async function handleInboundMessage(msg: InboundMessage): Promise<InboundResult> {
+/**
+ * @param creds Credenciales de la Cloud API de la agencia dueña del canal, ya
+ *   resueltas por el webhook. Solo hacen falta para la respuesta automática del
+ *   número madre; si vienen en null el mensaje entrante se procesa igual y la
+ *   respuesta queda registrada como fallida con el motivo.
+ */
+export async function handleInboundMessage(
+  msg: InboundMessage,
+  creds: CloudCreds | null,
+): Promise<InboundResult> {
   if (!hasAdminClient()) {
     return { ok: false, error: "Falta SUPABASE_SERVICE_ROLE_KEY para procesar mensajes." };
   }
@@ -178,9 +191,7 @@ export async function handleInboundMessage(msg: InboundMessage): Promise<Inbound
 
   const { data: channel } = await supabase
     .from("wa_channels")
-    .select(
-      "id, agency_id, branch_id, kind, is_mother, phone_number_id, auto_reply_enabled, auto_reply_text",
-    )
+    .select("id, agency_id, branch_id, kind, is_mother, auto_reply_enabled, auto_reply_text")
     .eq("id", msg.channelId)
     .maybeSingle();
   if (!channel) return { ok: false, error: "Canal desconocido." };
@@ -320,9 +331,13 @@ export async function handleInboundMessage(msg: InboundMessage): Promise<Inbound
     (isNewConversation || leadIsNew)
   ) {
     const text = channel.auto_reply_text;
-    const result = channel.phone_number_id
-      ? await sendCloudText(channel.phone_number_id, phone, text)
-      : ({ ok: false, error: "sin phone_number_id" } as const);
+    // Sin credenciales no hay respuesta automática, pero el mensaje del cliente
+    // ya quedó guardado y el resto del lote tiene que seguir: se registra el
+    // intento como fallido con el motivo, nunca se tira una excepción (una acá
+    // aborta el barrido del webhook y se pierden los mensajes que vienen atrás).
+    const result: CloudResult = creds
+      ? await sendCloudText(creds, phone, text)
+      : { ok: false, error: "La agencia todavía no conectó su cuenta de Meta." };
 
     await supabase.from("messages").insert({
       agency_id: agencyId,

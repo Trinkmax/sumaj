@@ -147,6 +147,24 @@ export type Database = {
         }
         Relationships: []
       }
+      app_config: {
+        Row: {
+          key: string
+          updated_at: string
+          value: string
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value?: string
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: string
+        }
+        Relationships: []
+      }
       attachments: {
         Row: {
           agency_id: string
@@ -1915,6 +1933,99 @@ export type Database = {
           },
         ]
       }
+      wa_cloud_credentials: {
+        Row: {
+          account_review_status: string | null
+          agency_id: string
+          app_id: string | null
+          app_secret_id: string | null
+          business_id: string | null
+          business_verification_status: string | null
+          channel_id: string
+          check_ok: boolean | null
+          checked_at: string | null
+          checks: Json
+          created_at: string
+          token_app_id: string | null
+          token_expires_at: string | null
+          token_scopes: string[] | null
+          token_secret_id: string | null
+          token_tail: string | null
+          updated_at: string
+          verify_secret_id: string | null
+          waba_id: string | null
+          waba_name: string | null
+          webhook_callback_url: string | null
+          webhook_slug: string
+          webhook_subscribed: boolean
+        }
+        Insert: {
+          account_review_status?: string | null
+          agency_id: string
+          app_id?: string | null
+          app_secret_id?: string | null
+          business_id?: string | null
+          business_verification_status?: string | null
+          channel_id: string
+          check_ok?: boolean | null
+          checked_at?: string | null
+          checks?: Json
+          created_at?: string
+          token_app_id?: string | null
+          token_expires_at?: string | null
+          token_scopes?: string[] | null
+          token_secret_id?: string | null
+          token_tail?: string | null
+          updated_at?: string
+          verify_secret_id?: string | null
+          waba_id?: string | null
+          waba_name?: string | null
+          webhook_callback_url?: string | null
+          webhook_slug?: string
+          webhook_subscribed?: boolean
+        }
+        Update: {
+          account_review_status?: string | null
+          agency_id?: string
+          app_id?: string | null
+          app_secret_id?: string | null
+          business_id?: string | null
+          business_verification_status?: string | null
+          channel_id?: string
+          check_ok?: boolean | null
+          checked_at?: string | null
+          checks?: Json
+          created_at?: string
+          token_app_id?: string | null
+          token_expires_at?: string | null
+          token_scopes?: string[] | null
+          token_secret_id?: string | null
+          token_tail?: string | null
+          updated_at?: string
+          verify_secret_id?: string | null
+          waba_id?: string | null
+          waba_name?: string | null
+          webhook_callback_url?: string | null
+          webhook_slug?: string
+          webhook_subscribed?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wa_cloud_credentials_agency_id_fkey"
+            columns: ["agency_id"]
+            isOneToOne: false
+            referencedRelation: "agencies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wa_cloud_credentials_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: true
+            referencedRelation: "wa_channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       wa_session_state: {
         Row: {
           channel_id: string
@@ -2014,6 +2125,24 @@ export type Database = {
     Functions: {
       quote_public: { Args: { token: string }; Returns: Json }
       receipt_public: { Args: { token: string }; Returns: Json }
+      wa_cloud_config: { Args: { p_channel_id: string }; Returns: Json }
+      wa_cloud_config_by_phone_number_id: {
+        Args: { p_phone_number_id: string }
+        Returns: Json
+      }
+      wa_cloud_config_by_slug: { Args: { p_slug: string }; Returns: Json }
+      wa_cloud_secret_clear: {
+        Args: { p_channel_id: string }
+        Returns: undefined
+      }
+      wa_cloud_secret_set: {
+        Args: { p_channel_id: string; p_slot: string; p_value: string }
+        Returns: undefined
+      }
+      wa_cloud_verify_token_matches: {
+        Args: { p_token: string }
+        Returns: boolean
+      }
     }
     Enums: {
       activity_type:

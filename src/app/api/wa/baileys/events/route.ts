@@ -58,15 +58,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, ignored: true });
   }
 
-  const result = await handleInboundMessage({
-    channelId: event.channelId,
-    from: event.from,
-    text: event.text ?? "",
-    kind: (event.kind ?? "texto") as Enums<"message_kind">,
-    waMessageId: event.waMessageId ?? null,
-    pushName: event.pushName ?? null,
-    timestamp: event.timestamp ?? Date.now(),
-  });
+  const result = await handleInboundMessage(
+    {
+      channelId: event.channelId,
+      from: event.from,
+      text: event.text ?? "",
+      kind: (event.kind ?? "texto") as Enums<"message_kind">,
+      waMessageId: event.waMessageId ?? null,
+      pushName: event.pushName ?? null,
+      timestamp: event.timestamp ?? Date.now(),
+    },
+    // Sin credenciales de Meta a propósito: por acá entran los mensajes de las
+    // sucursales (Baileys). La respuesta automática es del número madre y sale
+    // por la Cloud API, así que en este camino nunca hace falta.
+    null,
+  );
 
   if (!result.ok) {
     // Con un 200 el worker daría el mensaje por avisado y la consulta se perdería

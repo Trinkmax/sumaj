@@ -9,7 +9,8 @@ import {
   logActivity,
   type ActionResult,
 } from "@/lib/actions/core";
-import { hasCloudApi, sendCloudTemplate, sendCloudText } from "@/lib/wa/cloud";
+import { sendCloudTemplate, sendCloudText, type CloudCreds } from "@/lib/wa/cloud";
+import { getCloudCreds } from "@/lib/wa/cloud-credentials";
 import { hasWorker, sendViaBaileys } from "@/lib/wa/worker";
 import { alertBranchOperators } from "@/lib/wa/inbound";
 import type { MessageStatus } from "@/lib/types";
@@ -20,7 +21,7 @@ export type SentMessage = { id: string; status: MessageStatus; createdAt: string
 
 /** Todo lo que hace falta para saber por qué número sale el mensaje. */
 const CONVERSATION_WITH_CHANNEL =
-  "id, last_inbound_at, wa_id, branch_id, contact:contacts(id, full_name, phone), channel_ref:wa_channels(id, kind, status, phone_number_id, label)";
+  "id, last_inbound_at, wa_id, branch_id, contact:contacts(id, full_name, phone), channel_ref:wa_channels(id, kind, status, label)";
 
 /* Motivos por los que un mensaje no puede salir. Son textos distintos a
    propósito: el vendedor tiene que saber si le falta el teléfono del cliente,
@@ -35,12 +36,12 @@ const BRANCH_UNLINKED =
 const WORKER_DOWN =
   "El servicio que maneja los números de las sucursales no está disponible. Avisale a quien administra el sistema.";
 const MOTHER_MISSING =
-  "El número madre todavía no está conectado a la API de WhatsApp. Conectalo en Configuración · WhatsApp o derivá el chat a una sucursal.";
+  "El número madre todavía no está conectado con Meta. Conectalo en Configuración · WhatsApp o derivá el chat a una sucursal.";
 
 /** Por dónde sale el mensaje una vez resuelto el canal. */
 type SendRoute =
   | { via: "baileys"; channelId: string; to: string }
-  | { via: "cloud"; phoneNumberId: string; to: string };
+  | { via: "cloud"; creds: CloudCreds; to: string };
 
 /**
  * Resuelve la salida del mensaje o el motivo por el que NO sale.
@@ -49,16 +50,20 @@ type SendRoute =
  * y `metadata.simulated`: el vendedor veía el tilde y el cliente nunca recibía
  * nada. Ahora falta de infraestructura = error explícito, sin escribir en el
  * hilo (el mensaje nunca salió: ensuciarlo no aporta).
+ *
+ * Las credenciales de Meta ya no son globales: viajan DENTRO de la ruta, atadas
+ * a la agencia que manda. Resolverlas una sola vez "para todos" sería mandar con
+ * el token de otra.
  */
-function resolveRoute(
+async function resolveRoute(
+  agencyId: string,
   channel: {
     id: string;
     kind: string;
     status: string;
-    phone_number_id: string | null;
   } | null,
   to: string | null,
-): { ok: true; route: SendRoute } | { ok: false; error: string } {
+): Promise<{ ok: true; route: SendRoute } | { ok: false; error: string }> {
   if (!to) return { ok: false, error: NO_PHONE };
   if (!channel) return { ok: false, error: NO_CHANNEL };
 
@@ -70,9 +75,9 @@ function resolveRoute(
     return { ok: true, route: { via: "baileys", channelId: channel.id, to } };
   }
 
-  if (!hasCloudApi() || !channel.phone_number_id)
-    return { ok: false, error: MOTHER_MISSING };
-  return { ok: true, route: { via: "cloud", phoneNumberId: channel.phone_number_id, to } };
+  const creds = await getCloudCreds(agencyId);
+  if (!creds || !creds.phoneNumberId) return { ok: false, error: MOTHER_MISSING };
+  return { ok: true, route: { via: "cloud", creds, to } };
 }
 
 /* ───────────────────────────────────────────
@@ -102,7 +107,8 @@ export async function sendMessage(input: {
     .maybeSingle();
   if (!conversation) return fail("No encontramos la conversación.");
 
-  const routed = resolveRoute(
+  const routed = await resolveRoute(
+    agency.id,
     conversation.channel_ref,
     conversation.contact?.phone ?? conversation.wa_id,
   );
@@ -137,7 +143,7 @@ export async function sendMessage(input: {
       errorDetail = res.error;
     }
   } else {
-    const res = await sendCloudText(route.phoneNumberId, route.to, parsed.data.body);
+    const res = await sendCloudText(route.creds, route.to, parsed.data.body);
     if (res.ok) {
       waMessageId = res.waMessageId;
     } else {
@@ -333,7 +339,8 @@ export async function sendTemplate(input: {
   if (!template) return fail("No encontramos la plantilla.");
   if (!template.is_approved) return fail("Esa plantilla todavía no está aprobada por Meta.");
 
-  const routed = resolveRoute(
+  const routed = await resolveRoute(
+    agency.id,
     conversation.channel_ref,
     conversation.contact?.phone ?? conversation.wa_id,
   );
@@ -353,7 +360,7 @@ export async function sendTemplate(input: {
       errorDetail = res.error;
     }
   } else {
-    const res = await sendCloudTemplate(route.phoneNumberId, route.to, template.meta_name);
+    const res = await sendCloudTemplate(route.creds, route.to, template.meta_name);
     if (res.ok) waMessageId = res.waMessageId;
     else {
       status = "fallido";

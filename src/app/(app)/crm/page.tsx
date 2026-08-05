@@ -8,7 +8,7 @@ import {
   type BranchOption,
   type ConversationRow,
 } from "@/components/chats/types";
-import { hasCloudApi } from "@/lib/wa/cloud";
+import { hasCloudApi } from "@/lib/wa/cloud-credentials";
 import { hasWorker } from "@/lib/wa/worker";
 
 export const metadata = { title: "CRM" };
@@ -22,7 +22,7 @@ export default async function CrmPage({
   const { member, agency, isAdmin } = await requireMember();
   const supabase = await createClient();
 
-  const [leadsRes, membersRes, convsRes, branchesRes] = await Promise.all([
+  const [leadsRes, membersRes, convsRes, branchesRes, cloudReady] = await Promise.all([
     supabase
       .from("leads")
       .select(
@@ -50,6 +50,10 @@ export default async function CrmPage({
       .select("id, name, color, position, channels:wa_channels(id, kind, status, phone)")
       .eq("is_active", true)
       .order("position", { ascending: true }),
+    // ¿tiene esta agencia el número madre conectado con Meta? Va acá adentro a
+    // propósito: es la ruta más caliente del sistema y no puede pagar un viaje
+    // secuencial más.
+    hasCloudApi(agency.id),
   ]);
 
   const conversations = (convsRes.data ?? []) as unknown as ConversationRow[];
@@ -113,9 +117,9 @@ export default async function CrmPage({
 
   /* Capacidad REAL de enviar por WhatsApp. `settings.whatsapp.connected` es una
      preferencia guardada, no la infraestructura viva: sin worker el número de
-     una sucursal no manda nada y sin Cloud API el madre tampoco. El chat lo
-     cruza con el canal de cada conversación. */
-  const waSend: WaSendCapability = { worker: hasWorker(), cloud: hasCloudApi() };
+     una sucursal no manda nada y sin las credenciales de Meta de ESTA agencia
+     el madre tampoco. El chat lo cruza con el canal de cada conversación. */
+  const waSend: WaSendCapability = { worker: hasWorker(), cloud: cloudReady };
 
   // ?vista= manda; un deep link con ?c= solo también abre Chats.
   // null = sin preferencia en la URL → el board usa la última vista guardada.

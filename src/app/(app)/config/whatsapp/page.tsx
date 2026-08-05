@@ -5,16 +5,20 @@ import { PageHeader } from "@/components/shell/page-header";
 import { ConfigNav } from "@/components/config/config-nav";
 import { WhatsappSettings } from "@/components/config/whatsapp-settings";
 import { RoutingRulesManager } from "@/components/config/routing-rules-manager";
-import { hasCloudApi } from "@/lib/wa/cloud";
+import { getCloudStatus } from "@/lib/actions/wa-cloud";
 
 /**
  * Config → WhatsApp: el NÚMERO MADRE (Cloud API de Meta) y las reglas que
  * deciden a qué sucursal se deriva cada consulta nueva.
  * El número de cada sucursal (Baileys, con QR) se vincula en /config/sucursales.
  *
- * Admin only, como el resto de /config: acá se ven credenciales de Meta y se
- * decide a dónde cae cada consulta. Igual los componentes reciben `isAdmin`
+ * Admin only, como el resto de /config: acá se cargan las credenciales de Meta y
+ * se decide a dónde cae cada consulta. Igual los componentes reciben `isAdmin`
  * para no depender solo del redirect.
+ *
+ * El estado de la conexión con Meta NO se lee de la tabla: `wa_cloud_credentials`
+ * es solo para el service role. Lo resuelve `getCloudStatus()`, que además nunca
+ * devuelve secretos —solo banderas, el diagnóstico y los últimos 4 del token.
  */
 export default async function WhatsappPage() {
   const { agency, isAdmin } = await requireMember();
@@ -22,14 +26,13 @@ export default async function WhatsappPage() {
 
   const supabase = await createClient();
 
-  const [channelRes, branchesRes, rulesRes] = await Promise.all([
+  const [channelRes, branchesRes, rulesRes, statusRes] = await Promise.all([
     supabase
       .from("wa_channels")
       .select(
         // sin last_error: no es legible por `authenticated` (migración 0016).
-        // El número madre es Cloud API y no tiene sesión que se caiga; si hace
-        // falta el detalle técnico, se lee con service role desde getChannelState.
-        "id, label, phone, phone_number_id, status, auto_reply_enabled, auto_reply_text, last_connected_at",
+        // El detalle de la conexión con Meta viene por getCloudStatus.
+        "id, phone, auto_reply_enabled, auto_reply_text",
       )
       .eq("agency_id", agency.id)
       .eq("is_mother", true)
@@ -44,6 +47,7 @@ export default async function WhatsappPage() {
       .select("id, branch_id, match_type, pattern, is_active, position")
       .eq("agency_id", agency.id)
       .order("position", { ascending: true }),
+    getCloudStatus(),
   ]);
 
   const channel = channelRes.data;
@@ -67,20 +71,16 @@ export default async function WhatsappPage() {
       <div className="mx-auto mt-4 max-w-3xl space-y-4 px-4 md:mx-0 md:px-6">
         <WhatsappSettings
           isAdmin={isAdmin}
-          cloudApiReady={hasCloudApi()}
           webhookBase={webhookBase}
+          status={statusRes.ok ? statusRes.data : null}
+          statusError={statusRes.ok ? null : statusRes.error}
           channel={
             channel
               ? {
                   id: channel.id,
-                  label: channel.label,
                   phone: channel.phone,
-                  phoneNumberId: channel.phone_number_id,
-                  status: channel.status,
                   autoReplyEnabled: channel.auto_reply_enabled,
                   autoReplyText: channel.auto_reply_text ?? "",
-                  lastConnectedAt: channel.last_connected_at,
-                  lastError: null,
                 }
               : null
           }

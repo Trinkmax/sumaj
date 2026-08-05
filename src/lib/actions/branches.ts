@@ -11,7 +11,6 @@ import {
 } from "@/lib/actions/core";
 import { TAG_COLORS } from "@/lib/domain";
 import { channelStatus, hasWorker, logoutChannel, startChannel } from "@/lib/wa/worker";
-import { hasCloudApi, registerCloudNumber } from "@/lib/wa/cloud";
 import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
 import type { Enums, TablesUpdate } from "@/lib/types";
 
@@ -320,17 +319,15 @@ export async function syncChannel(input: {
   return getChannelState({ channelId: channel.id });
 }
 
+/**
+ * Ajustes "de pantalla" del número: nombre, teléfono visible y respuesta
+ * automática. El phone number ID NO se toca acá: el número madre se elige de la
+ * lista que devuelve Meta con `selectCloudNumber()` de `actions/wa-cloud.ts`,
+ * que además valida contra el Graph antes de guardarlo.
+ */
 const channelSettingsSchema = z.object({
   channelId: z.uuid(),
   label: z.string().trim().min(2).max(60).optional(),
-  // solo dígitos: el ID se interpola en la URL del Graph y sale con el token de
-  // la plataforma (ver registerCloudNumber / post en lib/wa/cloud.ts)
-  phoneNumberId: z
-    .string()
-    .trim()
-    .regex(/^\d{5,20}$/, "El phone number ID de Meta son solo números.")
-    .nullable()
-    .optional(),
   phone: z.string().trim().max(40).nullable().optional(),
   autoReplyEnabled: z.boolean().optional(),
   autoReplyText: z.string().trim().max(1000).nullable().optional(),
@@ -349,16 +346,6 @@ export async function updateChannelSettings(
 
   const patch: TablesUpdate<"wa_channels"> = { updated_at: new Date().toISOString() };
   if (parsed.data.label !== undefined) patch.label = parsed.data.label;
-  if (parsed.data.phoneNumberId !== undefined) {
-    patch.phone_number_id = parsed.data.phoneNumberId || null;
-    // Un phone number ID nuevo es un número sin registrar: si heredara el
-    // "conectado" del anterior, la pantalla diría que las consultas entran solas
-    // mientras Meta no entrega nada.
-    if (channel.is_mother && patch.phone_number_id !== channel.phone_number_id) {
-      patch.status = "desconectado";
-      patch.last_connected_at = null;
-    }
-  }
   if (parsed.data.phone !== undefined)
     patch.phone = parsed.data.phone?.replace(/\D/g, "") || null;
   if (parsed.data.autoReplyEnabled !== undefined)
@@ -368,77 +355,6 @@ export async function updateChannelSettings(
 
   const { error } = await supabase.from("wa_channels").update(patch).eq("id", channel.id);
   if (error) return fail("No se pudieron guardar los cambios del número.");
-
-  revalidatePath("/config/whatsapp");
-  revalidateBranches();
-  return succeed(null);
-}
-
-const registerMotherSchema = z.object({
-  channelId: z.uuid(),
-  pin: z.string().trim().regex(/^\d{6}$/, "El PIN son 6 números, sin letras ni espacios."),
-});
-
-/**
- * Registra el número madre en la Cloud API de Meta.
- *
- * Meta agrega y verifica el número, pero el registro final va por API: en su
- * panel el botón "Registrarte" queda gris y el número se queda "Pendiente" para
- * siempre. Hasta que esto no corre, Meta NO entrega los mensajes al webhook por
- * más que el número esté verificado y la suscripción armada.
- *
- * El token sale del entorno del server (`WA_CLOUD_TOKEN`) y el PIN lo escribe el
- * admin en el momento: ninguno de los dos toca la base ni el navegador.
- */
-export async function registerMotherNumber(
-  input: z.infer<typeof registerMotherSchema>,
-): Promise<ActionResult<null>> {
-  const parsed = registerMotherSchema.safeParse(input);
-  if (!parsed.success) {
-    return fail(parsed.error.issues[0]?.message ?? "Revisá el PIN.");
-  }
-  const { supabase, channel, isAdmin, agency } = await loadChannel(parsed.data.channelId);
-  if (!isAdmin) return fail(ADMIN_ONLY);
-  if (!channel) return fail("No encontramos el número.");
-  if (!channel.is_mother) {
-    return fail("El número de la sucursal se vincula con QR, no con la Cloud API.");
-  }
-  if (!channel.phone_number_id) {
-    return fail("Cargá primero el phone number ID de Meta y guardá.");
-  }
-  if (!hasCloudApi()) {
-    return fail("Falta el token de la Cloud API en el servidor (WA_CLOUD_TOKEN).");
-  }
-
-  const res = await registerCloudNumber(channel.phone_number_id, parsed.data.pin);
-  if (!res.ok) {
-    // El motivo se lo devolvemos al admin por el toast; acá queda solo el rastro
-    // para el service role. `status` NO se toca a propósito: /config/whatsapp no
-    // puede leer last_error (migración 0016), así que un "Con error" pegajoso
-    // mandaría a revisar el phone number ID y el token —que no son los que
-    // fallaron— y escondería el botón para reintentar.
-    await supabase
-      .from("wa_channels")
-      .update({ last_error: res.error, updated_at: new Date().toISOString() })
-      .eq("id", channel.id);
-    return fail(res.error);
-  }
-
-  await supabase
-    .from("wa_channels")
-    .update({
-      status: "conectado",
-      last_error: null,
-      last_connected_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", channel.id);
-
-  await logActivity({
-    agencyId: agency.id,
-    type: "sistema",
-    body: "Se registró el número madre en la Cloud API de Meta",
-  });
 
   revalidatePath("/config/whatsapp");
   revalidateBranches();

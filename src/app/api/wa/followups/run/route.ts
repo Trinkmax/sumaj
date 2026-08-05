@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
-import { hasCloudApi, sendCloudTemplate } from "@/lib/wa/cloud";
+import { sendCloudTemplate } from "@/lib/wa/cloud";
+import { getCloudCreds, type ResolvedCloudCreds } from "@/lib/wa/cloud-credentials";
 import { hasWorker, sendViaBaileys } from "@/lib/wa/worker";
 import { fillTemplate } from "@/lib/domain";
 
@@ -11,6 +12,14 @@ import { fillTemplate } from "@/lib/domain";
  * SUCURSAL (Baileys) → texto libre, sin ventana de 24 hs y sin plantilla paga.
  * Solo si la sucursal no tiene número vinculado se cae al número madre con una
  * plantilla aprobada (eso sí se le paga a Meta).
+ *
+ * El lote mezcla agencias: las credenciales de Meta se resuelven POR FILA con
+ * `getCloudCreds(followup.agency_id)`, memoizadas a mano en un Map local al
+ * request. Acá NO alcanza el `cache()` de React que trae esa función: memoiza
+ * dentro del render de un RSC y en un route handler no hay dispatcher, así que
+ * cada fila volvería a pagar las consultas y los descifrados del Vault.
+ * Resolverlas una sola vez para todo el lote haría que una agencia mande con el
+ * token de otra: por eso la clave del memo es siempre el agency_id.
  *
  * Lo llama el cron de Postgres con el header x-cron-secret.
  */
@@ -30,6 +39,19 @@ export async function POST(request: Request) {
   }
 
   const supabase = createAdminClient();
+
+  /* Credenciales de Meta memoizadas para este lote, UNA ENTRADA POR AGENCIA:
+     el lote mezcla agencias y una sola entrada compartida haría que una mande
+     con el token de otra. Se llena la primera vez que una fila de esa agencia
+     lo necesita; `null` (no hay token) también se cachea para no reintentar. */
+  const credsPorAgencia = new Map<string, ResolvedCloudCreds | null>();
+  async function credsDe(agencyId: string): Promise<ResolvedCloudCreds | null> {
+    const memo = credsPorAgencia.get(agencyId);
+    if (memo !== undefined) return memo;
+    const creds = await getCloudCreds(agencyId);
+    credsPorAgencia.set(agencyId, creds);
+    return creds;
+  }
 
   const { data: pending, error } = await supabase
     .from("followups")
@@ -123,26 +145,19 @@ export async function POST(request: Request) {
           .single();
         conversationId = created?.id ?? conversationId;
       }
-    } else if (hasCloudApi() && followup.template?.meta_name) {
-      /* 2. fallback: plantilla paga por el número madre */
-      const { data: mother } = await supabase
-        .from("wa_channels")
-        .select("id, phone_number_id")
-        .eq("agency_id", followup.agency_id)
-        .eq("is_mother", true)
-        .maybeSingle();
-      if (mother?.phone_number_id) {
-        const res = await sendCloudTemplate(
-          mother.phone_number_id,
-          phone,
-          followup.template.meta_name,
-        );
+    } else if (followup.template?.meta_name) {
+      /* 2. fallback: plantilla paga por el número madre DE ESA AGENCIA.
+         Si esta agencia no tiene Meta conectado falla solo este seguimiento:
+         el resto del lote —que puede ser de otras agencias— sigue. */
+      const creds = await credsDe(followup.agency_id);
+      if (creds?.phoneNumberId) {
+        const res = await sendCloudTemplate(creds, phone, followup.template.meta_name);
         ok = res.ok;
         templateName = followup.template.meta_name;
         if (res.ok) waMessageId = res.waMessageId;
         else errorDetail = res.error;
       } else {
-        errorDetail = "El número madre no tiene phone number ID.";
+        errorDetail = "El número madre de la agencia no está conectado con Meta.";
       }
     } else {
       errorDetail = "La sucursal no tiene WhatsApp vinculado.";
