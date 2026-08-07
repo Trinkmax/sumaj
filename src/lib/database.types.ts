@@ -477,6 +477,7 @@ export type Database = {
       file_services: {
         Row: {
           agency_id: string
+          commission_pct: number
           cost: number
           created_at: string
           date_from: string | null
@@ -484,6 +485,7 @@ export type Database = {
           deadline_date: string | null
           description: string
           file_id: string
+          gross: number | null
           id: string
           images: Json
           paid_to_supplier: boolean
@@ -496,6 +498,7 @@ export type Database = {
         }
         Insert: {
           agency_id: string
+          commission_pct?: number
           cost?: number
           created_at?: string
           date_from?: string | null
@@ -503,6 +506,7 @@ export type Database = {
           deadline_date?: string | null
           description: string
           file_id: string
+          gross?: number | null
           id?: string
           images?: Json
           paid_to_supplier?: boolean
@@ -515,6 +519,7 @@ export type Database = {
         }
         Update: {
           agency_id?: string
+          commission_pct?: number
           cost?: number
           created_at?: string
           date_from?: string | null
@@ -522,6 +527,7 @@ export type Database = {
           deadline_date?: string | null
           description?: string
           file_id?: string
+          gross?: number | null
           id?: string
           images?: Json
           paid_to_supplier?: boolean
@@ -624,8 +630,10 @@ export type Database = {
           currency: string
           departure_date: string | null
           destination: string
+          discount: number
           id: string
           lead_id: string | null
+          markup: number
           notes: string | null
           number: number
           quote_id: string | null
@@ -650,8 +658,10 @@ export type Database = {
           currency?: string
           departure_date?: string | null
           destination: string
+          discount?: number
           id?: string
           lead_id?: string | null
+          markup?: number
           notes?: string | null
           number?: number
           quote_id?: string | null
@@ -676,8 +686,10 @@ export type Database = {
           currency?: string
           departure_date?: string | null
           destination?: string
+          discount?: number
           id?: string
           lead_id?: string | null
+          markup?: number
           notes?: string | null
           number?: number
           quote_id?: string | null
@@ -2105,8 +2117,13 @@ export type Database = {
         Row: {
           agency_id: string | null
           balance: number | null
+          discount: number | null
           file_id: string | null
+          gross_profit: number | null
+          markup: number | null
           paid_total: number | null
+          services_sale: number | null
+          supplier_commission: number | null
           total_cost: number | null
           total_sale: number | null
           utility: number | null

@@ -7,7 +7,9 @@ import {
   succeed,
   fail,
   logActivity,
+  buildFileServices,
   convertLeadToSale,
+  quotePackageMarkup,
   selectQuoteSale,
   type ActionResult,
 } from "@/lib/actions/core";
@@ -16,7 +18,6 @@ import {
   DEFAULT_QUOTE_FEES,
   DEFAULT_SELLER_MARKUP_PCT,
   paxCount,
-  round2,
   type QuoteItemInput,
   type QuotePax,
 } from "@/lib/domain";
@@ -645,7 +646,8 @@ export async function setQuoteStatus(input: {
 
 /* ───────────────────────────────────────────
    convertQuoteDirect — venta directa sin lead.
-   Misma distribución proporcional del markup que convertLeadToSale.
+   Arma la venta igual que convertLeadToSale: precios reales por servicio y
+   el markup del paquete como línea del file.
    ─────────────────────────────────────────── */
 
 const convertSchema = z.object({ quoteId: z.string().uuid() });
@@ -684,6 +686,16 @@ export async function convertQuoteDirect(input: {
     }
   }
 
+  // El markup viaja en el INSERT: cambiarlo después es privilegio de admin (0021).
+  const pkg =
+    sale.saleItems.length > 0
+      ? quotePackageMarkup({
+          saleItems: sale.saleItems,
+          totalPrice: sale.totalPrice,
+          discount: quote.discount,
+        })
+      : { markup: 0, discount: 0 };
+
   const { data: file, error: fileError } = await supabase
     .from("files")
     .insert({
@@ -697,6 +709,8 @@ export async function convertQuoteDirect(input: {
       return_date: quote.trip_date_to,
       currency: quote.currency,
       commission_pct: sellerCommission,
+      markup: pkg.markup,
+      discount: pkg.discount,
       status: "vendido",
       // nace de un presupuesto: los números los revisa un admin antes de darla por buena
       review_status: "pendiente",
@@ -706,30 +720,13 @@ export async function convertQuoteDirect(input: {
   if (fileError || !file) return fail("No se pudo crear el file.");
 
   if (sale.saleItems.length > 0) {
-    const totalCost = sale.saleItems.reduce((a, i) => a + Number(i.cost), 0);
-    const factor = totalCost > 0 ? sale.totalPrice / totalCost : 1;
-    let priceAcc = 0;
-    const services = [...sale.saleItems]
-      .sort((a, b) => a.position - b.position)
-      .map((item, idx, arr) => {
-        const isLast = idx === arr.length - 1;
-        const price = isLast
-          ? round2(sale.totalPrice - priceAcc)
-          : round2(Number(item.cost) * factor);
-        priceAcc = round2(priceAcc + price);
-        return {
-          agency_id: agency.id,
-          file_id: file.id,
-          type: item.type,
-          description: item.description,
-          supplier_id: item.supplier_id,
-          date_from: quote.trip_date_from,
-          date_to: quote.trip_date_to,
-          cost: Number(item.cost),
-          price,
-          position: item.position,
-        };
-      });
+    const services = buildFileServices({
+      agencyId: agency.id,
+      fileId: file.id,
+      saleItems: sale.saleItems,
+      dateFrom: quote.trip_date_from,
+      dateTo: quote.trip_date_to,
+    });
     const { error: servicesError } = await supabase.from("file_services").insert(services);
     if (servicesError) {
       // deshacer el file para no dejar una venta "vacía" (total 0, saldo 0)

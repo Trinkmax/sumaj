@@ -808,7 +808,7 @@ export function CajaClient({
                 compact
                 icon={TrendingUp}
                 circle="bg-money-tint text-money-text"
-                label="Utilidad"
+                label="Base de comisión"
                 amounts={stats.utility}
                 numberClass="text-ink"
                 zeroCurrency={mainCurrency}
@@ -877,7 +877,7 @@ export function CajaClient({
                     </div>
                     <div className="grid grid-cols-3 gap-2 rounded-xl bg-sand-soft/70 px-3 py-2.5">
                       <div className="min-w-0">
-                        <p className="text-[11px] text-ink-faint">Utilidad</p>
+                        <p className="text-[11px] text-ink-faint">Base</p>
                         <MoneyMulti
                           amounts={c.utility}
                           className="text-[13px] font-medium text-ink-soft"
@@ -931,7 +931,7 @@ export function CajaClient({
                   <tr className="border-b border-line text-left text-xs text-ink-faint">
                     <th className="px-4 py-3 font-medium">Vendedor</th>
                     <th className="px-3 py-3 text-right font-medium">Files</th>
-                    <th className="px-3 py-3 text-right font-medium">Utilidad</th>
+                    <th className="px-3 py-3 text-right font-medium">Base</th>
                     <th className="px-3 py-3 font-medium">Esquema</th>
                     <th className="px-3 py-3 text-right font-medium">Comisión</th>
                     <th className="px-3 py-3 text-right font-medium">Pagado</th>
@@ -1007,9 +1007,10 @@ export function CajaClient({
             </div>
 
             <p className="px-1 text-xs text-ink-faint">
-              La comisión sale del esquema de cada file: un porcentaje de la utilidad o un
-              monto fijo por venta. Se cuentan los files creados en el mes y lo que
-              liquidaste dentro de ese mismo mes.
+              La comisión sale del esquema de cada file: un porcentaje de la base o un
+              monto fijo por venta. La base es venta − costo; la comisión que devuelve el
+              mayorista queda para la agencia y se ve en cada file. Se cuentan los files
+              creados en el mes y lo que liquidaste dentro de ese mismo mes.
               {isAdmin ? " Cada pago que registres queda como movimiento de caja." : ""}
             </p>
           </div>

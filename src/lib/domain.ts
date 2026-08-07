@@ -350,6 +350,122 @@ export function fileCommission(input: {
   return round2(((input.utility || 0) * (input.commission_pct || 0)) / 100);
 }
 
+/* ───────────────────────────────────────────
+   Rentabilidad de una venta — ÚNICA fuente de verdad del file.
+
+   La agencia gana tres platas distintas en el mismo file y hay que verlas
+   separadas, porque no vienen del mismo lado:
+   · comisión del mayorista → Σ bruto × %. La devuelve el proveedor: NO está
+     en (precio − costo) y es, casi siempre, la parte más grande.
+   · markup                 → el sobreprecio del paquete. Vive en el file, no
+     se prorratea: si se reparte entre los servicios, ningún precio cierra.
+   · ajuste de precios      → Σ (precio − costo) cuando un servicio se vende
+     por arriba de lo que cuesta (carga a mano, sin presupuesto).
+
+   El vendedor ve `utility` (venta − costo) y cobra sobre eso.
+   Los socios ven `netProfit`: comisión mayorista + markup − comisión vendedor.
+   ─────────────────────────────────────────── */
+export type FileServiceInput = {
+  cost: number;
+  price: number;
+  /** bruto comisionable del mayorista; null = no se cargó */
+  gross: number | null;
+  /** % que devuelve el mayorista sobre el bruto */
+  commission_pct: number;
+};
+
+export type FileProfitInput = {
+  services: FileServiceInput[];
+  markup: number;
+  discount: number;
+  commission_type: string | null;
+  commission_pct: number;
+  commission_amount: number;
+};
+
+export type FileProfit = {
+  totalCost: number; // Σ costo (lo que se le paga a los proveedores)
+  servicesSale: number; // Σ precio de los servicios
+  priceAdjustment: number; // Σ (precio − costo): sobreprecio cargado servicio por servicio
+  markup: number;
+  discount: number;
+  totalSale: number; // lo que paga el cliente
+  utility: number; // venta − costo: lo que ve el vendedor y base de su comisión
+  supplierCommission: number; // Σ comisión del mayorista
+  grossProfit: number; // utilidad + comisión del mayorista
+  sellerCommission: number;
+  netProfit: number; // lo que le queda a la agencia
+  marginPct: number; // utilidad neta sobre la venta
+};
+
+/** Comisión que devuelve el mayorista por un servicio. */
+export function serviceSupplierCommission(s: {
+  gross: number | null;
+  commission_pct: number;
+}): number {
+  return round2(((s.gross || 0) * (s.commission_pct || 0)) / 100);
+}
+
+/**
+ * Utilidad neta de una venta a partir de la vista `file_totals`, para las
+ * pantallas que agregan muchos files y no traen los servicios uno por uno
+ * (inicio, lista de files). Mismo resultado que computeFileProfit().netProfit.
+ */
+export function fileNetProfit(
+  totals: { utility: number; supplier_commission: number },
+  file: { commission_type: string | null; commission_pct: number; commission_amount: number },
+): number {
+  return round2(
+    totals.utility +
+      totals.supplier_commission -
+      fileCommission({
+        commission_type: file.commission_type,
+        commission_pct: file.commission_pct,
+        commission_amount: file.commission_amount,
+        utility: totals.utility,
+      }),
+  );
+}
+
+export function computeFileProfit(input: FileProfitInput): FileProfit {
+  const totalCost = round2(input.services.reduce((a, s) => a + (s.cost || 0), 0));
+  const servicesSale = round2(input.services.reduce((a, s) => a + (s.price || 0), 0));
+  const markup = round2(input.markup || 0);
+  const discount = round2(input.discount || 0);
+  const totalSale = round2(servicesSale + markup - discount);
+  const utility = round2(totalSale - totalCost);
+
+  // se suma primero y se redondea al final, igual que computeQuoteTotals y que
+  // la vista file_totals: los tres tienen que dar exactamente el mismo número
+  const supplierCommission = round2(
+    input.services.reduce((a, s) => a + ((s.gross || 0) * (s.commission_pct || 0)) / 100, 0),
+  );
+
+  const grossProfit = round2(utility + supplierCommission);
+  const sellerCommission = fileCommission({
+    commission_type: input.commission_type,
+    commission_pct: input.commission_pct,
+    commission_amount: input.commission_amount,
+    utility,
+  });
+  const netProfit = round2(grossProfit - sellerCommission);
+
+  return {
+    totalCost,
+    servicesSale,
+    priceAdjustment: round2(servicesSale - totalCost),
+    markup,
+    discount,
+    totalSale,
+    utility,
+    supplierCommission,
+    grossProfit,
+    sellerCommission,
+    netProfit,
+    marginPct: totalSale > 0 ? round2((netProfit / totalSale) * 100) : 0,
+  };
+}
+
 export const ACTIVITY_TYPES: Record<ActivityType, { label: string; icon: LucideIcon }> = {
   nota: { label: "Nota", icon: StickyNote },
   llamada: { label: "Llamada", icon: Phone },

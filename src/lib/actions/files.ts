@@ -317,6 +317,52 @@ export async function updateFileCommission(
 }
 
 /* ───────────────────────────────────────────
+   Markup del paquete.
+   El sobreprecio de la agencia vive acá y no prorrateado en los servicios:
+   así cada servicio muestra su precio real y el markup se puede tocar sin
+   reescribir toda la planilla. Solo un admin lo mueve.
+   ─────────────────────────────────────────── */
+const markupSchema = z.object({
+  fileId: z.string().uuid(),
+  markup: z.number().min(0).max(99_000_000),
+  discount: z.number().min(0).max(99_000_000),
+});
+
+export async function updateFileMarkup(
+  input: z.infer<typeof markupSchema>,
+): Promise<ActionResult<null>> {
+  const parsed = markupSchema.safeParse(input);
+  if (!parsed.success) return fail("Datos inválidos. Revisá el markup y el descuento.");
+  const { supabase, member, agency, isAdmin } = await requireAction();
+  if (!isAdmin) return fail("Esto lo maneja un admin de la agencia.");
+
+  const { data: file, error } = await supabase
+    .from("files")
+    .update({ markup: parsed.data.markup, discount: parsed.data.discount })
+    .eq("id", parsed.data.fileId)
+    .select("id, code, currency, contact_id")
+    .single();
+
+  if (error || !file) return fail("No se pudo guardar el markup.");
+
+  await logActivity({
+    agencyId: agency.id,
+    memberId: member.id,
+    contactId: file.contact_id,
+    fileId: file.id,
+    type: "sistema",
+    body:
+      `Markup del paquete: ${file.currency} ${parsed.data.markup}` +
+      (parsed.data.discount > 0 ? ` — descuento ${file.currency} ${parsed.data.discount}` : ""),
+    metadata: { markup: parsed.data.markup, discount: parsed.data.discount },
+  });
+
+  revalidateFile(parsed.data.fileId);
+  revalidatePath("/caja");
+  return succeed(null);
+}
+
+/* ───────────────────────────────────────────
    Servicios del file
    ─────────────────────────────────────────── */
 const serviceFields = {
@@ -331,6 +377,9 @@ const serviceFields = {
   images: z.array(serviceImageSchema).max(6).optional(),
   cost: z.number().min(0).max(99_000_000),
   price: z.number().min(0).max(99_000_000),
+  /** bruto comisionable del mayorista: la base sobre la que devuelve comisión */
+  gross: z.number().min(0).max(99_000_000).nullable().optional(),
+  commissionPct: z.number().min(0).max(100).optional(),
 };
 
 const addServiceSchema = z.object({ fileId: z.string().uuid(), ...serviceFields });
@@ -340,7 +389,7 @@ export async function addService(
 ): Promise<ActionResult<{ serviceId: string }>> {
   const parsed = addServiceSchema.safeParse(input);
   if (!parsed.success) return fail("Datos inválidos. Revisá la descripción y los montos.");
-  const { supabase, agency } = await requireAction();
+  const { supabase, agency, isAdmin } = await requireAction();
 
   const { data: last } = await supabase
     .from("file_services")
@@ -365,6 +414,9 @@ export async function addService(
       images: (parsed.data.images ?? []) as unknown as ImagesColumn,
       cost: parsed.data.cost,
       price: parsed.data.price,
+      // la comisión del mayorista es plata de la agencia: la define un admin
+      gross: isAdmin ? (parsed.data.gross ?? null) : null,
+      commission_pct: isAdmin ? (parsed.data.commissionPct ?? 0) : 0,
       position: (last?.position ?? 0) + 1,
     })
     .select("id")
@@ -387,7 +439,7 @@ export async function updateService(
 ): Promise<ActionResult<null>> {
   const parsed = updateServiceSchema.safeParse(input);
   if (!parsed.success) return fail("Datos inválidos. Revisá la descripción y los montos.");
-  const { supabase } = await requireAction();
+  const { supabase, isAdmin } = await requireAction();
 
   const patch: TablesUpdate<"file_services"> = {
     type: parsed.data.type,
@@ -403,6 +455,14 @@ export async function updateService(
   // si el caller no manda imágenes, no las tocamos (no las borra por omisión)
   if (parsed.data.images !== undefined) {
     patch.images = parsed.data.images as unknown as ImagesColumn;
+  }
+  // El bruto y el % del mayorista los define un admin. Si no vienen (o los manda
+  // un vendedor), quedan como estaban en vez de borrarse o de pisarse.
+  if (isAdmin) {
+    if (parsed.data.gross !== undefined) patch.gross = parsed.data.gross;
+    if (parsed.data.commissionPct !== undefined) {
+      patch.commission_pct = parsed.data.commissionPct;
+    }
   }
 
   const { error } = await supabase

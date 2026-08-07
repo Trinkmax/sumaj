@@ -24,7 +24,8 @@ export type FileListRow = {
 
 export type ContactOption = { id: string; full_name: string; phone: string | null };
 export type MemberOption = { id: string; display_name: string };
-export type SupplierOption = { id: string; name: string };
+/** el % del proveedor precarga la comisión del mayorista al cargar un servicio */
+export type SupplierOption = { id: string; name: string; default_commission_pct: number };
 
 /** file completo para /files/[id] */
 export type FileDetail = {
@@ -47,6 +48,9 @@ export type FileDetail = {
   commission_amount: number;
   /** etiqueta del esquema fijo, ej. "Grupal Europa" */
   commission_label: string | null;
+  /** sobreprecio del paquete: vive en el file, NO prorrateado en los servicios */
+  markup: number;
+  discount: number;
   created_at: string;
   /** navegación cruzada: lead y presupuesto de origen */
   lead_id: string | null;
@@ -77,6 +81,10 @@ export type ServiceRow = {
   images: ServiceImage[];
   cost: number;
   price: number;
+  /** bruto comisionable del mayorista; null = no se cargó */
+  gross: number | null;
+  /** % que devuelve el mayorista sobre el bruto */
+  commission_pct: number;
   paid_to_supplier: boolean;
   position: number;
 };

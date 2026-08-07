@@ -1,6 +1,6 @@
 import { requireMember } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { CHANNELS, STAGES, waLink } from "@/lib/domain";
+import { CHANNELS, STAGES, fileNetProfit, waLink } from "@/lib/domain";
 import { fmtDate } from "@/lib/format";
 import type { LeadChannel, LeadStage } from "@/lib/types";
 import { consejoDelDia } from "@/components/inicio/consejos";
@@ -108,9 +108,13 @@ export default async function InicioPage() {
     supabase.from("conversations").select("unread_count").gt("unread_count", 0),
     supabase
       .from("files")
-      .select("id, created_at, seller_id, status, currency")
+      .select(
+        "id, created_at, seller_id, status, currency, commission_type, commission_pct, commission_amount",
+      )
       .neq("status", "cancelado"),
-    supabase.from("file_totals").select("file_id, total_sale, utility, paid_total, balance"),
+    supabase
+      .from("file_totals")
+      .select("file_id, total_sale, utility, supplier_commission, paid_total, balance"),
     supabase.from("members").select("id, display_name, avatar_url").eq("is_active", true),
     supabase
       .from("leads")
@@ -165,6 +169,9 @@ export default async function InicioPage() {
     seller_id: string | null;
     status: string;
     currency: string;
+    commission_type: string;
+    commission_pct: number;
+    commission_amount: number;
   };
   const files: FileRow[] = filesRes.data ?? [];
   const totalsMap = new Map(
@@ -173,12 +180,27 @@ export default async function InicioPage() {
       {
         sale: Number(t.total_sale ?? 0),
         utility: Number(t.utility ?? 0),
+        supplier_commission: Number(t.supplier_commission ?? 0),
         paid: Number(t.paid_total ?? 0),
         balance: Number(t.balance ?? 0),
       },
     ]),
   );
   const saleOf = (f: FileRow) => totalsMap.get(f.id)?.sale ?? 0;
+
+  /* El vendedor ve venta − costo (su base de comisión). El socio ve la plata
+     que de verdad queda: la comisión del mayorista la devuelve el proveedor y
+     no aparece en venta − costo, y hay que descontar al vendedor. */
+  const utilityOf = (f: FileRow) => {
+    const t = totalsMap.get(f.id);
+    if (!t) return 0;
+    if (!isAdmin) return t.utility;
+    return fileNetProfit(t, {
+      commission_type: f.commission_type,
+      commission_pct: Number(f.commission_pct) || 0,
+      commission_amount: Number(f.commission_amount) || 0,
+    });
+  };
   const addMoney = (m: MoneyByCurrency, currency: string, amount: number) => {
     m[currency] = (m[currency] ?? 0) + amount;
   };
@@ -220,7 +242,7 @@ export default async function InicioPage() {
     const receivable: MoneyByCurrency = {};
     for (const f of monthFiles) {
       addMoney(sales, f.currency, saleOf(f));
-      addMoney(utility, f.currency, totalsMap.get(f.id)?.utility ?? 0);
+      addMoney(utility, f.currency, utilityOf(f));
     }
     for (const f of prevFiles) addMoney(prevSales, f.currency, saleOf(f));
     for (const c of monthCobros) {

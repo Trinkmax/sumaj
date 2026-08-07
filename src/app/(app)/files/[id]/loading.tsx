@@ -123,6 +123,9 @@ export default function LoadingFileDetail() {
             ))}
           </div>
 
+          {/* la tarjeta de Rentabilidad es admin-only y el skeleton es estático:
+              no la dibujamos para no prometerle una tarjeta al vendedor */}
+
           {/* notas */}
           <div className="card space-y-3 p-4 md:p-5">
             <Skeleton className="h-5 w-16" />

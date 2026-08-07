@@ -5,6 +5,7 @@ import { requireMember } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { FileHeader } from "@/components/files/file-header";
 import { ServicesCard } from "@/components/files/services-card";
+import { ProfitCard } from "@/components/files/profit-card";
 import { PaymentsCard } from "@/components/files/payments-card";
 import { TravelersCard } from "@/components/files/travelers-card";
 import { NotesCard } from "@/components/files/notes-card";
@@ -15,6 +16,7 @@ import type {
   FileDetail,
   PaymentRow,
   ServiceRow,
+  SupplierOption,
   TravelerRow,
 } from "@/components/files/types";
 
@@ -101,7 +103,11 @@ export default async function FileDetailPage({
       .eq("file_id", id)
       .order("created_at", { ascending: false })
       .limit(50),
-    supabase.from("suppliers").select("id, name").eq("is_active", true).order("name"),
+    supabase
+      .from("suppliers")
+      .select("id, name, default_commission_pct")
+      .eq("is_active", true)
+      .order("name"),
     // navegación cruzada: la conversación del contacto (si existe) para el chip "Chat"
     supabase
       .from("conversations")
@@ -133,6 +139,8 @@ export default async function FileDetailPage({
     commission_pct: Number(fileData.commission_pct) || 0,
     commission_amount: Number(fileData.commission_amount) || 0,
     commission_label: fileData.commission_label,
+    markup: Number(fileData.markup) || 0,
+    discount: Number(fileData.discount) || 0,
     created_at: fileData.created_at,
     lead_id: fileData.lead_id,
     quote_id: fileData.quote_id,
@@ -160,8 +168,23 @@ export default async function FileDetailPage({
     images: toServiceImages(s.images),
     cost: Number(s.cost) || 0,
     price: Number(s.price) || 0,
+    gross: s.gross === null ? null : Number(s.gross),
+    commission_pct: Number(s.commission_pct) || 0,
     paid_to_supplier: s.paid_to_supplier,
     position: Number(s.position) || 0,
+  }));
+
+  /* El bruto y el % del mayorista son plata de la agencia: al vendedor no se le
+     muestran y tampoco tienen por qué viajar en el payload del componente cliente. */
+  const visibleServices: ServiceRow[] = isAdmin
+    ? services
+    : services.map((s) => ({ ...s, gross: null, commission_pct: 0 }));
+
+  const suppliers: SupplierOption[] = (suppliersRes.data ?? []).map((s) => ({
+    id: s.id,
+    name: s.name,
+    // el % que devuelve cada mayorista también es plata de la agencia
+    default_commission_pct: isAdmin ? Number(s.default_commission_pct) || 0 : 0,
   }));
 
   const payments: PaymentRow[] = (paymentsRes.data ?? []).map((p) => ({
@@ -197,7 +220,7 @@ export default async function FileDetailPage({
 
       <FileHeader
         file={file}
-        services={services}
+        services={visibleServices}
         travelers={linkedTravelers}
         agencyName={agency.name}
         quoteCode={quoteRes.data?.code ?? null}
@@ -212,9 +235,11 @@ export default async function FileDetailPage({
             fileId={file.id}
             agencyId={agency.id}
             currency={file.currency}
-            services={services}
-            suppliers={suppliersRes.data ?? []}
+            services={visibleServices}
+            suppliers={suppliers}
             sellerName={file.seller?.display_name ?? "Vendedor"}
+            markup={file.markup}
+            discount={file.discount}
             commissionType={file.commission_type}
             commissionPct={file.commission_pct}
             commissionAmount={file.commission_amount}
@@ -227,9 +252,9 @@ export default async function FileDetailPage({
             linked={linkedTravelers}
             contactTravelers={contactTravelers}
             returnDate={file.return_date}
-            className="order-3 lg:order-none"
+            className="order-4 lg:order-none"
           />
-          <FileTimeline activities={activities} className="order-5 lg:order-none" />
+          <FileTimeline activities={activities} className="order-6 lg:order-none" />
         </div>
 
         {/* columna derecha (desktop) */}
@@ -246,9 +271,25 @@ export default async function FileDetailPage({
             contactPhone={file.contact?.phone ?? null}
             totals={file.totals}
             payments={payments}
-            className="order-2 lg:order-none"
+            className="order-3 lg:order-none"
           />
-          <NotesCard fileId={file.id} notes={file.notes} className="order-4 lg:order-none" />
+          {/* la plata real de la venta: comisión del mayorista + markup − vendedor */}
+          {isAdmin && (
+            <ProfitCard
+              fileId={file.id}
+              currency={file.currency}
+              sellerName={file.seller?.display_name ?? "Vendedor"}
+              services={services}
+              markup={file.markup}
+              discount={file.discount}
+              commissionType={file.commission_type}
+              commissionPct={file.commission_pct}
+              commissionAmount={file.commission_amount}
+              commissionLabel={file.commission_label}
+              className="order-2 lg:order-none"
+            />
+          )}
+          <NotesCard fileId={file.id} notes={file.notes} className="order-5 lg:order-none" />
         </div>
       </div>
     </div>

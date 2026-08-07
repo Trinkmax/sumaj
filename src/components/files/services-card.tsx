@@ -7,6 +7,7 @@ import {
   AlarmClock,
   ArrowRight,
   ChevronRight,
+  HandCoins,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -28,19 +29,19 @@ import {
   updateService,
   deleteService,
   toggleServicePaid,
-  updateFileCommission,
 } from "@/lib/actions/files";
 import {
   COMMISSION_TYPES,
   SERVICE_TYPES,
   SERVICE_ORDER,
-  fileCommission,
+  computeFileProfit,
   round2,
-  type CommissionType,
+  serviceSupplierCommission,
 } from "@/lib/domain";
 import { fmtDate, fmtDeadline, fmtMoney, fmtNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ServiceImage, ServiceType } from "@/lib/types";
+import { MarkupDialog } from "./markup-dialog";
 import { numToInput, parseAmount } from "./helpers";
 import { ServiceImagesField, ServiceImagesStrip } from "./service-images";
 import type { ServiceRow, SupplierOption } from "./types";
@@ -83,6 +84,8 @@ export function ServicesCard({
   services,
   suppliers,
   sellerName,
+  markup,
+  discount,
   commissionType,
   commissionPct,
   commissionAmount,
@@ -96,6 +99,8 @@ export function ServicesCard({
   services: ServiceRow[];
   suppliers: SupplierOption[];
   sellerName: string;
+  markup: number;
+  discount: number;
   commissionType: string;
   commissionPct: number;
   commissionAmount: number;
@@ -106,7 +111,7 @@ export function ServicesCard({
   const [dialogService, setDialogService] = React.useState<ServiceRow | "new" | null>(null);
   const [toDelete, setToDelete] = React.useState<ServiceRow | null>(null);
   const [deleting, setDeleting] = React.useState(false);
-  const [commissionOpen, setCommissionOpen] = React.useState(false);
+  const [markupOpen, setMarkupOpen] = React.useState(false);
 
   /* toggle "pagado a proveedor" optimista: el override vale mientras el servidor
      siga contestando lo mismo; en cuanto llegan datos nuevos se descarta solo. */
@@ -173,17 +178,22 @@ export function ServicesCard({
     return out.sort((a, b) => a.deadline.days - b.deadline.days);
   }, [services, paidOverrides]);
 
-  const totalCost = round2(services.reduce((a, s) => a + s.cost, 0));
-  const totalSale = round2(services.reduce((a, s) => a + s.price, 0));
-  const utility = round2(totalSale - totalCost);
+  const profit = React.useMemo(
+    () =>
+      computeFileProfit({
+        services,
+        markup,
+        discount,
+        commission_type: commissionType,
+        commission_pct: commissionPct,
+        commission_amount: commissionAmount,
+      }),
+    [services, markup, discount, commissionType, commissionPct, commissionAmount],
+  );
   const isFixed = commissionType === "monto_fijo";
-  const commission = fileCommission({
-    commission_type: commissionType,
-    commission_pct: commissionPct,
-    commission_amount: commissionAmount,
-    utility,
-  });
-  const showCommission = isAdmin || commission > 0;
+  /* el socio ve la plata de verdad en la tarjeta de Rentabilidad; acá,
+     "utilidad" es venta − costo y se quedaría corta */
+  const showCommission = !isAdmin && profit.sellerCommission > 0;
 
   return (
     <section className={cn("card animate-slide-up p-4 md:p-5", className)}>
@@ -248,6 +258,7 @@ export function ServicesCard({
                         key={s.id}
                         service={s}
                         currency={currency}
+                        isAdmin={isAdmin}
                         paid={isPaid(s)}
                         onTogglePaid={() => togglePaid(s)}
                         onEdit={() => setDialogService(s)}
@@ -260,26 +271,80 @@ export function ServicesCard({
             })}
           </div>
 
-          {/* totales — costo / venta / utilidad alineados tabular */}
+          {/* totales — cómo se arma lo que paga el cliente */}
           <div className="mt-4 space-y-1.5 rounded-xl bg-sand-soft/60 p-3.5">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-ink-soft">Costo total</span>
-              <span className="font-medium tabular-nums text-ink-soft">
-                {fmtMoney(totalCost, currency)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-ink-soft">Venta total</span>
-              <span className="font-semibold tabular-nums text-ink">
-                {fmtMoney(totalSale, currency)}
-              </span>
-            </div>
+            <TotalLine
+              label="Costo de los servicios"
+              amount={profit.totalCost}
+              currency={currency}
+            />
+            {/* si un servicio se vendió por arriba de su costo, la cuenta lo dice */}
+            {Math.abs(profit.priceAdjustment) > 0.004 && (
+              <TotalLine
+                label="Sobreprecio de servicios"
+                amount={Math.abs(profit.priceAdjustment)}
+                currency={currency}
+                negative={profit.priceAdjustment < 0}
+              />
+            )}
+
+            {/* El markup es del paquete y se ve como tal: si se prorratea entre
+                los servicios, ningún precio del file vuelve a cerrar. Se muestra
+                a todos —si no, la venta total no se explica con lo de arriba—;
+                lo que cambia por rol es quién lo puede tocar. */}
+            {isAdmin ? (
+              <>
+                <MarkupLine
+                  label="Markup del paquete"
+                  amount={profit.markup}
+                  currency={currency}
+                  onEdit={() => setMarkupOpen(true)}
+                />
+                {profit.discount > 0.004 && (
+                  <MarkupLine
+                    label="Descuento"
+                    amount={profit.discount}
+                    currency={currency}
+                    negative
+                    onEdit={() => setMarkupOpen(true)}
+                  />
+                )}
+              </>
+            ) : (
+              <>
+                <TotalLine label="Markup del paquete" amount={profit.markup} currency={currency} />
+                {profit.discount > 0.004 && (
+                  <TotalLine
+                    label="Descuento"
+                    amount={profit.discount}
+                    currency={currency}
+                    negative
+                  />
+                )}
+              </>
+            )}
+
             <div className="flex items-center justify-between border-t border-line pt-1.5">
-              <span className="text-sm font-semibold text-ink">Utilidad</span>
-              <span className="text-lg font-bold tabular-nums text-money-text">
-                {fmtMoney(utility, currency)}
+              <span className="text-sm font-semibold text-ink">Venta total</span>
+              <span
+                className={cn(
+                  "font-bold tabular-nums text-ink",
+                  isAdmin ? "text-lg" : "text-base",
+                )}
+              >
+                {fmtMoney(profit.totalSale, currency)}
               </span>
             </div>
+
+            {/* el vendedor cierra acá: su utilidad y lo que se lleva */}
+            {!isAdmin && (
+              <div className="flex items-center justify-between border-t border-line pt-1.5">
+                <span className="text-sm font-semibold text-ink">Utilidad</span>
+                <span className="text-lg font-bold tabular-nums text-money-text">
+                  {fmtMoney(profit.utility, currency)}
+                </span>
+              </div>
+            )}
 
             {showCommission && (
               <CommissionLine
@@ -288,9 +353,7 @@ export function ServicesCard({
                 isFixed={isFixed}
                 commissionPct={commissionPct}
                 commissionLabel={commissionLabel}
-                commission={commission}
-                editable={isAdmin}
-                onEdit={() => setCommissionOpen(true)}
+                commission={profit.sellerCommission}
               />
             )}
           </div>
@@ -305,25 +368,25 @@ export function ServicesCard({
           currency={currency}
           suppliers={suppliers}
           service={dialogService === "new" ? null : dialogService}
+          isAdmin={isAdmin}
           open
           onOpenChange={(o) => !o && setDialogService(null)}
         />
       )}
 
-      {commissionOpen && (
-        <CommissionDialog
+      {markupOpen && (
+        <MarkupDialog
           fileId={fileId}
           currency={currency}
-          sellerName={sellerName}
-          utility={utility}
-          commissionType={commissionType}
-          commissionPct={commissionPct}
-          commissionAmount={commissionAmount}
-          commissionLabel={commissionLabel}
+          totalCost={profit.totalCost}
+          servicesSale={profit.servicesSale}
+          markup={markup}
+          discount={discount}
           open
-          onOpenChange={setCommissionOpen}
+          onOpenChange={setMarkupOpen}
         />
       )}
+
 
       {toDelete && (
         <Dialog open onOpenChange={(o) => !o && setToDelete(null)}>
@@ -419,6 +482,7 @@ function DeadlineBanner({
 function ServiceItem({
   service: s,
   currency,
+  isAdmin,
   paid,
   onTogglePaid,
   onEdit,
@@ -426,11 +490,17 @@ function ServiceItem({
 }: {
   service: ServiceRow;
   currency: string;
+  isAdmin: boolean;
   paid: boolean;
   onTogglePaid: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  /* el precio del servicio ES su costo salvo que se le haya puesto sobreprecio
+     propio: el markup del paquete vive en el file, no repartido acá */
+  const hasOwnMargin = Math.abs(s.price - s.cost) > 0.004;
+  const supplierCommission = serviceSupplierCommission(s);
+
   return (
     <div className="py-2.5">
       <div className="flex items-start gap-3">
@@ -457,7 +527,14 @@ function ServiceItem({
 
         <div className="shrink-0 text-right tabular-nums">
           <p className="text-sm font-semibold text-ink">{fmtMoney(s.price, currency)}</p>
-          <p className="text-xs text-ink-faint">costo {fmtMoney(s.cost, currency)}</p>
+          {hasOwnMargin && (
+            <p className="text-xs text-ink-faint">costo {fmtMoney(s.cost, currency)}</p>
+          )}
+          {isAdmin && supplierCommission > 0.004 && (
+            <p className="text-xs text-money-text">
+              comisión {fmtMoney(supplierCommission, currency)}
+            </p>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5">
@@ -513,8 +590,66 @@ function ServiceItem({
   );
 }
 
-/* ───────────────────────── comisión del vendedor ───────────────────────── */
+/* ───────────────────────── líneas de los totales ───────────────────────── */
 
+/** Una línea de la cuenta, sin acción. */
+function TotalLine({
+  label,
+  amount,
+  currency,
+  negative,
+}: {
+  label: string;
+  amount: number;
+  currency: string;
+  negative?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 text-sm">
+      <span className="truncate text-ink-soft">{label}</span>
+      <span className="flex shrink-0 items-center gap-1.5 tabular-nums">
+        {negative && <span className="text-ink-faint">−</span>}
+        <span className="font-medium text-ink-soft">{fmtMoney(amount, currency)}</span>
+      </span>
+    </div>
+  );
+}
+
+/** Markup / descuento del paquete. Solo el admin los toca. */
+function MarkupLine({
+  label,
+  amount,
+  currency,
+  negative,
+  onEdit,
+}: {
+  label: string;
+  amount: number;
+  currency: string;
+  negative?: boolean;
+  onEdit: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onEdit}
+      aria-label={`Editar ${label}`}
+      className="-mx-1.5 flex min-h-11 w-full items-center justify-between gap-2 rounded-lg px-1.5 text-left transition-colors hover:bg-sand-deep/50 tap-highlight-none"
+    >
+      <span className="truncate text-sm text-ink-soft">{label}</span>
+      <span className="flex shrink-0 items-center gap-1.5 tabular-nums">
+        {negative && <span className="text-sm text-ink-faint">−</span>}
+        <span className="text-sm font-medium text-ink-soft">{fmtMoney(amount, currency)}</span>
+        <Pencil className="size-3.5 text-ink-faint" strokeWidth={2} />
+      </span>
+    </button>
+  );
+}
+
+/**
+ * Lo que se lleva el vendedor por esta venta. Solo se la mostramos a él:
+ * el desglose de plata de la agencia vive en la tarjeta de Rentabilidad.
+ */
 function CommissionLine({
   sellerName,
   currency,
@@ -522,8 +657,6 @@ function CommissionLine({
   commissionPct,
   commissionLabel,
   commission,
-  editable,
-  onEdit,
 }: {
   sellerName: string;
   currency: string;
@@ -531,11 +664,9 @@ function CommissionLine({
   commissionPct: number;
   commissionLabel: string | null;
   commission: number;
-  editable: boolean;
-  onEdit: () => void;
 }) {
-  const content = (
-    <>
+  return (
+    <div className="flex items-center justify-between gap-2 pt-0.5">
       <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-[13px] text-ink-faint">
         <span className="truncate">
           Comisión {sellerName}
@@ -554,195 +685,10 @@ function CommissionLine({
           </span>
         )}
       </span>
-      <span className="flex shrink-0 items-center gap-1.5">
-        <span className="text-[13px] font-medium tabular-nums text-ink-soft">
-          {fmtMoney(commission, currency)}
-        </span>
-        {editable && <Pencil className="size-3.5 text-ink-faint" strokeWidth={2} />}
+      <span className="shrink-0 text-[13px] font-medium tabular-nums text-ink-soft">
+        {fmtMoney(commission, currency)}
       </span>
-    </>
-  );
-
-  if (!editable) {
-    return <div className="flex items-center justify-between gap-2 pt-0.5">{content}</div>;
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={onEdit}
-      aria-label="Editar la comisión del vendedor"
-      className="-mx-1.5 flex min-h-11 w-full items-center justify-between gap-2 rounded-lg px-1.5 text-left transition-colors hover:bg-sand-deep/50 tap-highlight-none"
-    >
-      {content}
-    </button>
-  );
-}
-
-const COMMISSION_ORDER: CommissionType[] = ["utilidad_pct", "monto_fijo"];
-
-function CommissionDialog({
-  fileId,
-  currency,
-  sellerName,
-  utility,
-  commissionType,
-  commissionPct,
-  commissionAmount,
-  commissionLabel,
-  open,
-  onOpenChange,
-}: {
-  fileId: string;
-  currency: string;
-  sellerName: string;
-  utility: number;
-  commissionType: string;
-  commissionPct: number;
-  commissionAmount: number;
-  commissionLabel: string | null;
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-}) {
-  const [type, setType] = React.useState<CommissionType>(
-    commissionType === "monto_fijo" ? "monto_fijo" : "utilidad_pct",
-  );
-  const [pct, setPct] = React.useState(numToInput(commissionPct));
-  const [amount, setAmount] = React.useState(numToInput(commissionAmount));
-  const [label, setLabel] = React.useState(commissionLabel ?? "");
-  const [loading, setLoading] = React.useState(false);
-
-  const pctNum = parseAmount(pct);
-  const amountNum = parseAmount(amount);
-  const preview = fileCommission({
-    commission_type: type,
-    commission_pct: pctNum,
-    commission_amount: amountNum,
-    utility,
-  });
-
-  const submit = async () => {
-    if (type === "utilidad_pct" && (pctNum < 0 || pctNum > 100)) {
-      toast.error("El porcentaje va de 0 a 100.");
-      return;
-    }
-    if (type === "monto_fijo" && amountNum < 0) {
-      toast.error("El monto no puede ser negativo.");
-      return;
-    }
-    setLoading(true);
-    const res = await updateFileCommission({
-      fileId,
-      commissionType: type,
-      commissionPct: Math.min(100, Math.max(0, pctNum)),
-      commissionAmount: Math.max(0, amountNum),
-      commissionLabel: label.trim() || null,
-    });
-    setLoading(false);
-    if (!res.ok) {
-      toast.error(res.error);
-      return;
-    }
-    toast.success("Listo, actualizamos la comisión");
-    onOpenChange(false);
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        title="Comisión del vendedor"
-        description={`Cómo cobra ${sellerName} esta venta.`}
-      >
-        <div className="space-y-4">
-          <ChoiceGrid<CommissionType>
-            options={COMMISSION_ORDER.map((k) => ({
-              value: k,
-              label: COMMISSION_TYPES[k].label,
-              icon: COMMISSION_TYPES[k].icon,
-              hint: COMMISSION_TYPES[k].hint,
-            }))}
-            value={type}
-            onChange={setType}
-            columns={2}
-          />
-
-          {type === "utilidad_pct" ? (
-            <div>
-              <Label htmlFor="cm-pct">Porcentaje de la utilidad</Label>
-              <div className="relative">
-                <Input
-                  id="cm-pct"
-                  inputMode="decimal"
-                  value={pct}
-                  onChange={(e) => setPct(e.target.value)}
-                  placeholder="0"
-                  className="pr-8 text-right tabular-nums"
-                />
-                <span className="pointer-events-none absolute inset-y-0 right-3.5 flex items-center text-sm text-ink-faint">
-                  %
-                </span>
-              </div>
-              <p className="mt-1.5 text-[11px] text-ink-faint">
-                Utilidad de este file: {fmtMoney(utility, currency)}
-              </p>
-            </div>
-          ) : (
-            <div>
-              <Label htmlFor="cm-amount">Monto por venta</Label>
-              <div className="relative">
-                <Input
-                  id="cm-amount"
-                  inputMode="decimal"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0"
-                  className="pr-12 text-right tabular-nums"
-                />
-                <span className="pointer-events-none absolute inset-y-0 right-3.5 flex items-center text-sm text-ink-faint">
-                  {currency}
-                </span>
-              </div>
-              <p className="mt-1.5 text-[11px] text-ink-faint">
-                Se paga igual, sin importar la utilidad del file.
-              </p>
-            </div>
-          )}
-
-          <div>
-            <Label htmlFor="cm-label">Etiqueta (opcional)</Label>
-            <Input
-              id="cm-label"
-              value={label}
-              maxLength={40}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="Ej: Grupal Europa"
-            />
-            <p className="mt-1.5 text-[11px] text-ink-faint">
-              Queda al lado de la comisión, para acordarte por qué es así.
-            </p>
-          </div>
-
-          <div className="flex items-center justify-between gap-3 rounded-xl bg-money-tint px-3.5 py-3">
-            <div className="min-w-0">
-              <p className="text-[13px] font-semibold text-money-text">Cobra {sellerName}</p>
-              <p className="text-[11px] text-ink-faint">con esta venta</p>
-            </div>
-            <span className="shrink-0 text-xl font-bold tabular-nums text-money-text">
-              {fmtMoney(preview, currency)}
-            </span>
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => onOpenChange(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={submit} loading={loading}>
-              Guardar comisión
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+    </div>
   );
 }
 
@@ -754,6 +700,7 @@ function ServiceDialog({
   currency,
   suppliers,
   service,
+  isAdmin,
   open,
   onOpenChange,
 }: {
@@ -762,6 +709,7 @@ function ServiceDialog({
   currency: string;
   suppliers: SupplierOption[];
   service: ServiceRow | null;
+  isAdmin: boolean;
   open: boolean;
   onOpenChange: (o: boolean) => void;
 }) {
@@ -777,12 +725,35 @@ function ServiceDialog({
   const [uploadingImages, setUploadingImages] = React.useState(false);
   const [cost, setCost] = React.useState(numToInput(service?.cost));
   const [price, setPrice] = React.useState(numToInput(service?.price));
+  const [gross, setGross] = React.useState(numToInput(service?.gross));
+  const [supplierPct, setSupplierPct] = React.useState(numToInput(service?.commission_pct));
   const [loading, setLoading] = React.useState(false);
 
   const costNum = parseAmount(cost);
   const priceNum = parseAmount(price);
-  const utility = round2(priceNum - costNum);
+  const grossNum = parseAmount(gross);
+  const supplierPctNum = parseAmount(supplierPct);
+  const supplierCommission = round2((grossNum * supplierPctNum) / 100);
+  /* al admin le importa todo lo que deja el servicio; al vendedor, su margen */
+  const serviceProfit = round2(priceNum - costNum + (isAdmin ? supplierCommission : 0));
   const canSave = description.trim().length > 0 && !uploadingImages;
+
+  /* el precio arranca igual al costo y lo sigue mientras nadie lo toque a mano:
+     el sobreprecio del paquete va al markup del file, no servicio por servicio */
+  const changeCost = (v: string) => {
+    if (price === cost) setPrice(v);
+    setCost(v);
+  };
+
+  /* al elegir proveedor se precarga su % habitual: nadie se acuerda de memoria
+     cuánto devuelve cada mayorista, y sin el % la comisión no se cuenta */
+  const pickSupplier = (id: string) => {
+    setSupplierId(id);
+    const supplier = suppliers.find((s) => s.id === id);
+    if (supplier && supplier.default_commission_pct > 0 && parseAmount(supplierPct) === 0) {
+      setSupplierPct(numToInput(supplier.default_commission_pct));
+    }
+  };
 
   const submit = async () => {
     if (!canSave) return;
@@ -799,6 +770,11 @@ function ServiceDialog({
       images,
       cost: costNum,
       price: priceNum,
+      // el bruto y el % son plata de la agencia: si el vendedor edita el
+      // servicio, no se mandan y quedan como los dejó el admin
+      ...(isAdmin
+        ? { gross: gross.trim() === "" ? null : grossNum, commissionPct: supplierPctNum }
+        : {}),
     };
     const res = service
       ? await updateService({ serviceId: service.id, ...payload })
@@ -852,7 +828,7 @@ function ServiceDialog({
               <Select
                 id="sv-supplier"
                 value={supplierId}
-                onChange={(e) => setSupplierId(e.target.value)}
+                onChange={(e) => pickSupplier(e.target.value)}
               >
                 <option value="">Sin proveedor</option>
                 {suppliers.map((s) => (
@@ -945,10 +921,11 @@ function ServiceDialog({
                 id="sv-cost"
                 inputMode="decimal"
                 value={cost}
-                onChange={(e) => setCost(e.target.value)}
+                onChange={(e) => changeCost(e.target.value)}
                 placeholder="0"
                 className="text-right tabular-nums"
               />
+              <p className="mt-1.5 text-[11px] text-ink-faint">Lo que le pagás al proveedor.</p>
             </div>
             <div>
               <Label htmlFor="sv-price">Precio de venta ({currency})</Label>
@@ -960,22 +937,75 @@ function ServiceDialog({
                 placeholder="0"
                 className="text-right tabular-nums"
               />
+              <p className="mt-1.5 text-[11px] text-ink-faint">
+                {isAdmin
+                  ? "El sobreprecio del paquete va en el markup, no acá."
+                  : "Lo que se le cobra por este servicio. Normalmente, igual al costo."}
+              </p>
             </div>
           </div>
 
+          {/* de acá sale la mayor parte de lo que gana la agencia y no está en
+              precio − costo: la devuelve el mayorista sobre la tarifa bruta */}
+          {isAdmin && (
+            <div className="rounded-xl border border-line bg-sand-soft/50 p-3">
+              <p className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-ink">
+                <HandCoins className="size-4 text-ink-faint" strokeWidth={1.9} />
+                Comisión del mayorista
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="sv-gross">Bruto comisionable ({currency})</Label>
+                  <Input
+                    id="sv-gross"
+                    inputMode="decimal"
+                    value={gross}
+                    onChange={(e) => setGross(e.target.value)}
+                    placeholder="0"
+                    className="text-right tabular-nums"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="sv-pct">Comisión</Label>
+                  <div className="relative">
+                    <Input
+                      id="sv-pct"
+                      inputMode="decimal"
+                      value={supplierPct}
+                      onChange={(e) => setSupplierPct(e.target.value)}
+                      placeholder="0"
+                      className="pr-8 text-right tabular-nums"
+                    />
+                    <span className="pointer-events-none absolute inset-y-0 right-3.5 flex items-center text-sm text-ink-faint">
+                      %
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-[13px] text-ink-soft">Devuelve el mayorista</span>
+                <span className="text-sm font-semibold tabular-nums text-money-text">
+                  {fmtMoney(supplierCommission, currency)}
+                </span>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-between rounded-xl bg-sand-soft/60 px-3.5 py-2.5">
-            <span className="text-sm text-ink-soft">Utilidad del servicio</span>
+            <span className="text-sm text-ink-soft">
+              {isAdmin ? "Deja este servicio" : "Utilidad del servicio"}
+            </span>
             <span
               className={cn(
                 "font-semibold tabular-nums",
-                utility > 0
+                serviceProfit > 0
                   ? "text-money-text"
-                  : utility < 0
+                  : serviceProfit < 0
                     ? "text-tone-red-text"
                     : "text-ink-faint",
               )}
             >
-              {fmtMoney(utility, currency)}
+              {fmtMoney(serviceProfit, currency)}
             </span>
           </div>
 

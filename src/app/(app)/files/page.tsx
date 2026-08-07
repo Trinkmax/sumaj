@@ -1,5 +1,6 @@
 import { requireMember } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { fileNetProfit } from "@/lib/domain";
 import { PageHeader } from "@/components/shell/page-header";
 import { FilesList } from "@/components/files/files-list";
 import { NewFileButton } from "@/components/files/new-file-dialog";
@@ -15,10 +16,12 @@ export default async function FilesPage() {
     supabase
       .from("files")
       .select(
-        "id, code, destination, status, review_status, currency, departure_date, return_date, created_at, seller_id, contact_id, contact:contacts(id, full_name), seller:members!files_seller_id_fkey(id, display_name)",
+        "id, code, destination, status, review_status, currency, departure_date, return_date, created_at, seller_id, contact_id, commission_type, commission_pct, commission_amount, contact:contacts(id, full_name), seller:members!files_seller_id_fkey(id, display_name)",
       )
       .order("created_at", { ascending: false }),
-    supabase.from("file_totals").select("file_id, total_cost, total_sale, utility, paid_total, balance"),
+    supabase
+      .from("file_totals")
+      .select("file_id, total_cost, total_sale, utility, supplier_commission, paid_total, balance"),
     supabase.from("contacts").select("id, full_name, phone").order("full_name"),
     supabase
       .from("members")
@@ -33,6 +36,7 @@ export default async function FilesPage() {
       {
         total_sale: Number(t.total_sale) || 0,
         utility: Number(t.utility) || 0,
+        supplier_commission: Number(t.supplier_commission) || 0,
         paid_total: Number(t.paid_total) || 0,
         balance: Number(t.balance) || 0,
       },
@@ -41,6 +45,17 @@ export default async function FilesPage() {
 
   const rows: FileListRow[] = (filesRes.data ?? []).map((f) => {
     const t = totalsByFile.get(f.id);
+    /* el vendedor ve venta − costo, que es su base de comisión; el socio ve la
+       plata que de verdad queda: + comisión del mayorista − comisión del vendedor */
+    const utility = !t
+      ? 0
+      : isAdmin
+        ? fileNetProfit(t, {
+            commission_type: f.commission_type,
+            commission_pct: Number(f.commission_pct) || 0,
+            commission_amount: Number(f.commission_amount) || 0,
+          })
+        : t.utility;
     return {
       id: f.id,
       code: f.code,
@@ -56,7 +71,7 @@ export default async function FilesPage() {
       contact_name: f.contact?.full_name ?? "—",
       seller_name: f.seller?.display_name ?? null,
       total_sale: t?.total_sale ?? 0,
-      utility: t?.utility ?? 0,
+      utility,
       paid_total: t?.paid_total ?? 0,
       balance: t?.balance ?? 0,
     };

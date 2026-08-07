@@ -5,7 +5,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getMemberContext, type MemberContext } from "@/lib/auth";
 import { round2 } from "@/lib/domain";
-import type { ActivityType, LeadStage, TablesInsert } from "@/lib/types";
+import type { ActivityType, LeadStage, ServiceType, TablesInsert } from "@/lib/types";
 
 export type ActionResult<T = null> =
   | { ok: true; data: T }
@@ -174,9 +174,78 @@ export function selectQuoteSale<
 }
 
 /**
- * Convierte un lead en venta (file). Si hay presupuesto, arma los servicios
- * a partir de sus ítems distribuyendo el markup proporcionalmente para que
- * Σ precio de venta = Precio Cliente del presupuesto.
+ * Ítem del presupuesto tal como llega de la base al convertirlo en venta.
+ * Los numéricos vienen como string desde postgres, por eso el union.
+ */
+type QuoteSaleItem = {
+  type: ServiceType;
+  description: string;
+  supplier_id: string | null;
+  cost: number | string;
+  gross: number | string | null;
+  commission_pct: number | string;
+  position: number;
+};
+
+/**
+ * Markup y descuento del paquete al pasar a la venta.
+ *
+ * Antes esto se prorrateaba entre los servicios para que Σ precio diera el
+ * Precio Cliente, y el file terminaba con precios que no existen en ningún
+ * lado ("el aéreo sale 1.326,43" cuando el aéreo sale 1.313,76). El markup
+ * es del paquete, así que viaja al file como su propia línea y cada servicio
+ * conserva su precio real.
+ *
+ * Invariante: markup ≥ 0, descuento ≥ 0, y markup − descuento = precio − costo,
+ * de modo que la venta total del file sigue siendo el Precio Cliente exacto.
+ */
+export function quotePackageMarkup(input: {
+  saleItems: Pick<QuoteSaleItem, "cost">[];
+  totalPrice: number;
+  discount: number | string | null;
+}): { markup: number; discount: number } {
+  const totalCost = round2(input.saleItems.reduce((a, i) => a + Number(i.cost), 0));
+  const delta = round2(input.totalPrice - totalCost);
+  const quoted = round2(Math.max(0, Number(input.discount) || 0));
+  const discount = delta < 0 ? Math.max(quoted, round2(-delta)) : quoted;
+  return { markup: round2(delta + discount), discount };
+}
+
+/**
+ * Servicios del file a partir de los ítems del presupuesto.
+ * Cada uno se lleva el bruto y el % del mayorista: sin eso el file no puede
+ * saber cuánto gana de verdad la agencia (la comisión del mayorista no está
+ * en precio − costo, la devuelve el proveedor aparte).
+ */
+export function buildFileServices(input: {
+  agencyId: string;
+  fileId: string;
+  saleItems: QuoteSaleItem[];
+  dateFrom: string | null;
+  dateTo: string | null;
+}): TablesInsert<"file_services">[] {
+  return [...input.saleItems]
+    .sort((a, b) => a.position - b.position)
+    .map((item) => ({
+      agency_id: input.agencyId,
+      file_id: input.fileId,
+      type: item.type,
+      description: item.description,
+      supplier_id: item.supplier_id,
+      date_from: input.dateFrom,
+      date_to: input.dateTo,
+      cost: Number(item.cost),
+      price: Number(item.cost),
+      gross: item.gross === null ? null : Number(item.gross),
+      commission_pct: Number(item.commission_pct) || 0,
+      position: item.position,
+    }));
+}
+
+/**
+ * Convierte un lead en venta (file). Si hay presupuesto, cada servicio pasa
+ * con su precio real y el markup del paquete queda como una línea del file
+ * (ver quotePackageMarkup): la venta total sigue siendo el Precio Cliente.
  * El dato entra una vez y fluye: lead → file → cliente, sin retipear.
  */
 export async function convertLeadToSale(input: {
@@ -230,6 +299,18 @@ export async function convertLeadToSale(input: {
     }
   }
 
+  // El markup viaja en el INSERT, no en un UPDATE posterior: en la base, cambiar
+  // el markup de un file ya creado es privilegio de admin (trigger de la 0021).
+  const sale = quote ? selectQuoteSale(quote, quote.items, quote.options ?? []) : null;
+  const pkg =
+    quote && sale && sale.saleItems.length > 0
+      ? quotePackageMarkup({
+          saleItems: sale.saleItems,
+          totalPrice: sale.totalPrice,
+          discount: quote.discount,
+        })
+      : { markup: 0, discount: 0 };
+
   const { data: file, error: fileError } = await supabase
     .from("files")
     .insert({
@@ -243,6 +324,8 @@ export async function convertLeadToSale(input: {
       return_date: quote?.trip_date_to ?? lead.trip_date_to,
       currency: quote?.currency ?? "USD",
       commission_pct: sellerCommission,
+      markup: pkg.markup,
+      discount: pkg.discount,
       status: "vendido",
       // nace del pipeline: los montos y servicios vienen del presupuesto,
       // así que la venta entra en revisión hasta que un admin la valide
@@ -253,33 +336,15 @@ export async function convertLeadToSale(input: {
 
   if (fileError || !file) return fail("No se pudo crear el file.");
 
-  // servicios desde el presupuesto, con markup distribuido proporcionalmente
-  const sale = quote ? selectQuoteSale(quote, quote.items, quote.options ?? []) : null;
+  // servicios desde el presupuesto, cada uno con su precio real
   if (quote && sale && sale.saleItems.length > 0) {
-    const totalCost = sale.saleItems.reduce((a, i) => a + Number(i.cost), 0);
-    const factor = totalCost > 0 ? sale.totalPrice / totalCost : 1;
-    let priceAcc = 0;
-    const services = [...sale.saleItems]
-      .sort((a, b) => a.position - b.position)
-      .map((item, idx, arr) => {
-        const isLast = idx === arr.length - 1;
-        const price = isLast
-          ? round2(sale.totalPrice - priceAcc)
-          : round2(Number(item.cost) * factor);
-        priceAcc = round2(priceAcc + price);
-        return {
-          agency_id: agency.id,
-          file_id: file.id,
-          type: item.type,
-          description: item.description,
-          supplier_id: item.supplier_id,
-          date_from: quote.trip_date_from,
-          date_to: quote.trip_date_to,
-          cost: Number(item.cost),
-          price,
-          position: item.position,
-        };
-      });
+    const services = buildFileServices({
+      agencyId: agency.id,
+      fileId: file.id,
+      saleItems: sale.saleItems,
+      dateFrom: quote.trip_date_from,
+      dateTo: quote.trip_date_to,
+    });
     const { error: servicesError } = await supabase.from("file_services").insert(services);
     if (servicesError) {
       // sin transacción entre round-trips: si fallan los servicios,
