@@ -671,8 +671,10 @@ export async function convertQuoteDirect(input: {
 
   const sale = selectQuoteSale(quote, quote.items, quote.options ?? []);
 
-  // vendedor: quien creó el presupuesto, o quien convierte
-  let sellerId = quote.created_by ?? member.id;
+  // Vendedor: quien creó el presupuesto, o quien convierte. El id y el % van
+  // siempre en pareja: si no podemos leer la ficha del otro, queda a nombre de
+  // quien convierte con su propio %.
+  let sellerId = member.id;
   let sellerCommission = member.commission_pct;
   if (quote.created_by && quote.created_by !== member.id) {
     const { data: seller } = await supabase

@@ -285,7 +285,10 @@ export async function convertLeadToSale(input: {
   }
 
   // vendedor del file: el asignado al lead, o quien convierte
-  let sellerId = lead.assigned_to ?? member.id;
+  // vendedor y % viajan juntos SIEMPRE: si no podemos leer la ficha del
+  // asignado, la venta queda a nombre de quien convierte con su propio %
+  // (un file con el vendedor de uno y la comisión de otro no existe)
+  let sellerId = member.id;
   let sellerCommission = member.commission_pct;
   if (lead.assigned_to && lead.assigned_to !== member.id) {
     const { data: seller } = await supabase

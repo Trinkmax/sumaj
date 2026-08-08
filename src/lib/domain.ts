@@ -339,15 +339,23 @@ export const COMMISSION_TYPES: Record<
   },
 };
 
-/** Comisión del vendedor por una venta, según el esquema del file. */
+/**
+ * Comisión del vendedor por una venta, según el esquema del file.
+ *
+ * Nunca negativa: si la venta pierde plata (un descuento mayor al markup), el
+ * vendedor no cobra, pero tampoco "debe". Sin este piso, la comisión negativa
+ * se restaba de lo que sí ganó en otros files al liquidar el mes en Caja.
+ */
 export function fileCommission(input: {
   commission_type: string | null;
   commission_pct: number;
   commission_amount: number;
   utility: number;
 }): number {
-  if (input.commission_type === "monto_fijo") return round2(input.commission_amount || 0);
-  return round2(((input.utility || 0) * (input.commission_pct || 0)) / 100);
+  if (input.commission_type === "monto_fijo") {
+    return round2(Math.max(0, input.commission_amount || 0));
+  }
+  return round2(Math.max(0, ((input.utility || 0) * (input.commission_pct || 0)) / 100));
 }
 
 /* ───────────────────────────────────────────
@@ -750,8 +758,20 @@ export function sellerMarkupCommission(
   return round2((markupAmount * (pct || 0)) / 100);
 }
 
+/**
+ * Redondeo a 2 decimales, medio para arriba SOBRE EL VALOR DECIMAL.
+ *
+ * `Math.round(n * 100)` redondea sobre el binario: 1257,34 × 25% da
+ * 314,33499999999998 en float y terminaba en 314,33, mientras Postgres
+ * —que hace la misma cuenta en numeric exacto— devuelve 314,34. Con la vista
+ * `file_totals` calculando comisión del mayorista, esa diferencia de un centavo
+ * se veía: el KPI del mes y la tarjeta de Rentabilidad del mismo file no
+ * cerraban. `toPrecision(15)` limpia el ruido binario antes de redondear y
+ * reproduce el half-away-from-zero de `round(numeric, 2)`.
+ */
 export function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
+  const scaled = Number((Math.abs(n) * 100).toPrecision(15));
+  return ((n < 0 ? -1 : 1) * Math.round(scaled)) / 100;
 }
 
 /* ───────────────────────────────────────────

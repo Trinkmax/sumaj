@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
+import { TriangleAlert } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -119,6 +120,19 @@ export function MarkupDialog({
               mayorista va aparte.
             </p>
           </div>
+
+          {/* con la utilidad en negativo el vendedor no cobra: mejor decirlo
+              antes de guardar que descubrirlo al liquidar el mes */}
+          {utility < -0.004 && (
+            <p className="flex items-start gap-2 rounded-xl border border-tone-amber-line bg-tone-amber-soft px-3 py-2.5 text-[12px] leading-snug text-tone-amber-text">
+              <TriangleAlert className="mt-px size-4 shrink-0" strokeWidth={2} />
+              <span>
+                Estás vendiendo por debajo del costo de los servicios. El vendedor no cobra
+                comisión por esta venta; fijate si la comisión del mayorista alcanza para
+                cubrirla.
+              </span>
+            </p>
+          )}
 
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => onOpenChange(false)}>
