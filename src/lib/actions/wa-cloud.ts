@@ -850,18 +850,54 @@ export async function runCloudDiagnostics(): Promise<ActionResult<CloudStatus>> 
   } else {
     patch.webhook_subscribed = true;
     patch.webhook_callback_url = sub.data.callbackUrl;
-    const apunta = !esperada || !sub.data.callbackUrl || sub.data.callbackUrl === esperada;
-    checks.push(
-      apunta
-        ? { key: "webhook", label: "Webhook", level: "ok", detail: "Meta entrega los mensajes al sistema.", action: null }
-        : {
-            key: "webhook",
-            label: "Webhook",
-            level: "warn",
-            detail: `Meta está entregando los mensajes a ${sub.data.callbackUrl}.`,
-            action: "No es la dirección de este sistema. Tocá Conectar para corregirla.",
-          },
-    );
+
+    /* Estar suscripto NO alcanza: hace falta una URL a donde entregar.
+       Meta acepta dos lugares —el override de la cuenta y la config de la app—
+       y con cualquiera de los dos alcanza, así que si no hay override hay que
+       ir a preguntar por la de la app ANTES de decir que está todo bien.
+
+       Este chequeo daba verde cuando `callbackUrl` venía null, tratándolo como
+       "no sabemos, asumimos que sí". Era el peor error posible en un
+       diagnóstico: la agencia veía "Meta entrega los mensajes al sistema",
+       mandaba un mensaje de prueba, no llegaba nada, y no había ni un renglón
+       que explicara por qué. Sin URL, no llega nada: eso es un error, no una
+       duda. */
+    const appUrlConfigurada =
+      creds.appId && creds.appSecret
+        ? await getAppSubscription({ appId: creds.appId, appSecret: creds.appSecret })
+        : null;
+    const enElApp = appUrlConfigurada?.ok ? appUrlConfigurada.data.callbackUrl : null;
+    const entregaA = sub.data.callbackUrl ?? enElApp;
+
+    if (!entregaA) {
+      checks.push({
+        key: "webhook",
+        label: "Webhook",
+        level: "error",
+        detail:
+          "Meta no tiene ninguna dirección a la que entregarte los mensajes: la cuenta está suscripta, pero sin URL configurada.",
+        action: "Tocá Conectar acá arriba: el sistema le carga la suya.",
+      });
+    } else {
+      const apunta = !esperada || entregaA === esperada;
+      checks.push(
+        apunta
+          ? {
+              key: "webhook",
+              label: "Webhook",
+              level: "ok",
+              detail: "Meta entrega los mensajes al sistema.",
+              action: null,
+            }
+          : {
+              key: "webhook",
+              label: "Webhook",
+              level: "warn",
+              detail: `Meta está entregando los mensajes a ${entregaA}.`,
+              action: "No es la dirección de este sistema. Tocá Conectar para corregirla.",
+            },
+      );
+    }
   }
 
   const hayError = checks.some((c) => c.level === "error");
