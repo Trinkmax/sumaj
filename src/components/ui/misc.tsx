@@ -5,7 +5,7 @@ import * as PopoverPrimitive from "@radix-ui/react-popover";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import * as SwitchPrimitive from "@radix-ui/react-switch";
 import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
-import { Check, type LucideIcon } from "lucide-react";
+import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* ── Popover ── */
@@ -192,6 +192,12 @@ const CHOICE_COLS: Record<2 | 3 | 4 | 5, string> = {
   5: "grid-cols-5",
 };
 
+/**
+ * Cualquier icono que se pueda pintar en un tile: los de lucide y los de marca
+ * que van a mano (`ui/brand-icons`), que lucide dejó de traer en la v1.
+ */
+export type TileIcon = React.ComponentType<{ className?: string; strokeWidth?: number }>;
+
 export function ChoiceGrid<T extends string>({
   options,
   value,
@@ -200,7 +206,7 @@ export function ChoiceGrid<T extends string>({
   size = "md",
   className,
 }: {
-  options: { value: T; label: string; icon?: LucideIcon; hint?: string }[];
+  options: { value: T; label: string; icon?: TileIcon; hint?: string }[];
   value: T | null | undefined;
   onChange: (v: T) => void;
   columns?: 2 | 3 | 4 | 5;

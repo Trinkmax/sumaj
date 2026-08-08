@@ -5,7 +5,9 @@ import Link from "next/link";
 import { Clock, ReceiptText, Send, StickyNote, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/misc";
+import { WhatsAppIcon } from "@/components/quotes/wa-icon";
 import { markConversationRead, sendMessage, sendTemplate } from "@/lib/actions/messages";
 import { sendInternalNote } from "@/lib/actions/crm-panel";
 import { fmtDate } from "@/lib/format";
@@ -29,23 +31,32 @@ const VAR_LABELS: Record<string, string> = {
 };
 
 /**
- * Capacidad REAL de enviar por WhatsApp, calculada en el server (donde se leen
- * las envs del worker y de la Cloud API). `agency.settings.whatsapp.connected`
- * no alcanza: es una preferencia guardada, no la infraestructura viva.
+ * Capacidad REAL de enviar, calculada en el server (donde se leen las envs del
+ * worker y las credenciales de Meta). `agency.settings.whatsapp.connected` no
+ * alcanza: es una preferencia guardada, no la infraestructura viva.
  */
 export type WaSendCapability = {
   /** worker de Baileys configurado: los números de las sucursales */
   worker: boolean;
   /** Cloud API de Meta configurada: el número madre */
   cloud: boolean;
+  /** cuenta de Instagram conectada: los DMs */
+  instagram: boolean;
 };
 
 type EmbeddedConversation = Pick<
   Tables<"conversations">,
-  "id" | "agency_id" | "contact_id" | "status" | "wa_id" | "last_inbound_at" | "unread_count"
+  | "id"
+  | "agency_id"
+  | "contact_id"
+  | "status"
+  | "channel"
+  | "wa_id"
+  | "last_inbound_at"
+  | "unread_count"
 > & {
   contact: Pick<Tables<"contacts">, "id" | "full_name" | "phone"> | null;
-  /** por qué número sale el mensaje: define si aplica la ventana de 24 hs */
+  /** por qué canal sale el mensaje: define si aplica la ventana de 24 hs */
   channel_ref: Pick<
     Tables<"wa_channels">,
     "id" | "kind" | "label" | "status" | "phone_number_id"
@@ -69,6 +80,32 @@ function sendBlock(
 ): SendBlock | null {
   if (!conversation) return null;
   const channel = conversation.channel_ref;
+
+  // Instagram va primero y con su propia lógica: acá el destinatario no es un
+  // teléfono sino el IGSID de la persona (`wa_id`), así que un contacto sin
+  // teléfono cargado no impide nada.
+  //
+  // Se mira también `conversation.channel`: si alguien borró y rehizo el canal,
+  // la conversación queda sin `channel_ref` (la FK es ON DELETE SET NULL) y sin
+  // esto el chat mandaría al vendedor a configurar sucursales de WhatsApp.
+  if (channel?.kind === "instagram" || (!channel && conversation.channel === "instagram")) {
+    if (!waSend.instagram)
+      return {
+        title: "Instagram sin conectar",
+        detail:
+          "Todavía no está conectada la cuenta de Instagram, así que los mensajes no salen.",
+        link: { href: "/config/instagram", label: "Configuración · Instagram" },
+      };
+    if (!conversation.wa_id)
+      return {
+        title: "Chat sin identificar",
+        detail:
+          "Este chat no tiene el identificador de Instagram de la persona. Se completa solo cuando vuelva a escribir.",
+        link: null,
+      };
+    return null;
+  }
+
   const to = conversation.contact?.phone ?? conversation.wa_id;
 
   if (!to)
@@ -126,12 +163,15 @@ export function EmbeddedChat({
   meId,
   waSend,
   onQuoteRequest,
+  onBridgeRequest,
   className,
 }: {
   conversationId: string;
   meId: string;
   waSend: WaSendCapability;
   onQuoteRequest?: () => void;
+  /** si viene, en los chats de Instagram aparece el pase a WhatsApp */
+  onBridgeRequest?: () => void;
   className?: string;
 }) {
   const [loadedId, setLoadedId] = useState<string | null>(null);
@@ -165,10 +205,12 @@ export function EmbeddedChat({
      avisa y no deja mandar (antes se guardaba como "enviado" sin salir). */
   const blocked = useMemo(() => sendBlock(conversation, waSend), [conversation, waSend]);
   const canSend = conversation != null && blocked == null;
-  /* La ventana de 24 hs es una regla de la Cloud API: se exige SOLO cuando el
-     mensaje va a salir de verdad por el número madre. Por el número de una
-     sucursal (Baileys) se escribe siempre — el seguimiento no se paga — y si el
-     madre no está conectado, la ventana no puede tapar el primer mensaje. */
+  const isInstagram =
+    conversation?.channel_ref?.kind === "instagram" || conversation?.channel === "instagram";
+  /* La ventana de 24 hs es una regla de Meta y aplica a sus dos canales: el
+     número madre (Cloud API) e Instagram. Por el número de una sucursal
+     (Baileys) se escribe siempre — el seguimiento no se paga — y si el canal de
+     Meta no está conectado, la ventana no puede tapar el primer mensaje. */
   const windowApplies = canSend && conversation?.channel_ref?.kind !== "baileys";
   const windowOpen =
     !windowApplies ||
@@ -196,7 +238,7 @@ export function EmbeddedChat({
         supabase
           .from("conversations")
           .select(
-            "id, agency_id, contact_id, status, wa_id, last_inbound_at, unread_count, contact:contacts(id, full_name, phone), channel_ref:wa_channels(id, kind, label, status, phone_number_id)",
+            "id, agency_id, contact_id, status, channel, wa_id, last_inbound_at, unread_count, contact:contacts(id, full_name, phone), channel_ref:wa_channels(id, kind, label, status, phone_number_id)",
           )
           .eq("id", conversationId)
           .maybeSingle(),
@@ -472,6 +514,22 @@ export function EmbeddedChat({
     </Tooltip>
   );
 
+  /* El movimiento que cierra la venta: Instagram trae la consulta, WhatsApp la
+     trabaja. Va en verde y siempre a la vista dentro de un chat de Instagram,
+     no escondido en un menú. */
+  const bridgeButton = isInstagram && onBridgeRequest && (
+    <Tooltip content="Seguir la charla por WhatsApp">
+      <button
+        type="button"
+        onClick={onBridgeRequest}
+        className="flex size-11 shrink-0 items-center justify-center rounded-full text-wa-accent transition-colors hover:bg-wa-hover active:scale-95 tap-highlight-none"
+        aria-label="Pasar a WhatsApp"
+      >
+        <WhatsAppIcon className="size-5" />
+      </button>
+    </Tooltip>
+  );
+
   /* Aviso persistente: queda arriba del composer todo el tiempo que el chat no
      pueda enviar. Un placeholder no alcanza — desaparece al primer tecleo. */
   const sendNotice = blocked && (
@@ -503,6 +561,7 @@ export function EmbeddedChat({
       <div className="flex items-end gap-1">
         {noteToggle}
         {quoteButton}
+        {bridgeButton}
         <div
           className={cn(
             "flex min-w-0 flex-1 items-end rounded-lg transition-colors",
@@ -637,6 +696,49 @@ export function EmbeddedChat({
           </>
         ) : noteMode ? (
           composerBar
+        ) : isInstagram ? (
+          /* En Instagram no hay plantillas pagas: fuera de las 24 hs la salida
+             es WhatsApp (o esperar a que la persona vuelva a escribir). Ofrecer
+             un TemplatePicker acá sería ofrecer algo que no existe. */
+          <>
+            <div className="flex items-start gap-2.5 bg-wa-panel-alt px-4 py-2.5 text-[12.5px] leading-snug text-wa-ink-soft">
+              <Clock className="mt-0.5 size-4 shrink-0 text-wa-ink-faint" />
+              <p className="flex-1">
+                <span className="font-semibold text-wa-ink">
+                  Se cerró la ventana de 24 hs
+                </span>{" "}
+                — Instagram no deja escribir hasta que la persona vuelva a
+                mandar un mensaje.
+              </p>
+              <Tooltip content="Nota interna (no la ve el cliente)">
+                <button
+                  type="button"
+                  onClick={() => setNoteMode(true)}
+                  className="-my-1 flex size-9 shrink-0 items-center justify-center rounded-full text-wa-ink-soft transition-colors hover:bg-wa-hover active:scale-95 tap-highlight-none"
+                  aria-label="Nota interna"
+                >
+                  <StickyNote className="size-4.5" strokeWidth={1.9} />
+                </button>
+              </Tooltip>
+            </div>
+            <div className="border-t border-wa-line bg-wa-panel-alt px-3 py-3 md:px-4">
+              {onBridgeRequest ? (
+                <>
+                  <Button variant="whatsapp" onClick={onBridgeRequest} className="w-full">
+                    <WhatsAppIcon className="size-4" />
+                    Seguir por WhatsApp
+                  </Button>
+                  <p className="mt-2 px-1 text-center text-[11.5px] leading-snug text-wa-ink-faint">
+                    Le escribís desde el número de la sucursal: ahí no hay ventana de 24 hs.
+                  </p>
+                </>
+              ) : (
+                <p className="px-1 py-2 text-center text-[13px] leading-relaxed text-wa-ink-faint">
+                  Esperá a que la persona escriba para poder contestarle.
+                </p>
+              )}
+            </div>
+          </>
         ) : (
           <>
             <div className="flex items-start gap-2.5 bg-wa-panel-alt px-4 py-2.5 text-[12.5px] leading-snug text-wa-ink-soft">

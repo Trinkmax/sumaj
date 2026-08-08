@@ -7,13 +7,7 @@ import {
   Bot,
   Check,
   CheckCheck,
-  ChevronRight,
-  CircleAlert,
-  CircleCheck,
-  CircleDashed,
   Copy,
-  Eye,
-  EyeOff,
   KeyRound,
   ListChecks,
   Lock,
@@ -35,6 +29,14 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { EmptyState, Switch } from "@/components/ui/misc";
 import { ConfirmDialog } from "@/components/config/confirm-dialog";
+import {
+  CheckRow,
+  Crumb,
+  IdField,
+  SecretField,
+  Step,
+  copyToClipboard,
+} from "@/components/config/wizard-bits";
 import { createMotherChannel, updateChannelSettings } from "@/lib/actions/branches";
 import {
   connectCloud,
@@ -44,7 +46,6 @@ import {
   runCloudDiagnostics,
   saveCloudCredentials,
   selectCloudNumber,
-  type CloudCheck,
   type CloudStatus,
 } from "@/lib/actions/wa-cloud";
 import type { CloudPhoneNumber } from "@/lib/wa/cloud";
@@ -90,20 +91,6 @@ const STEPS: { icon: LucideIcon; title: string; body: string }[] = [
   },
 ];
 
-/** Miga de pan inline (reemplaza los "→" literales). */
-function Crumb({ parts }: { parts: string[] }) {
-  return (
-    <span className="inline-flex flex-wrap items-center gap-0.5 align-baseline font-medium text-ink">
-      {parts.map((p, i) => (
-        <React.Fragment key={i}>
-          {i > 0 && <ChevronRight className="size-3 shrink-0 text-ink-faint" aria-hidden />}
-          {p}
-        </React.Fragment>
-      ))}
-    </span>
-  );
-}
-
 function HowItWorks() {
   return (
     <section className="card p-5 animate-slide-up">
@@ -129,159 +116,6 @@ function HowItWorks() {
         ))}
       </ol>
     </section>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════
-   Piezas chicas
-   ═══════════════════════════════════════════════════════════ */
-
-async function copyToClipboard(text: string, okMessage: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast.success(okMessage);
-    return true;
-  } catch {
-    toast.error("No se pudo copiar. Copialo a mano.");
-    return false;
-  }
-}
-
-/** Un paso del asistente: número (o tilde cuando ya está hecho) + título. */
-function Step({
-  n,
-  title,
-  description,
-  done,
-  children,
-}: {
-  n: number;
-  title: string;
-  description: string;
-  done: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="border-t border-line p-5 first:border-t-0">
-      <div className="flex items-start gap-3">
-        <span
-          className={cn(
-            "flex size-7 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold tabular-nums transition-colors",
-            done
-              ? "bg-tone-emerald-soft text-tone-emerald-text"
-              : "bg-ink text-cream",
-          )}
-          aria-hidden
-        >
-          {done ? <Check className="size-4 animate-check-pop" strokeWidth={2.5} /> : n}
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="text-[15px] font-semibold text-ink">{title}</h3>
-          <p className="mt-0.5 text-sm leading-relaxed text-ink-soft">{description}</p>
-        </div>
-      </div>
-      <div className="mt-4 sm:pl-10">{children}</div>
-    </div>
-  );
-}
-
-/** Campo de credencial sensible: ojo para mirar lo que se pega, nada más. */
-function SecretField({
-  id,
-  label,
-  value,
-  onChange,
-  placeholder,
-  hint,
-  loaded,
-  loadedLabel,
-  disabled,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  hint: React.ReactNode;
-  loaded: boolean;
-  loadedLabel: string;
-  disabled?: boolean;
-}) {
-  const [show, setShow] = React.useState(false);
-  return (
-    <div>
-      <div className="mb-1.5 flex flex-wrap items-center gap-2">
-        <Label htmlFor={id} className="mb-0">
-          {label}
-        </Label>
-        {loaded && (
-          <span className="inline-flex items-center gap-1 rounded-full border border-tone-emerald-line bg-tone-emerald-soft px-2 py-0.5 text-[11px] font-medium leading-4 text-tone-emerald-text">
-            <Check className="size-3" strokeWidth={2.75} aria-hidden />
-            {loadedLabel}
-          </span>
-        )}
-      </div>
-      <div className="relative">
-        <Input
-          id={id}
-          type={show ? "text" : "password"}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          autoComplete="off"
-          spellCheck={false}
-          disabled={disabled}
-          className="h-11 pr-11 font-mono text-[13px]"
-        />
-        <button
-          type="button"
-          onClick={() => setShow((s) => !s)}
-          aria-label={show ? `Ocultar ${label.toLowerCase()}` : `Mostrar ${label.toLowerCase()}`}
-          className="absolute right-1.5 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-lg text-ink-faint transition-colors hover:bg-sand-soft hover:text-ink tap-highlight-none"
-        >
-          {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-        </button>
-      </div>
-      <p className="mt-1.5 text-xs leading-relaxed text-ink-faint">{hint}</p>
-    </div>
-  );
-}
-
-/** Campo de dato público (los IDs de Meta): mismo aire, sin ojo. */
-function IdField({
-  id,
-  label,
-  value,
-  onChange,
-  placeholder,
-  hint,
-  disabled,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  hint: React.ReactNode;
-  disabled?: boolean;
-}) {
-  return (
-    <div>
-      <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        value={value}
-        onChange={(e) => onChange(e.target.value.replace(/\s/g, ""))}
-        placeholder={placeholder}
-        inputMode="numeric"
-        autoComplete="off"
-        spellCheck={false}
-        maxLength={30}
-        disabled={disabled}
-        className="h-11 font-mono text-[13px]"
-      />
-      <p className="mt-1.5 text-xs leading-relaxed text-ink-faint">{hint}</p>
-    </div>
   );
 }
 
@@ -402,35 +236,6 @@ function NumberCard({
     >
       {body}
     </button>
-  );
-}
-
-const CHECK_META: Record<CloudCheck["level"], { icon: LucideIcon; color: string }> = {
-  ok: { icon: CircleCheck, color: "text-tone-emerald-text" },
-  warn: { icon: TriangleAlert, color: "text-tone-amber-text" },
-  error: { icon: CircleAlert, color: "text-tone-red-text" },
-  pending: { icon: CircleDashed, color: "text-tone-stone-text" },
-};
-
-function CheckRow({ check }: { check: CloudCheck }) {
-  const meta = CHECK_META[check.level] ?? CHECK_META.pending;
-  return (
-    <li className="flex items-start gap-3">
-      <meta.icon
-        className={cn("mt-0.5 size-4.5 shrink-0", meta.color)}
-        strokeWidth={1.9}
-        aria-hidden
-      />
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-ink">{check.label}</p>
-        <p className="mt-0.5 text-[13px] leading-relaxed text-ink-soft">{check.detail}</p>
-        {check.action && (
-          <p className="mt-1.5 rounded-xl bg-sand-soft/70 px-3 py-2 text-[13px] leading-relaxed text-ink-soft">
-            {check.action}
-          </p>
-        )}
-      </div>
-    </li>
   );
 }
 

@@ -1,3 +1,5 @@
+import { Globe, Store } from "lucide-react";
+import { InstagramIcon, type BrandIconProps } from "@/components/ui/brand-icons";
 import type { Enums, Tables } from "@/lib/types";
 
 /**
@@ -43,23 +45,47 @@ export type BranchOption = {
   } | null;
 };
 
+export type ConversationOrigin = {
+  kind: "instagram" | "madre" | "sucursal" | "otro";
+  /** valor del filtro de la bandeja */
+  key: string;
+  label: string;
+  /** los de lucide entran acá igual: la firma es la que ellos ya cumplen */
+  icon: React.ComponentType<BrandIconProps>;
+};
+
+/** Clave del filtro "por dónde entra" cuando la conversación es de Instagram. */
+export const INSTAGRAM_ORIGIN_KEY = "instagram";
+
 /**
- * De dónde viene la conversación, resuelto igual en la lista y en el hilo:
- * el número madre manda sobre la sucursal (al derivar, el hilo del madre
- * también queda marcado con la sucursal destino).
+ * De dónde viene la conversación, resuelto igual en la lista y en el hilo.
+ *
+ * Instagram se pregunta PRIMERO: su canal no es madre y no tiene sucursal
+ * propia, pero la conversación sí queda etiquetada con la sucursal a la que se
+ * derivó — sin este orden, un DM derivado se mostraría como si hubiera entrado
+ * por el WhatsApp de esa sucursal, que es exactamente lo contrario de lo que
+ * pasó.
  */
 export function conversationOrigin(c: {
   channel_ref: ChannelLite | null;
   branch: BranchLite | null;
-}): { kind: "madre" | "sucursal" | "otro"; key: string; label: string } | null {
+}): ConversationOrigin | null {
+  if (c.channel_ref?.kind === "instagram") {
+    return {
+      kind: "instagram",
+      key: INSTAGRAM_ORIGIN_KEY,
+      label: c.channel_ref.label,
+      icon: InstagramIcon,
+    };
+  }
   if (c.channel_ref?.is_mother) {
-    return { kind: "madre", key: "madre", label: c.channel_ref.label };
+    return { kind: "madre", key: "madre", label: c.channel_ref.label, icon: Globe };
   }
   if (c.branch) {
-    return { kind: "sucursal", key: c.branch.id, label: c.branch.name };
+    return { kind: "sucursal", key: c.branch.id, label: c.branch.name, icon: Store };
   }
   if (c.channel_ref) {
-    return { kind: "otro", key: c.channel_ref.id, label: c.channel_ref.label };
+    return { kind: "otro", key: c.channel_ref.id, label: c.channel_ref.label, icon: Globe };
   }
   return null;
 }

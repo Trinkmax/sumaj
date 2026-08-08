@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Check, Globe, MessageCircle, Search, Store, type LucideIcon } from "lucide-react";
+import { Check, MessageCircle, Search, type LucideIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Avatar } from "@/components/ui/avatar";
 import { Select } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import {
   CONVERSATION_SELECT,
   conversationOrigin,
+  INSTAGRAM_ORIGIN_KEY,
   type BranchOption,
   type ConversationRow,
 } from "./types";
@@ -170,6 +171,13 @@ export function ConversationList({
   }, [conversations, search, filter, origin, activeId, meId]);
 
   const hasAny = conversations.length > 0;
+  /* La opción de Instagram en el filtro aparece cuando hay algo que filtrar.
+     Se deduce de la bandeja y no de un prop: una agencia que todavía no conectó
+     Instagram no tiene por qué ver un filtro que no le filtra nada. */
+  const hasInstagram = useMemo(
+    () => conversations.some((c) => c.channel_ref?.kind === "instagram"),
+    [conversations],
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-wa-panel">
@@ -223,19 +231,20 @@ export function ConversationList({
               );
             })}
           </div>
-          {/* madre vs sucursal: por qué número entró el chat */}
-          {branches.length > 0 && (
+          {/* por dónde entró el chat: madre, sucursal o Instagram */}
+          {(branches.length > 0 || hasInstagram) && (
             <Select
               value={origin}
               onChange={(e) => setOrigin(e.target.value)}
-              aria-label="Filtrar por número"
+              aria-label="Filtrar por canal"
               className={cn(
                 "h-8 w-auto shrink-0 rounded-full border-wa-line bg-wa-panel pl-3 pr-8 text-[13px] text-wa-ink",
                 origin !== ALL_ORIGINS && "border-transparent bg-wa-accent/15 text-wa-accent-deep",
               )}
             >
-              <option value={ALL_ORIGINS}>Todos los números</option>
+              <option value={ALL_ORIGINS}>Todos los canales</option>
               <option value="madre">Número madre</option>
+              {hasInstagram && <option value={INSTAGRAM_ORIGIN_KEY}>Instagram</option>}
               {branches.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.name}
@@ -259,7 +268,7 @@ export function ConversationList({
             <WaEmpty
               icon={MessageCircle}
               title="Todavía no hay chats"
-              description="Cuando un cliente te escriba por WhatsApp, la conversación aparece acá."
+              description="Cuando un cliente escriba por WhatsApp o por Instagram, la conversación aparece acá."
             />
           )
         ) : (
@@ -270,7 +279,7 @@ export function ConversationList({
               const name = c.contact?.full_name ?? "Sin nombre";
               const outTick = lastIsOutbound(c);
               const from = conversationOrigin(c);
-              const FromIcon = from?.kind === "sucursal" ? Store : Globe;
+              const FromIcon = from?.icon;
               const rowClass = cn(
                 "flex h-[72px] items-center gap-3 px-3 transition-colors tap-highlight-none",
                 active ? "bg-wa-active" : "hover:bg-wa-hover active:bg-wa-active",
@@ -295,8 +304,8 @@ export function ConversationList({
                             </span>
                           )}
                         </p>
-                        {/* metadata, no protagonista: por qué número entró */}
-                        {from && (
+                        {/* metadata, no protagonista: por dónde entró */}
+                        {from && FromIcon && (
                           <span className="flex max-w-[104px] shrink-0 items-center gap-1 rounded bg-wa-panel-alt px-1.5 py-px text-[10px] font-medium leading-4 text-wa-ink-faint">
                             <FromIcon className="size-2.5 shrink-0" strokeWidth={2.25} />
                             <span className="truncate">{from.label}</span>

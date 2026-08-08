@@ -13,6 +13,7 @@ import {
   Smartphone,
   ChevronLeft,
 } from "lucide-react";
+import { InstagramIcon } from "@/components/ui/brand-icons";
 import { cn } from "@/lib/utils";
 
 const SECTIONS = [
@@ -24,6 +25,7 @@ const SECTIONS = [
   { href: "/config/plantillas", label: "Plantillas", icon: MessageSquareText },
   { href: "/config/seguimiento", label: "Seguimiento", icon: AlarmClock },
   { href: "/config/whatsapp", label: "WhatsApp", icon: Smartphone },
+  { href: "/config/instagram", label: "Instagram", icon: InstagramIcon },
 ];
 
 /** Tabs horizontales compartidas por todas las subpáginas de configuración. */

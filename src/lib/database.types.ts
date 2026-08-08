@@ -321,6 +321,7 @@ export type Database = {
           email: string | null
           full_name: string
           id: string
+          ig_id: string | null
           instagram: string | null
           is_client: boolean
           notes: string | null
@@ -339,6 +340,7 @@ export type Database = {
           email?: string | null
           full_name: string
           id?: string
+          ig_id?: string | null
           instagram?: string | null
           is_client?: boolean
           notes?: string | null
@@ -357,6 +359,7 @@ export type Database = {
           email?: string | null
           full_name?: string
           id?: string
+          ig_id?: string | null
           instagram?: string | null
           is_client?: boolean
           notes?: string | null
@@ -875,6 +878,204 @@ export type Database = {
             columns: ["template_id"]
             isOneToOne: false
             referencedRelation: "wa_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ig_accounts: {
+        Row: {
+          account_name: string | null
+          agency_id: string
+          app_id: string | null
+          app_secret_id: string | null
+          auth_mode: string
+          auto_wa_enabled: boolean
+          auto_wa_text: string
+          bridge_enabled: boolean
+          bridge_label: string
+          bridge_phone: string | null
+          bridge_text: string
+          channel_id: string
+          check_ok: boolean | null
+          checked_at: string | null
+          checks: Json
+          created_at: string
+          followers_count: number | null
+          human_agent_enabled: boolean
+          ig_app_id: string | null
+          ig_app_secret_id: string | null
+          ig_user_id: string | null
+          page_id: string | null
+          phone_country_code: string
+          profile_picture_url: string | null
+          token_expires_at: string | null
+          token_scopes: string[] | null
+          token_secret_id: string | null
+          token_tail: string | null
+          updated_at: string
+          username: string | null
+          verify_secret_id: string | null
+          webhook_callback_url: string | null
+          webhook_slug: string
+          webhook_subscribed: boolean
+        }
+        Insert: {
+          account_name?: string | null
+          agency_id: string
+          app_id?: string | null
+          app_secret_id?: string | null
+          auth_mode?: string
+          auto_wa_enabled?: boolean
+          auto_wa_text?: string
+          bridge_enabled?: boolean
+          bridge_label?: string
+          bridge_phone?: string | null
+          bridge_text?: string
+          channel_id: string
+          check_ok?: boolean | null
+          checked_at?: string | null
+          checks?: Json
+          created_at?: string
+          followers_count?: number | null
+          human_agent_enabled?: boolean
+          ig_app_id?: string | null
+          ig_app_secret_id?: string | null
+          ig_user_id?: string | null
+          page_id?: string | null
+          phone_country_code?: string
+          profile_picture_url?: string | null
+          token_expires_at?: string | null
+          token_scopes?: string[] | null
+          token_secret_id?: string | null
+          token_tail?: string | null
+          updated_at?: string
+          username?: string | null
+          verify_secret_id?: string | null
+          webhook_callback_url?: string | null
+          webhook_slug?: string
+          webhook_subscribed?: boolean
+        }
+        Update: {
+          account_name?: string | null
+          agency_id?: string
+          app_id?: string | null
+          app_secret_id?: string | null
+          auth_mode?: string
+          auto_wa_enabled?: boolean
+          auto_wa_text?: string
+          bridge_enabled?: boolean
+          bridge_label?: string
+          bridge_phone?: string | null
+          bridge_text?: string
+          channel_id?: string
+          check_ok?: boolean | null
+          checked_at?: string | null
+          checks?: Json
+          created_at?: string
+          followers_count?: number | null
+          human_agent_enabled?: boolean
+          ig_app_id?: string | null
+          ig_app_secret_id?: string | null
+          ig_user_id?: string | null
+          page_id?: string | null
+          phone_country_code?: string
+          profile_picture_url?: string | null
+          token_expires_at?: string | null
+          token_scopes?: string[] | null
+          token_secret_id?: string | null
+          token_tail?: string | null
+          updated_at?: string
+          username?: string | null
+          verify_secret_id?: string | null
+          webhook_callback_url?: string | null
+          webhook_slug?: string
+          webhook_subscribed?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ig_accounts_agency_id_fkey"
+            columns: ["agency_id"]
+            isOneToOne: false
+            referencedRelation: "agencies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ig_accounts_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: true
+            referencedRelation: "wa_channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ig_bridge_links: {
+        Row: {
+          agency_id: string
+          code: string
+          contact_id: string
+          conversation_id: string | null
+          created_at: string
+          expires_at: string
+          lead_id: string | null
+          used_at: string | null
+          wa_conversation_id: string | null
+        }
+        Insert: {
+          agency_id: string
+          code?: string
+          contact_id: string
+          conversation_id?: string | null
+          created_at?: string
+          expires_at?: string
+          lead_id?: string | null
+          used_at?: string | null
+          wa_conversation_id?: string | null
+        }
+        Update: {
+          agency_id?: string
+          code?: string
+          contact_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          expires_at?: string
+          lead_id?: string | null
+          used_at?: string | null
+          wa_conversation_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ig_bridge_links_agency_id_fkey"
+            columns: ["agency_id"]
+            isOneToOne: false
+            referencedRelation: "agencies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ig_bridge_links_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ig_bridge_links_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ig_bridge_links_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ig_bridge_links_wa_conversation_id_fkey"
+            columns: ["wa_conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
             referencedColumns: ["id"]
           },
         ]
@@ -2140,6 +2341,15 @@ export type Database = {
       }
     }
     Functions: {
+      ig_config: { Args: { p_channel_id: string }; Returns: Json }
+      ig_config_by_ig_user_id: { Args: { p_ig_user_id: string }; Returns: Json }
+      ig_config_by_slug: { Args: { p_slug: string }; Returns: Json }
+      ig_secret_clear: { Args: { p_channel_id: string }; Returns: undefined }
+      ig_secret_set: {
+        Args: { p_channel_id: string; p_slot: string; p_value: string }
+        Returns: undefined
+      }
+      ig_verify_token_matches: { Args: { p_token: string }; Returns: boolean }
       quote_public: { Args: { token: string }; Returns: Json }
       receipt_public: { Args: { token: string }; Returns: Json }
       wa_cloud_config: { Args: { p_channel_id: string }; Returns: Json }
@@ -2240,7 +2450,7 @@ export type Database = {
         | "crucero"
         | "otro"
       trip_type: "familiar" | "pareja" | "grupal" | "corporativo" | "solo"
-      wa_channel_kind: "cloud_api" | "baileys"
+      wa_channel_kind: "cloud_api" | "baileys" | "instagram"
       wa_channel_status: "desconectado" | "vinculando" | "conectado" | "error"
     }
     CompositeTypes: {
@@ -2439,7 +2649,7 @@ export const Constants = {
         "otro",
       ],
       trip_type: ["familiar", "pareja", "grupal", "corporativo", "solo"],
-      wa_channel_kind: ["cloud_api", "baileys"],
+      wa_channel_kind: ["cloud_api", "baileys", "instagram"],
       wa_channel_status: ["desconectado", "vinculando", "conectado", "error"],
     },
   },

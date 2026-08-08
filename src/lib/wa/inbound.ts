@@ -20,6 +20,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
 import { sendCloudText, type CloudCreds, type CloudResult } from "@/lib/wa/cloud";
 import { hasWorker, sendViaBaileys } from "@/lib/wa/worker";
+import {
+  attachBridgeConversation,
+  findBridgeCode,
+  redeemBridgeLink,
+  releaseBridgeLink,
+} from "@/lib/ig/bridge";
 import { fmtPhone } from "@/lib/format";
 import type { Database } from "@/lib/database.types";
 import type { Enums } from "@/lib/types";
@@ -62,7 +68,15 @@ function snippet(text: string, max = 90): string {
 
 /* ───────────────────────── ruteo a sucursal ───────────────────────── */
 
-async function routeToBranch(
+/**
+ * A qué sucursal cae una consulta nueva: la primera regla que matchea, y si
+ * ninguna matchea, la sucursal por defecto.
+ *
+ * Exportada porque Instagram usa EXACTAMENTE las mismas reglas (`lib/ig/inbound`).
+ * Que un lead caiga en una sucursal distinta según por dónde entró sería un bug
+ * imposible de explicarle a la agencia: las reglas son del negocio, no del canal.
+ */
+export async function routeToBranch(
   supabase: Admin,
   agencyId: string,
   text: string,
@@ -198,9 +212,18 @@ export async function handleInboundMessage(
 
   const agencyId = channel.agency_id;
 
-  /* 1. contacto */
+  /* 1. ¿este WhatsApp viene del chat de Instagram?
+     El link wa.me que se le mandó por DM trae una referencia en el texto
+     prellenado. Si está, esta persona ya existe en el CRM: es la MISMA que venía
+     hablando por Instagram, y sin esto quedaría como un contacto nuevo con un
+     lead nuevo. Ver lib/ig/bridge.ts. */
+  const bridgeCode = findBridgeCode(msg.text);
+  const bridged = bridgeCode ? await redeemBridgeLink(supabase, agencyId, bridgeCode, null) : null;
+
+  /* 2. contacto */
   let contactId: string;
   let contactName: string;
+
   const { data: existingContact } = await supabase
     .from("contacts")
     .select("id, full_name")
@@ -208,7 +231,39 @@ export async function handleInboundMessage(
     .eq("phone", phone)
     .maybeSingle();
 
-  if (existingContact) {
+  let bridgedContact: { id: string; full_name: string; phone: string | null } | null = null;
+  if (bridged) {
+    const { data } = await supabase
+      .from("contacts")
+      .select("id, full_name, phone")
+      .eq("id", bridged.contactId)
+      .eq("agency_id", agencyId)
+      .maybeSingle();
+    bridgedContact = data;
+  }
+
+  /* La referencia manda… salvo que el teléfono del que llega el WhatsApp YA
+     identifique a otra persona del CRM. Eso pasa cuando alguien reenvía el
+     mensaje prellenado: el texto con la referencia adentro se puede compartir, y
+     sin este freno el WhatsApp de Bruno terminaría pegado al contacto, al lead y
+     al historial de Ana. Entre un dato que la agencia ya tiene (el teléfono) y
+     una referencia que vino en un texto reenviable, gana el teléfono.
+     El código se libera para que la persona que sí lo recibió pueda usarlo. */
+  const bridgeAplica =
+    !!bridgedContact && (!existingContact || existingContact.id === bridgedContact.id);
+  if (bridgeCode && bridged && !bridgeAplica) {
+    await releaseBridgeLink(supabase, bridgeCode);
+  }
+
+  if (bridgedContact && bridgeAplica) {
+    contactId = bridgedContact.id;
+    contactName = bridgedContact.full_name;
+    // El teléfono se le pega a la ficha de Instagram, que hasta ahora no tenía
+    // ninguno.
+    if (!bridgedContact.phone) {
+      await supabase.from("contacts").update({ phone }).eq("id", bridgedContact.id);
+    }
+  } else if (existingContact) {
     contactId = existingContact.id;
     contactName = existingContact.full_name;
   } else {
@@ -227,7 +282,7 @@ export async function handleInboundMessage(
     contactId = created.id;
   }
 
-  /* 2. conversación del canal por el que entró */
+  /* 3. conversación del canal por el que entró */
   let conversationId: string;
   let isNewConversation = false;
   const { data: existingConv } = await supabase
@@ -259,7 +314,32 @@ export async function handleInboundMessage(
     isNewConversation = true;
   }
 
-  /* 3. mensaje (idempotente por wa_message_id: los webhooks reintentan) */
+  /* El puente queda cerrado: la referencia sabe en qué hilo terminó, y el
+     vendedor ve de dónde salió esta charla sin tener que deducirlo. La nota va
+     ANTES del mensaje del cliente para que el preview de la bandeja siga siendo
+     lo que escribió el cliente y no una nota nuestra. */
+  if (bridgeCode && bridged && bridgeAplica) {
+    await attachBridgeConversation(supabase, bridgeCode, conversationId);
+    await supabase.from("messages").insert({
+      agency_id: agencyId,
+      conversation_id: conversationId,
+      direction: "out",
+      kind: "nota_interna",
+      body: "Este chat viene del Instagram de la agencia. Es la misma persona.",
+      is_automated: true,
+      status: "enviado",
+      metadata: { from_instagram: true },
+    });
+    await supabase.from("activities").insert({
+      agency_id: agencyId,
+      contact_id: contactId,
+      lead_id: bridged.leadId,
+      type: "whatsapp",
+      body: "Pasó de Instagram a WhatsApp",
+    });
+  }
+
+  /* 4. mensaje (idempotente por wa_message_id: los webhooks reintentan) */
   if (msg.waMessageId) {
     const { data: dupe } = await supabase
       .from("messages")
@@ -281,7 +361,7 @@ export async function handleInboundMessage(
   });
   if (messageError) return { ok: false, error: "No se pudo guardar el mensaje." };
 
-  /* 4. lead: si no hay uno abierto, esta consulta lo crea */
+  /* 5. lead: si no hay uno abierto, esta consulta lo crea */
   const { data: openLead } = await supabase
     .from("leads")
     .select("id, branch_id")
@@ -323,7 +403,7 @@ export async function handleInboundMessage(
     await supabase.from("conversations").update({ branch_id: branchId }).eq("id", conversationId);
   }
 
-  /* 5. respuesta automática del número madre */
+  /* 6. respuesta automática del número madre */
   if (
     channel.is_mother &&
     channel.auto_reply_enabled &&
@@ -353,7 +433,7 @@ export async function handleInboundMessage(
     });
   }
 
-  /* 6. alerta a los operadores de la sucursal */
+  /* 7. alerta a los operadores de la sucursal */
   if (leadIsNew) {
     await alertBranchOperators(supabase, {
       agencyId,

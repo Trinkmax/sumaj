@@ -17,9 +17,9 @@ import { createClient } from "@/lib/supabase/client";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { EmptyState, Tooltip } from "@/components/ui/misc";
+import { EmptyState, Switch, Tooltip } from "@/components/ui/misc";
 import { ConversationList } from "@/components/chats/conversation-list";
 import { EmbeddedChat, type WaSendCapability } from "@/components/chats/embedded-chat";
 import { ChatContextPanel } from "@/components/chats/chat-context-panel";
@@ -27,10 +27,18 @@ import {
   CONVERSATION_SELECT,
   conversationOrigin,
   type BranchOption,
+  type ConversationOrigin,
   type ConversationRow,
 } from "@/components/chats/types";
 import { QuoteDialog } from "@/components/quotes/quote-dialog";
-import { assignConversation, deriveToBranch } from "@/lib/actions/messages";
+import { WhatsAppIcon } from "@/components/quotes/wa-icon";
+import {
+  assignConversation,
+  bridgeToWhatsapp,
+  deriveToBranch,
+  getWhatsappBridgeDraft,
+  type BridgeDraft,
+} from "@/lib/actions/messages";
 import { STAGE_BY_KEY, TAG_DOTS } from "@/lib/domain";
 import { fmtPhone, fmtRelative } from "@/lib/format";
 import type { LeadStage } from "@/lib/types";
@@ -44,12 +52,14 @@ const PANEL_KEY = "crm:chat-panel";
 
 const ASSIGN_ADMIN_HINT = "La asignación la maneja un admin";
 
-/** Qué implica el número por el que está abierta la conversación. */
+/** Qué implica el canal por el que está abierta la conversación. */
 function originHint(
-  kind: "madre" | "sucursal" | "otro",
+  kind: ConversationOrigin["kind"],
   label: string,
   canDerive: boolean,
 ): string {
+  if (kind === "instagram")
+    return `Entra por los mensajes de ${label}: se puede contestar hasta 24 hs después del último mensaje de la persona. Pasala a WhatsApp para seguir sin límite.`;
   if (kind === "madre")
     return canDerive
       ? "Entra por el número madre: solo se puede escribir dentro de las 24 hs del último mensaje del cliente. Derivá a una sucursal para seguir sin límite."
@@ -126,6 +136,7 @@ export function ChatView({
   const [lead, setLead] = React.useState<HeaderLead | null>(null);
   const [quoteOpen, setQuoteOpen] = React.useState(false);
   const [deriveOpen, setDeriveOpen] = React.useState(false);
+  const [bridgeOpen, setBridgeOpen] = React.useState(false);
   // panel de herramientas: aside colapsable en lg+, bottom sheet abajo
   const [panelOpen, setPanelOpen] = React.useState(false);
   const [sheetOpen, setSheetOpen] = React.useState(false);
@@ -266,12 +277,16 @@ export function ChatView({
     setLead((l) => (l && l.id === leadId ? { ...l, stage } : l));
   }, []);
 
-  /* por qué número está abierta la conversación (y si se puede derivar).
+  /* por qué canal está abierta la conversación (y si se puede derivar).
      Se deriva todo lo que NO esté ya en el número de una sucursal: el madre,
-     otro canal y también los hilos viejos sin canal asignado. */
+     otro canal y también los hilos viejos sin canal asignado. Instagram queda
+     afuera: derivar abre un hilo de WhatsApp con el teléfono del contacto, y un
+     contacto que llegó por DM no tiene teléfono — para eso está el puente. */
   const from = active ? conversationOrigin(active) : null;
-  const canDerive = isAdmin && active != null && from?.kind !== "sucursal";
-  const FromIcon = from?.kind === "sucursal" ? Store : Globe;
+  const isInstagram = from?.kind === "instagram";
+  const canDerive =
+    isAdmin && active != null && from?.kind !== "sucursal" && !isInstagram;
+  const FromIcon = from?.icon ?? Globe;
 
   const originChip = from && (
     <Tooltip content={originHint(from.kind, from.label, canDerive)}>
@@ -295,6 +310,19 @@ export function ChatView({
         className="flex size-10 shrink-0 items-center justify-center rounded-full text-wa-ink-soft transition-colors hover:bg-wa-hover active:scale-95 tap-highlight-none"
       >
         <Forward className="size-5" strokeWidth={1.9} />
+      </button>
+    </Tooltip>
+  );
+
+  const bridgeHeaderButton = isInstagram && (
+    <Tooltip content="Seguir la charla por WhatsApp">
+      <button
+        type="button"
+        onClick={() => setBridgeOpen(true)}
+        aria-label="Pasar a WhatsApp"
+        className="flex size-10 shrink-0 items-center justify-center rounded-full text-wa-accent transition-colors hover:bg-wa-hover active:scale-95 tap-highlight-none"
+      >
+        <WhatsAppIcon className="size-5" />
       </button>
     </Tooltip>
   );
@@ -407,6 +435,7 @@ export function ChatView({
                   </div>
                   {originChip}
                   {stageChip}
+                  {bridgeHeaderButton}
                   {deriveButton}
                   {assignControl}
                   {panelToggle}
@@ -417,6 +446,7 @@ export function ChatView({
                     meId={meId}
                     waSend={waSend}
                     onQuoteRequest={() => setQuoteOpen(true)}
+                    onBridgeRequest={() => setBridgeOpen(true)}
                     className="flex-1"
                   />
                 )}
@@ -484,6 +514,16 @@ export function ChatView({
               </p>
             </div>
             {stageChip}
+            {isInstagram && (
+              <button
+                type="button"
+                onClick={() => setBridgeOpen(true)}
+                aria-label="Pasar a WhatsApp"
+                className="flex size-11 shrink-0 items-center justify-center rounded-full text-wa-accent transition-colors active:bg-wa-active tap-highlight-none"
+              >
+                <WhatsAppIcon className="size-5" />
+              </button>
+            )}
             {canDerive && (
               <button
                 type="button"
@@ -508,6 +548,7 @@ export function ChatView({
             meId={meId}
             waSend={waSend}
             onQuoteRequest={() => setQuoteOpen(true)}
+            onBridgeRequest={() => setBridgeOpen(true)}
             className="flex-1"
           />
         </div>
@@ -546,6 +587,16 @@ export function ChatView({
         />
       )}
 
+      {/* pasar la charla de Instagram a WhatsApp */}
+      {selectedId && (
+        <BridgeDialog
+          open={bridgeOpen}
+          onOpenChange={setBridgeOpen}
+          conversationId={selectedId}
+          onBridged={select}
+        />
+      )}
+
       {/* popup de presupuesto: armalo acá y mandalo a la conversación */}
       <QuoteDialog
         open={quoteOpen}
@@ -556,6 +607,193 @@ export function ChatView({
         onDone={() => setPanelRefresh((k) => k + 1)}
       />
     </>
+  );
+}
+
+/* ───────────────────────────────────────────
+   Pasar de Instagram a WhatsApp.
+
+   El movimiento más importante del canal: la consulta entró por un DM y la
+   venta se trabaja por WhatsApp. Lo único que falta es el teléfono, así que
+   el diálogo es literalmente eso — el teléfono y el primer mensaje, con todo
+   pre-cargado para que sea un click.
+
+   Al confirmar saltamos al hilo de WhatsApp: el vendedor sigue escribiendo
+   donde tiene que estar, sin buscar nada.
+   ─────────────────────────────────────────── */
+function BridgeDialog({
+  open,
+  onOpenChange,
+  conversationId,
+  onBridged,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  conversationId: string;
+  onBridged: (conversationId: string) => void;
+}) {
+  const [draft, setDraft] = React.useState<BridgeDraft | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [phone, setPhone] = React.useState("");
+  const [text, setText] = React.useState("");
+  const [greet, setGreet] = React.useState(true);
+  const [sending, setSending] = React.useState(false);
+
+  /* limpieza al abrir (ajuste de estado durante el render, no en un efecto) */
+  const [prevOpen, setPrevOpen] = React.useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
+    if (open) {
+      setDraft(null);
+      setError(null);
+      setSending(false);
+    }
+  }
+
+  /* al abrir se pide el borrador: el teléfono que ya tengamos, el saludo de la
+     agencia y por qué sucursal saldría */
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      const res = await getWhatsappBridgeDraft({ conversationId });
+      if (cancelled) return;
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setDraft(res.data);
+      setPhone(res.data.phone ?? "");
+      setText(res.data.text);
+      setGreet(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, conversationId]);
+
+  // el estado de carga se deduce, así no hace falta un setState sincrónico
+  // adentro del efecto (que dispara renders en cascada)
+  const loading = !draft && !error;
+
+  async function confirm() {
+    if (sending) return;
+    setSending(true);
+    const res = await bridgeToWhatsapp({
+      conversationId,
+      phone,
+      text: greet ? text : undefined,
+    });
+    setSending(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    toast.success(
+      res.data.sent ? "Listo, ya le escribiste por WhatsApp." : "Chat de WhatsApp abierto.",
+    );
+    onOpenChange(false);
+    onBridged(res.data.conversationId);
+  }
+
+  const blocked = draft?.blocked ?? null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        title="Seguir por WhatsApp"
+        description={
+          draft
+            ? `${draft.contactName} pasa a WhatsApp: sin ventana de 24 hs y con el número de la sucursal.`
+            : "Pasá la charla al WhatsApp de la sucursal."
+        }
+        size="md"
+      >
+        {loading ? (
+          <div className="space-y-3">
+            <div className="h-11 w-full animate-pulse rounded-xl bg-sand-soft" />
+            <div className="h-24 w-full animate-pulse rounded-xl bg-sand-soft" />
+          </div>
+        ) : error ? (
+          <p className="rounded-xl border border-tone-amber-line bg-tone-amber-soft px-3 py-2.5 text-[13px] leading-snug text-tone-amber-text">
+            {error}
+          </p>
+        ) : (
+          <>
+            <div>
+              <Label htmlFor="bridge-phone">WhatsApp del cliente</Label>
+              <Input
+                id="bridge-phone"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="381 555-4433"
+                inputMode="tel"
+                autoComplete="off"
+                className="h-11 tabular-nums"
+              />
+              <p className="mt-1.5 text-xs leading-relaxed text-ink-faint">
+                {draft?.phone
+                  ? "Lo dejó en el chat de Instagram. Corregilo si hace falta."
+                  : "Escribilo con característica, sin el 0 ni el 15. Queda guardado en su ficha."}
+              </p>
+            </div>
+
+            <div className="mt-4">
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="bridge-text" className="mb-0">
+                  Primer mensaje
+                </Label>
+                <Switch
+                  checked={greet}
+                  onCheckedChange={setGreet}
+                  aria-label="Mandar el primer mensaje ahora"
+                />
+              </div>
+              <Textarea
+                id="bridge-text"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                rows={3}
+                disabled={!greet}
+                className="mt-1.5 min-h-[88px]"
+              />
+              <p className="mt-1.5 text-xs leading-relaxed text-ink-faint">
+                {greet
+                  ? `Sale ahora mismo${draft?.branchName ? ` desde ${draft.branchName}` : ""}.`
+                  : "Apagado: se abre el chat vacío y le escribís vos."}
+              </p>
+            </div>
+
+            {blocked && (
+              <p className="mt-3 rounded-xl border border-tone-amber-line bg-tone-amber-soft px-3 py-2 text-[12px] leading-snug text-tone-amber-text animate-fade-in">
+                {blocked}
+              </p>
+            )}
+
+            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => onOpenChange(false)}
+                disabled={sending}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                variant="whatsapp"
+                onClick={confirm}
+                loading={sending}
+                disabled={phone.trim().length < 6 || !!blocked}
+              >
+                <WhatsAppIcon className="size-4" />
+                {greet ? "Escribirle por WhatsApp" : "Abrir el chat"}
+              </Button>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

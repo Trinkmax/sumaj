@@ -1,11 +1,14 @@
-import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * Empty state compartido (icono lucide, nunca emoji).
+ * Empty state compartido (icono, nunca emoji).
  * SIN "use client": no usa hooks, así puede renderizarse también desde
  * Server Components pasándole `icon` sin cruzar el límite de serialización.
  * Los client components pueden importarlo desde acá o desde ui/misc.
+ *
+ * El tipo del icono es estructural y no `LucideIcon` para que también entren los
+ * de marca que van a mano (`ui/brand-icons`): lucide sacó los logos en la v1 y
+ * WhatsApp e Instagram son justo dos empty states que existen.
  */
 export function EmptyState({
   icon: Icon,
@@ -14,7 +17,7 @@ export function EmptyState({
   action,
   className,
 }: {
-  icon?: LucideIcon;
+  icon?: React.ComponentType<{ className?: string; strokeWidth?: number }>;
   title: string;
   description?: string;
   action?: React.ReactNode;

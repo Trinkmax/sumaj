@@ -9,6 +9,7 @@ import {
   type ConversationRow,
 } from "@/components/chats/types";
 import { hasCloudApi } from "@/lib/wa/cloud-credentials";
+import { hasInstagram } from "@/lib/ig/credentials";
 import { hasWorker } from "@/lib/wa/worker";
 
 export const metadata = { title: "CRM" };
@@ -22,7 +23,7 @@ export default async function CrmPage({
   const { member, agency, isAdmin } = await requireMember();
   const supabase = await createClient();
 
-  const [leadsRes, membersRes, convsRes, branchesRes, cloudReady] = await Promise.all([
+  const [leadsRes, membersRes, convsRes, branchesRes, cloudReady, igReady] = await Promise.all([
     supabase
       .from("leads")
       .select(
@@ -54,6 +55,8 @@ export default async function CrmPage({
     // propósito: es la ruta más caliente del sistema y no puede pagar un viaje
     // secuencial más.
     hasCloudApi(agency.id),
+    // lo mismo para los DMs de Instagram
+    hasInstagram(agency.id),
   ]);
 
   const conversations = (convsRes.data ?? []) as unknown as ConversationRow[];
@@ -115,11 +118,16 @@ export default async function CrmPage({
     };
   });
 
-  /* Capacidad REAL de enviar por WhatsApp. `settings.whatsapp.connected` es una
-     preferencia guardada, no la infraestructura viva: sin worker el número de
-     una sucursal no manda nada y sin las credenciales de Meta de ESTA agencia
-     el madre tampoco. El chat lo cruza con el canal de cada conversación. */
-  const waSend: WaSendCapability = { worker: hasWorker(), cloud: cloudReady };
+  /* Capacidad REAL de enviar. `settings.whatsapp.connected` es una preferencia
+     guardada, no la infraestructura viva: sin worker el número de una sucursal
+     no manda nada, sin las credenciales de Meta de ESTA agencia el madre
+     tampoco, y sin la cuenta de Instagram conectada los DMs no salen. El chat lo
+     cruza con el canal de cada conversación. */
+  const waSend: WaSendCapability = {
+    worker: hasWorker(),
+    cloud: cloudReady,
+    instagram: igReady,
+  };
 
   // ?vista= manda; un deep link con ?c= solo también abre Chats.
   // null = sin preferencia en la URL → el board usa la última vista guardada.

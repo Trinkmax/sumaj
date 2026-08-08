@@ -23,7 +23,6 @@ import {
   CreditCard,
   Flag,
   Globe,
-  Camera,
   Handshake,
   Heart,
   Landmark,
@@ -52,6 +51,7 @@ import {
   XCircle,
   type LucideIcon,
 } from "lucide-react";
+import { InstagramIcon } from "@/components/ui/brand-icons";
 
 import type {
   ActivityType,
@@ -147,12 +147,20 @@ export const STAGE_BY_KEY = Object.fromEntries(STAGES.map((s) => [s.key, s])) as
 /* ───────────────────────────────────────────
    Canales de origen
    ─────────────────────────────────────────── */
+/**
+ * `ChannelIcon` en vez de `LucideIcon` porque lucide sacó los logos de marca en
+ * la v1: WhatsApp e Instagram —los dos canales por los que entra el trabajo—
+ * son componentes propios (`ui/brand-icons`). Los iconos de lucide cumplen esta
+ * firma, así que el resto de los canales sigue igual.
+ */
+type ChannelIcon = React.ComponentType<{ className?: string; strokeWidth?: number }>;
+
 export const CHANNELS: Record<
   LeadChannel,
-  { label: string; short: string; icon: LucideIcon }
+  { label: string; short: string; icon: ChannelIcon }
 > = {
   whatsapp: { label: "WhatsApp", short: "WA", icon: MessageCircle },
-  instagram: { label: "Instagram", short: "IG", icon: Camera },
+  instagram: { label: "Instagram", short: "IG", icon: InstagramIcon },
   messenger: { label: "Messenger", short: "MS", icon: MessageSquare },
   lead_form: { label: "Formulario Meta", short: "Form", icon: ClipboardList },
   web: { label: "Web", short: "Web", icon: Globe },
