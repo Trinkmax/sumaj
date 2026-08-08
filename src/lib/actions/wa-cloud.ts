@@ -555,16 +555,56 @@ export async function connectCloud(): Promise<ActionResult<CloudStatus>> {
   }
   const callbackUrl = `${base}${webhookPathFor(ctx.row.webhook_slug)}`;
 
-  // Dos llamadas y no una: la primera suscribe la app a la cuenta (es el paso
-  // sin el cual Meta no entrega NADA) y la segunda le pone nuestra URL. El mismo
-  // endpoint hace las dos cosas, pero separarlas deja la suscripción hecha
-  // aunque el override falle, y así el diagnóstico puede decir exactamente cuál
-  // de los dos pasos quedó a medias. Las dos son idempotentes.
+  /* ── EL ORDEN DE ESTOS TRES PASOS NO ES ARBITRARIO ──
+     Meta rechaza el override de la URL con un (#100) "Before override the
+     current callback uri, your app must be subscribed to receive messages for
+     WhatsApp Business Account" si la app todavía no tiene su propia suscripción
+     al objeto whatsapp_business_account con el campo `messages`.
+
+     O sea: la suscripción a nivel APP no es un extra que se hace al final, es el
+     PRERREQUISITO del override. Antes estaba al revés —y encima condicionada a
+     que el override hubiera salido bien—, así que en una app recién creada el
+     override fallaba siempre y la conexión no se completaba nunca. */
+
+  /* 1. Alta de la app en la cuenta. Sin esto Meta no entrega nada. */
   const alta = await subscribeWaba({ creds });
   if (!alta.ok) return fail(alta.error);
 
+  /* 2. La suscripción a nivel app: la que habilita el override y la que trae los
+     avisos de plantilla aprobada y de cuenta restringida.
+
+     NO se pisa una configuración que ya exista: la URL de la app es una sola
+     para todas las agencias que compartan esa app de Meta, así que
+     sobrescribirla desde acá le cambiaría el webhook a las demás (o le pisaría
+     al admin lo que configuró a mano). Solo se escribe si está vacía, o si ya
+     apunta a este mismo sistema. */
+  let appLevelApuntaAca = false;
+  if (creds.appId && creds.appSecret) {
+    const actual = await getAppSubscription({ appId: creds.appId, appSecret: creds.appSecret });
+    const libre =
+      !actual.ok || !actual.data.callbackUrl || actual.data.callbackUrl.startsWith(base);
+    if (libre) {
+      const app = await subscribeAppWebhook({
+        appId: creds.appId,
+        appSecret: creds.appSecret,
+        callbackUrl,
+        verifyToken: creds.verifyToken,
+      });
+      appLevelApuntaAca = app.ok;
+    } else {
+      // La app le entrega a otro sistema: acá el override deja de ser un lujo y
+      // pasa a ser la única forma de que estos mensajes lleguen.
+      appLevelApuntaAca = false;
+    }
+  }
+
+  /* 3. El override por cuenta. Es lo que hace posible el multi-tenant, y lo que
+     deja la entrega atada a ESTA agencia y no a la configuración global de la
+     app. Si falla pero el paso 2 quedó apuntando acá, los mensajes igual
+     entran: se avisa y se sigue, en vez de dar por fracasada una conexión que
+     está funcionando. */
   const sub = await subscribeWaba({ creds, callbackUrl, verifyToken: creds.verifyToken });
-  if (!sub.ok) {
+  if (!sub.ok && !appLevelApuntaAca) {
     return fail(
       sub.code === 2200
         ? "Meta no pudo verificar el webhook. Revisá que la dirección pública del sistema sea la que está en línea (no localhost) y probá de nuevo."
@@ -572,35 +612,12 @@ export async function connectCloud(): Promise<ActionResult<CloudStatus>> {
     );
   }
 
-  // Extra, no imprescindible: la suscripción a nivel app es la que trae los
-  // avisos de plantilla aprobada y de cuenta restringida. Si Meta la rechaza,
-  // los mensajes igual entran por el override de arriba.
-  //
-  // Pero NO se pisa una configuración que ya exista: la URL de la app es una
-  // sola para todas las agencias que compartan esa app de Meta, así que
-  // sobrescribirla desde acá le cambiaría el webhook a las demás (o le pisaría
-  // al admin lo que configuró a mano en el panel). Solo se escribe si está
-  // vacía, o si ya apunta a este mismo sistema.
-  if (creds.appId && creds.appSecret) {
-    const actual = await getAppSubscription({ appId: creds.appId, appSecret: creds.appSecret });
-    const libre =
-      !actual.ok || !actual.data.callbackUrl || actual.data.callbackUrl.startsWith(base);
-    if (libre) {
-      await subscribeAppWebhook({
-        appId: creds.appId,
-        appSecret: creds.appSecret,
-        callbackUrl,
-        verifyToken: creds.verifyToken,
-      });
-    }
-  }
-
   const admin = createAdminClient();
   await admin
     .from("wa_cloud_credentials")
     .update({
       webhook_subscribed: true,
-      webhook_callback_url: sub.data.overrideCallbackUri ?? callbackUrl,
+      webhook_callback_url: sub.ok ? (sub.data.overrideCallbackUri ?? callbackUrl) : callbackUrl,
       updated_at: new Date().toISOString(),
     })
     .eq("channel_id", ctx.channelId);

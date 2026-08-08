@@ -567,8 +567,13 @@ export async function getAppSubscription(input: {
  * pero los avisos de plantilla aprobada y de cuenta restringida SIEMPRE se
  * entregan a la URL de la app. Esto la configura por API para que también
  * lleguen. La referencia del Graph dice que WhatsApp no está soportado en este
- * endpoint, pero el propio tooling de Meta lo usa y funciona — así que se
- * intenta y, si falla, no se rompe la conexión: es un extra, no el camino.
+ * endpoint, pero el propio tooling de Meta lo usa y funciona.
+ *
+ * OJO — no es un extra: es el PRERREQUISITO del override por cuenta. Sin esta
+ * suscripción (con el campo `messages`), `subscribeWaba` con
+ * `override_callback_uri` devuelve un (#100) "Before override the current
+ * callback uri, your app must be subscribed to receive messages". Por eso
+ * `connectCloud` la hace ANTES del override, no después.
  */
 export async function subscribeAppWebhook(input: {
   appId: string;
