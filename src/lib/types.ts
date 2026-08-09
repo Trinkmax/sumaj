@@ -20,6 +20,7 @@ export type PaymentDirection = Enums<"payment_direction">;
 export type MemberRole = Enums<"member_role">;
 export type MessageDirection = Enums<"message_direction">;
 export type MessageStatus = Enums<"message_status">;
+export type MessageKind = Enums<"message_kind">;
 export type ActivityType = Enums<"activity_type">;
 export type DocumentType = Enums<"document_type">;
 
@@ -67,6 +68,45 @@ export type AgencySettings = {
     /** legajo EVyT: las agencias de viaje argentinas tienen que publicarlo */
     evyt?: string | null;
   };
+};
+
+/**
+ * Adjunto de un mensaje del chat (`messages.media`).
+ *
+ * Vive acá y no junto al código que lo guarda porque lo necesitan las dos
+ * puntas: el webhook que lo baja (servidor) y la burbuja que lo muestra
+ * (browser). `lib/media/store.ts` importa el cliente con service role, así que
+ * un client component no puede importar de ahí ni el tipo.
+ *
+ * `path` es del bucket privado `attachments`, NUNCA una URL: las firmadas duran
+ * una hora y se piden al mostrar.
+ */
+export type MessageMedia = {
+  path: string;
+  mime: string;
+  /** nombre original — solo los documentos lo traen */
+  name?: string | null;
+  size?: number | null;
+  /** segundos; audio y video */
+  duration?: number | null;
+  /** nota de voz grabada, no un archivo de audio adjunto */
+  voice?: boolean;
+  /** figurita: se muestra sin fondo de burbuja */
+  sticker?: boolean;
+  /** figurita animada (webp animado) */
+  animated?: boolean;
+};
+
+/**
+ * Reacción a un mensaje (`messages.reactions`). No son mensajes: se pegan a la
+ * burbuja del mensaje reaccionado, como en WhatsApp. Hay como mucho una por
+ * lado, así que la dirección alcanza como identidad.
+ */
+export type MessageReaction = {
+  emoji: string;
+  direction: MessageDirection;
+  /** ISO */
+  at: string;
 };
 
 /** imagen adjunta a un servicio del file (voucher, comprobante de reserva) */

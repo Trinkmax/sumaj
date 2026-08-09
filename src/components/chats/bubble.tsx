@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { fmtDate, fmtTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { MediaContent, Reactions } from "./media-bubble";
+import type { MessageMedia, MessageReaction } from "@/lib/types";
 import type { MessageRow } from "./types";
 
 /** Ventana de respuesta libre de WhatsApp (24 hs desde el último entrante). */
@@ -129,6 +131,42 @@ function cleanMediaBody(body: string | null): string | null {
   return /^\[(image|document|audio|video|sticker)\]$/i.test(body.trim()) ? null : body;
 }
 
+/**
+ * El nombre que le puso el webhook a un adjunto ("Foto", "Mensaje de voz") es un
+ * relleno para la bandeja: adentro de la burbuja ya se ve la foto, así que
+ * repetirlo abajo es ruido. El pie de foto que escribió el cliente, en cambio,
+ * es contenido y va.
+ */
+const PLACEHOLDERS = new Set([
+  "foto",
+  "video",
+  "mensaje de voz",
+  "documento",
+  "figurita",
+  "imagen",
+  "adjunto",
+]);
+
+function captionOf(body: string | null): string | null {
+  const clean = cleanMediaBody(body)?.trim();
+  if (!clean) return null;
+  return PLACEHOLDERS.has(clean.toLowerCase()) ? null : clean;
+}
+
+/** El jsonb de la base, tipado — o null si la fila es vieja o vino vacía. */
+function mediaOf(m: MessageRow): MessageMedia | null {
+  const raw = m.media as unknown;
+  if (!raw || typeof raw !== "object") return null;
+  const media = raw as MessageMedia;
+  return typeof media.path === "string" && typeof media.mime === "string" ? media : null;
+}
+
+function reactionsOf(m: MessageRow): string[] {
+  const raw = m.reactions as unknown;
+  if (!Array.isArray(raw)) return [];
+  return (raw as MessageReaction[]).map((r) => r?.emoji).filter((e): e is string => !!e);
+}
+
 /* memo: el tick del reloj (60 s) re-renderiza el hilo pero no las 500 burbujas */
 export const Bubble = memo(function Bubble({
   m,
@@ -144,11 +182,18 @@ export const Bubble = memo(function Bubble({
   const out = m.direction === "out";
   const isTemplate = m.kind === "plantilla";
   const isNote = m.kind === "nota_interna";
+  /* El archivo de verdad, si el webhook lo pudo bajar. Cuando no está, se cae al
+     cartelito de antes: un mensaje sin adjunto recuperable sigue siendo un
+     mensaje, y el vendedor tiene que ver que le mandaron algo. */
+  const file = mediaOf(m);
   const media = MEDIA_META[m.kind];
   const mediaBody = media ? cleanMediaBody(m.body) : m.body;
-  // colita solo en burbujas "normales": la nota es amarilla y la plantilla
-  // tiene borde punteado (la colita no acompañaría el borde)
-  const withTail = tail && !isNote && !isTemplate;
+  const caption = captionOf(m.body);
+  const reactions = reactionsOf(m);
+  const isSticker = file?.sticker === true;
+  // colita solo en burbujas "normales": la nota es amarilla, la plantilla tiene
+  // borde punteado y la figurita no tiene burbuja
+  const withTail = tail && !isNote && !isTemplate && !isSticker;
 
   const meta = (
     <span
@@ -171,20 +216,27 @@ export const Bubble = memo(function Bubble({
   return (
     <div
       className={cn(
-        "flex",
-        out ? "justify-end" : "justify-start",
+        "flex flex-col",
+        out ? "items-end" : "items-start",
         tail || isNote ? "mt-2" : "mt-[2px]",
         fresh && "animate-msg-in",
       )}
     >
       <div
         className={cn(
-          "relative max-w-[85%] rounded-lg px-[9px] py-[6px] shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] md:max-w-[65%]",
-          isNote
-            ? "border border-tone-amber-line bg-tone-amber-soft"
-            : out
-              ? "bg-wa-bubble-out"
-              : "bg-wa-bubble-in",
+          "relative max-w-[85%] md:max-w-[65%]",
+          // La figurita no lleva burbuja: va suelta sobre el wallpaper, como en
+          // WhatsApp. Con fondo verde dejaría de leerse como una figurita.
+          isSticker
+            ? ""
+            : "rounded-lg px-[9px] py-[6px] shadow-[0_1px_0.5px_rgba(11,20,26,0.13)]",
+          isSticker
+            ? ""
+            : isNote
+              ? "border border-tone-amber-line bg-tone-amber-soft"
+              : out
+                ? "bg-wa-bubble-out"
+                : "bg-wa-bubble-in",
           withTail && (out ? "rounded-tr-none bubble-tail-out" : "rounded-tl-none bubble-tail-in"),
           isTemplate && "border border-dashed border-wa-accent-deep/50",
         )}
@@ -201,7 +253,20 @@ export const Bubble = memo(function Bubble({
           </span>
         )}
 
-        {media ? (
+        {file ? (
+          <>
+            <MediaContent media={file} out={out} caption={caption} />
+            {caption && !isSticker && (
+              <p className="whitespace-pre-wrap break-words pt-1 text-[14.2px] leading-[19px] text-wa-bubble-ink">
+                {caption}
+              </p>
+            )}
+            <div className={cn("flex justify-end", isSticker ? "pt-0.5" : "pt-0.5")}>{meta}</div>
+          </>
+        ) : media ? (
+          /* Sin archivo recuperable: el cartel de antes. Pasa con los mensajes
+             anteriores a que el sistema empezara a bajarlos, y cuando Meta ya lo
+             borró (el id entrante caduca a los 7 días). */
           <>
             <div className="my-0.5 flex items-center gap-2.5 rounded-md bg-wa-ink/5 px-2.5 py-2">
               <media.icon className="size-4.5 shrink-0 text-wa-ink-soft" strokeWidth={1.9} />
@@ -218,6 +283,7 @@ export const Bubble = memo(function Bubble({
           </div>
         )}
       </div>
+      <Reactions emojis={reactions} out={out} />
     </div>
   );
 });

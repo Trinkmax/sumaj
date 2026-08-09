@@ -639,3 +639,167 @@ export async function registerCloudNumber(
   if (!res.ok) return { ok: false, error: res.error };
   return { ok: true };
 }
+
+/* ═══════════════════════════════════════════════════════════
+   MEDIA — bajar lo que mandan, subir lo que mandamos
+
+   Meta no manda archivos por el webhook: manda un id. Ese id se cambia por una
+   URL que vive CINCO MINUTOS y que hay que pedir con el token (un GET pelado
+   devuelve 401). Para mandar, al revés: primero se sube el archivo y recién con
+   el id que devuelve se manda el mensaje.
+
+   Acá va solo la conversación con Meta. Dónde termina el archivo lo decide
+   `lib/media/store.ts`: este módulo no sabe que existe Supabase.
+   ═══════════════════════════════════════════════════════════ */
+
+export type CloudMediaInfo = {
+  /** vence a los 5 minutos y hay que bajarla con el token */
+  url: string;
+  mime: string;
+  size: number | null;
+};
+
+/** La URL de descarga de un media entrante, a partir de su id. */
+export async function getCloudMedia(
+  creds: CloudCreds,
+  mediaId: string,
+): Promise<GraphResult<CloudMediaInfo>> {
+  if (!creds.token) return { ok: false, error: "Falta el token de la Cloud API.", code: null };
+  if (!isMetaId(mediaId)) {
+    return { ok: false, error: "El id del archivo no es válido.", code: null };
+  }
+  const res = await graph<{ url?: string; mime_type?: string; file_size?: string | number }>(
+    `/${mediaId}`,
+    {
+      token: creds.token,
+      // Meta valida que el archivo sea de ESTE número: es gratis y evita bajar
+      // por accidente el adjunto de otra cuenta si un id se cruza.
+      query: isMetaId(creds.phoneNumberId) ? { phone_number_id: creds.phoneNumberId } : undefined,
+    },
+  );
+  if (!res.ok) return res;
+  if (!res.data.url) {
+    return { ok: false, error: "Meta no devolvió la dirección del archivo.", code: null };
+  }
+  return {
+    ok: true,
+    data: {
+      url: res.data.url,
+      mime: res.data.mime_type ?? "application/octet-stream",
+      size: res.data.file_size != null ? Number(res.data.file_size) : null,
+    },
+  };
+}
+
+/**
+ * Sube un archivo y devuelve su id, que es lo que después viaja en el mensaje.
+ *
+ * Va como multipart y no como JSON, así que no puede usar el helper `graph()`.
+ * El MIME viaja DOS VECES —en el campo `type` y pegado al archivo— porque así lo
+ * pide la documentación; y el error más común de este endpoint (131053) es
+ * justamente que el MIME declarado no coincida con el contenido real.
+ */
+export async function uploadCloudMedia(
+  creds: CloudCreds,
+  input: { body: Blob | ArrayBuffer; mime: string; filename: string },
+): Promise<GraphResult<{ id: string }>> {
+  if (!creds.token) return { ok: false, error: "Falta el token de la Cloud API.", code: null };
+  if (!isMetaId(creds.phoneNumberId)) {
+    return { ok: false, error: "El número madre no tiene un phone number ID válido.", code: null };
+  }
+
+  const blob =
+    input.body instanceof Blob ? input.body : new Blob([input.body], { type: input.mime });
+
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("type", input.mime);
+  form.append("file", blob, input.filename);
+
+  try {
+    const res = await fetch(`${GRAPH}/${creds.phoneNumberId}/media`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${creds.token}` },
+      body: form,
+      cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
+    });
+    const payload = (await res.json().catch(() => null)) as
+      | { id?: string; error?: GraphError }
+      | null;
+    if (!res.ok || payload?.error || !payload?.id) {
+      return {
+        ok: false,
+        error: graphError(payload, res.status),
+        code: payload?.error?.code ?? res.status,
+      };
+    }
+    return { ok: true, data: { id: payload.id } };
+  } catch (e) {
+    const aborted = e instanceof Error && e.name === "TimeoutError";
+    return {
+      ok: false,
+      error: aborted
+        ? "Meta tardó demasiado en recibir el archivo."
+        : "No se pudo subir el archivo a Meta.",
+      code: null,
+    };
+  }
+}
+
+/** Los tipos de adjunto que entiende la Cloud API al enviar. */
+export type CloudMediaKind = "image" | "video" | "audio" | "document" | "sticker";
+
+/**
+ * Manda un archivo ya subido.
+ *
+ * `voice: true` es lo que separa una NOTA DE VOZ de un archivo de audio: con eso
+ * WhatsApp le muestra al cliente la onda y el play, y sin eso le muestra un
+ * ícono de descarga. Meta solo lo acepta si el archivo es Ogg/Opus.
+ */
+export function sendCloudMedia(
+  creds: CloudCreds,
+  to: string,
+  input: {
+    kind: CloudMediaKind;
+    mediaId: string;
+    caption?: string | null;
+    filename?: string | null;
+    voice?: boolean;
+  },
+): Promise<CloudResult> {
+  const media: Record<string, unknown> = { id: input.mediaId };
+  // El audio no admite caption y el sticker tampoco: mandárselo es un 100 seguro.
+  if (input.caption && (input.kind === "image" || input.kind === "video" || input.kind === "document")) {
+    media.caption = input.caption.slice(0, 1024);
+  }
+  if (input.kind === "document" && input.filename) media.filename = input.filename;
+  if (input.kind === "audio" && input.voice) media.voice = true;
+
+  return send(creds, {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: to.replace(/\D/g, ""),
+    type: input.kind,
+    [input.kind]: media,
+  });
+}
+
+/**
+ * Reacciona a un mensaje. Con `emoji` en null se saca la reacción — es la misma
+ * llamada con el emoji vacío, tal como lo define Meta.
+ */
+export function sendCloudReaction(
+  creds: CloudCreds,
+  to: string,
+  messageId: string,
+  emoji: string | null,
+): Promise<CloudResult> {
+  return send(creds, {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: to.replace(/\D/g, ""),
+    type: "reaction",
+    reaction: { message_id: messageId, emoji: emoji ?? "" },
+  });
+}

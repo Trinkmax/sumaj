@@ -46,7 +46,12 @@ import {
 import type { ResolvedIgCreds } from "@/lib/ig/credentials";
 import { bridgeUrl, createBridgeLink } from "@/lib/ig/bridge";
 import { extractPhone, toE164 } from "@/lib/ig/phone";
-import { alertBranchOperators, routeToBranch } from "@/lib/wa/inbound";
+import {
+  alertBranchOperators,
+  routeToBranch,
+  type InboundMediaSource,
+} from "@/lib/wa/inbound";
+import { storeRemoteMedia, type MessageMedia } from "@/lib/media/store";
 import { hasWorker, sendViaBaileys } from "@/lib/wa/worker";
 import { fillTemplate } from "@/lib/domain";
 import { fmtPhone } from "@/lib/format";
@@ -73,7 +78,12 @@ export type IgInboundMessage = {
   kind: Enums<"message_kind">;
   /** mid de Meta: la clave de deduplicación */
   messageId: string | null;
-  mediaUrl: string | null;
+  /**
+   * De dónde bajar el adjunto. Instagram manda una URL de su CDN firmada que
+   * vence a los pocos días: guardarla sería guardar un link roto, así que el
+   * archivo se baja y queda en el bucket propio, igual que en WhatsApp.
+   */
+  media: InboundMediaSource | null;
   /** ms epoch */
   timestamp: number;
   /** anuncio del que vino la persona, si vino de uno */
@@ -439,13 +449,31 @@ export async function handleIgInbound(
       : "Respondió a tu historia"
     : msg.text;
 
+  /* El archivo se baja acá, con la conversación ya resuelta. Si falla, el
+     mensaje entra igual: perder el adjunto es malo, perder la consulta sería
+     peor. */
+  let media: MessageMedia | null = null;
+  if (msg.media) {
+    const stored = await storeRemoteMedia({
+      agencyId,
+      conversationId,
+      url: msg.media.url,
+      token: msg.media.token,
+      mime: msg.media.mime,
+      name: msg.media.name,
+      extra: msg.media.extra,
+    });
+    if (stored.ok) media = stored.media;
+    else console.warn(`[ig] adjunto sin guardar: ${stored.error}`);
+  }
+
   const { error: messageError } = await supabase.from("messages").insert({
     agency_id: agencyId,
     conversation_id: conversationId,
     direction: msg.direction,
     kind: msg.kind,
     body: body || null,
-    media_url: msg.mediaUrl,
+    media: media as never,
     wa_message_id: msg.messageId,
     // El eco es algo que la agencia ya mandó desde la app de Instagram: llega
     // entregado, no pendiente.

@@ -15,6 +15,7 @@ import type { Tables } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Bubble, DayChip, groupMessagesIntoDayGroups, startsStreak, WINDOW_MS } from "./bubble";
 import { TemplatePicker } from "./template-picker";
+import { AttachButton, VoiceRecorder } from "./composer-media";
 import type { ActiveLead, MessageRow, TemplateRow } from "./types";
 
 const MAX_COMPOSER_HEIGHT = 132; // ~5 líneas
@@ -374,8 +375,10 @@ export function EmbeddedChat({
       error_detail: null,
       is_automated: false,
       kind,
+      media: null,
       media_url: null,
       metadata: {},
+      reactions: [],
       sent_by: meId,
       status: "pendiente",
       template_name: templateName,
@@ -562,6 +565,23 @@ export function EmbeddedChat({
         {noteToggle}
         {quoteButton}
         {bridgeButton}
+        {/* Adjuntar y grabar solo aparecen si el mensaje puede salir de verdad:
+            en modo nota interna no van (la nota no sale de la app) y con el
+            envío bloqueado tampoco. */}
+        {!noteMode && canSend && conversation && (
+          <>
+            <AttachButton
+              agencyId={conversation.agency_id}
+              conversationId={conversationId}
+              onSent={() => requestAnimationFrame(() => scrollToBottom(true))}
+            />
+            <VoiceRecorder
+              agencyId={conversation.agency_id}
+              conversationId={conversationId}
+              onSent={() => requestAnimationFrame(() => scrollToBottom(true))}
+            />
+          </>
+        )}
         <div
           className={cn(
             "flex min-w-0 flex-1 items-end rounded-lg transition-colors",

@@ -9,7 +9,15 @@ import {
   logActivity,
   type ActionResult,
 } from "@/lib/actions/core";
-import { sendCloudTemplate, sendCloudText, type CloudCreds } from "@/lib/wa/cloud";
+import {
+  sendCloudMedia,
+  sendCloudTemplate,
+  sendCloudText,
+  uploadCloudMedia,
+  type CloudCreds,
+  type CloudMediaKind,
+} from "@/lib/wa/cloud";
+import { readMedia } from "@/lib/media/store";
 import { getCloudCreds } from "@/lib/wa/cloud-credentials";
 import { hasWorker, sendViaBaileys } from "@/lib/wa/worker";
 import { alertBranchOperators } from "@/lib/wa/inbound";
@@ -18,7 +26,12 @@ import { getIgCreds, type ResolvedIgCreds } from "@/lib/ig/credentials";
 import { toE164 } from "@/lib/ig/phone";
 import { fillTemplate } from "@/lib/domain";
 import { fmtPhone } from "@/lib/format";
-import type { MessageStatus, TablesInsert } from "@/lib/types";
+import type {
+  MessageKind,
+  MessageMedia,
+  MessageStatus,
+  TablesInsert,
+} from "@/lib/types";
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -411,6 +424,154 @@ export async function deriveToBranch(input: {
 
   revalidatePath("/crm");
   return succeed({ conversationId: targetId, branchName: branch.name });
+}
+
+/* ───────────────────────────────────────────
+   sendMediaMessage — mandar un archivo.
+
+   El binario NO viaja por la server action: lo sube el navegador directo al
+   bucket privado (la RLS de storage ya lo encierra en la carpeta de la agencia,
+   igual que los vouchers de los files), y acá llega solo el path. Es lo que
+   permite mandar un PDF de 20 MB sin chocar contra el límite de body de una
+   server action, y de paso el archivo queda guardado aunque Meta lo rechace.
+   ─────────────────────────────────────────── */
+
+/** De nuestro `message_kind` al `type` que entiende la Cloud API. */
+const CLOUD_KIND: Record<string, CloudMediaKind> = {
+  imagen: "image",
+  video: "video",
+  audio: "audio",
+  documento: "document",
+};
+
+/** El tipo de mensaje que le corresponde a un archivo, según su MIME. */
+function kindForMime(mime: string): MessageKind {
+  const base = mime.split(";")[0]!.trim().toLowerCase();
+  if (base.startsWith("image/")) return "imagen";
+  if (base.startsWith("video/")) return "video";
+  if (base.startsWith("audio/")) return "audio";
+  return "documento";
+}
+
+const mediaSchema = z.object({
+  conversationId: z.string().uuid(),
+  /** path dentro del bucket `attachments`, ya subido por el navegador */
+  path: z.string().trim().min(3).max(400),
+  mime: z.string().trim().min(3).max(120),
+  name: z.string().trim().max(200).nullable().optional(),
+  size: z.number().int().nonnegative().optional(),
+  /** nota de voz grabada (Ogg/Opus) en vez de un archivo de audio adjunto */
+  voice: z.boolean().optional(),
+  /** segundos, si los sabemos */
+  duration: z.number().nonnegative().optional(),
+  caption: z.string().trim().max(1024).optional(),
+});
+
+export async function sendMediaMessage(
+  input: z.infer<typeof mediaSchema>,
+): Promise<ActionResult<SentMessage>> {
+  const parsed = mediaSchema.safeParse(input);
+  if (!parsed.success) return fail("No pudimos preparar el archivo. Probá de nuevo.");
+  const { supabase, member, agency } = await requireAction();
+
+  /* El path viene del cliente y lo usa un cliente con service role, que no tiene
+     RLS que lo frene: si no se valida acá, alguien podría mandar el archivo de
+     otra agencia. La RLS del bucket solo cubre la subida. */
+  if (!parsed.data.path.startsWith(`${agency.id}/`)) {
+    return fail("Ese archivo no es de esta agencia.");
+  }
+
+  const { data: conversation } = await supabase
+    .from("conversations")
+    .select(CONVERSATION_WITH_CHANNEL)
+    .eq("id", parsed.data.conversationId)
+    .maybeSingle();
+  if (!conversation) return fail("No encontramos la conversación.");
+
+  const routed = await resolveRoute(
+    agency.id,
+    conversation.channel_ref,
+    conversation.contact?.phone ?? conversation.wa_id,
+    conversation.wa_id,
+  );
+  if (!routed.ok) return fail(routed.error);
+  const route = routed.route;
+
+  const kind = kindForMime(parsed.data.mime);
+  const media: MessageMedia = {
+    path: parsed.data.path,
+    mime: parsed.data.mime,
+    name: parsed.data.name ?? null,
+    size: parsed.data.size ?? null,
+    duration: parsed.data.duration ?? null,
+    voice: parsed.data.voice === true,
+  };
+
+  let status: MessageStatus = "enviado";
+  let waMessageId: string | null = null;
+  let errorDetail: string | null = null;
+
+  if (route.via === "cloud") {
+    const { open } = windowState(conversation.last_inbound_at, false);
+    if (!open) {
+      return fail(
+        "Fuera de la ventana de 24 hs del número madre. Derivá el chat a una sucursal para seguir sin costo.",
+      );
+    }
+
+    const bytes = await readMedia(parsed.data.path);
+    if (!bytes) return fail("No pudimos leer el archivo que se subió. Probá de nuevo.");
+
+    // Meta pide el archivo en dos pasos: primero se sube y recién con el id que
+    // devuelve se manda el mensaje.
+    const upload = await uploadCloudMedia(route.creds, {
+      body: bytes,
+      mime: parsed.data.mime,
+      filename: parsed.data.name ?? `archivo.${parsed.data.mime.split("/")[1] ?? "bin"}`,
+    });
+    if (!upload.ok) return fail(upload.error);
+
+    const res = await sendCloudMedia(route.creds, route.to, {
+      kind: CLOUD_KIND[kind] ?? "document",
+      mediaId: upload.data.id,
+      caption: parsed.data.caption ?? null,
+      filename: parsed.data.name ?? null,
+      voice: media.voice,
+    });
+    if (res.ok) waMessageId = res.waMessageId;
+    else {
+      status = "fallido";
+      errorDetail = res.error;
+    }
+  } else {
+    // Instagram y los números de sucursal todavía no mandan archivos: el envío
+    // falla explícito en vez de guardar una burbuja que el cliente nunca recibió.
+    return fail(
+      route.via === "instagram"
+        ? "Por Instagram todavía se pueden mandar solo mensajes de texto."
+        : "Por el número de la sucursal todavía se pueden mandar solo mensajes de texto.",
+    );
+  }
+
+  const message = await saveOutbound(supabase, {
+    agency_id: agency.id,
+    conversation_id: conversation.id,
+    direction: "out",
+    kind,
+    body: parsed.data.caption ?? null,
+    media: media as never,
+    sent_by: member.id,
+    status,
+    wa_message_id: waMessageId,
+    error_detail: errorDetail,
+    metadata: {},
+  });
+  if (!message) return fail("No se pudo enviar. Revisá tu conexión y probá de nuevo.");
+
+  if (status === "fallido") {
+    return fail(errorDetail ?? "WhatsApp rechazó el archivo. Probá de nuevo.");
+  }
+  return succeed(message);
 }
 
 /* ───────────────────────────────────────────

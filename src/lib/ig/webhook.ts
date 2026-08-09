@@ -435,7 +435,17 @@ function toInbound(event: IgMessaging, creds: ResolvedIgCreds): IgInboundMessage
     text,
     kind,
     messageId: message?.mid ?? postback?.mid ?? null,
-    mediaUrl: attachment?.payload?.url ?? null,
+    media: attachment?.payload?.url
+      ? {
+          url: attachment.payload.url,
+          // La CDN de Instagram entrega estos adjuntos firmados en la propia
+          // URL: no lleva token, a diferencia de WhatsApp.
+          token: null,
+          mime: null,
+          name: attachment.payload.title ?? null,
+          extra: { sticker: attachment.type === "sticker" },
+        }
+      : null,
     timestamp: toMillis(event.timestamp),
     campaign,
     sharedPhone,

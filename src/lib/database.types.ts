@@ -1338,8 +1338,10 @@ export type Database = {
           id: string
           is_automated: boolean
           kind: Database["public"]["Enums"]["message_kind"]
+          media: Json | null
           media_url: string | null
           metadata: Json
+          reactions: Json
           sent_by: string | null
           status: Database["public"]["Enums"]["message_status"]
           template_name: string | null
@@ -1355,8 +1357,10 @@ export type Database = {
           id?: string
           is_automated?: boolean
           kind?: Database["public"]["Enums"]["message_kind"]
+          media?: Json | null
           media_url?: string | null
           metadata?: Json
+          reactions?: Json
           sent_by?: string | null
           status?: Database["public"]["Enums"]["message_status"]
           template_name?: string | null
@@ -1372,8 +1376,10 @@ export type Database = {
           id?: string
           is_automated?: boolean
           kind?: Database["public"]["Enums"]["message_kind"]
+          media?: Json | null
           media_url?: string | null
           metadata?: Json
+          reactions?: Json
           sent_by?: string | null
           status?: Database["public"]["Enums"]["message_status"]
           template_name?: string | null

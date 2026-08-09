@@ -26,12 +26,30 @@ import {
   redeemBridgeLink,
   releaseBridgeLink,
 } from "@/lib/ig/bridge";
+import { storeRemoteMedia, type MessageMedia } from "@/lib/media/store";
 import { fmtPhone } from "@/lib/format";
 import type { Database } from "@/lib/database.types";
-import type { Enums } from "@/lib/types";
+import type { Enums, MessageReaction } from "@/lib/types";
 
 /** Sirve tanto el cliente con service role (webhooks) como el de la sesión (actions). */
 type Admin = SupabaseClient<Database>;
+
+/**
+ * De dónde bajar el archivo que vino con el mensaje.
+ *
+ * Llega como un descriptor y no como el binario ya bajado porque el archivo se
+ * guarda en una carpeta por conversación, y la conversación recién se resuelve
+ * acá adentro. La URL de Meta vive cinco minutos: alcanza de sobra, pero por eso
+ * la descarga pasa en el mismo request y no en un trabajo diferido.
+ */
+export type InboundMediaSource = {
+  url: string;
+  /** Meta exige el token para bajar; el worker de Baileys no. */
+  token?: string | null;
+  mime?: string | null;
+  name?: string | null;
+  extra?: Omit<MessageMedia, "path" | "mime" | "name" | "size">;
+};
 
 export type InboundMessage = {
   channelId: string;
@@ -45,6 +63,8 @@ export type InboundMessage = {
   timestamp: number;
   /** campaña/anuncio de origen, si el canal lo informa */
   campaign?: string | null;
+  /** adjunto, si el mensaje trae uno */
+  media?: InboundMediaSource | null;
 };
 
 export type InboundResult = { ok: boolean; error?: string };
@@ -349,12 +369,31 @@ export async function handleInboundMessage(
     if (dupe) return { ok: true };
   }
 
+  /* El archivo se baja ACÁ y no en el webhook porque recién ahora sabemos en qué
+     conversación va. Si falla, el mensaje entra igual: perder el adjunto es malo,
+     perder también la consulta del cliente sería peor. */
+  let media: MessageMedia | null = null;
+  if (msg.media) {
+    const stored = await storeRemoteMedia({
+      agencyId,
+      conversationId,
+      url: msg.media.url,
+      token: msg.media.token,
+      mime: msg.media.mime,
+      name: msg.media.name,
+      extra: msg.media.extra,
+    });
+    if (stored.ok) media = stored.media;
+    else console.warn(`[wa] adjunto sin guardar: ${stored.error}`);
+  }
+
   const { error: messageError } = await supabase.from("messages").insert({
     agency_id: agencyId,
     conversation_id: conversationId,
     direction: "in",
     kind: msg.kind,
     body: msg.text || null,
+    media: media as never,
     wa_message_id: msg.waMessageId,
     status: "entregado",
     created_at: new Date(msg.timestamp || Date.now()).toISOString(),
@@ -447,4 +486,57 @@ export async function handleInboundMessage(
   }
 
   return { ok: true };
+}
+
+/* ───────────────────────── reacciones ───────────────────────── */
+
+/**
+ * Pega (o saca) una reacción sobre el mensaje al que apunta.
+ *
+ * Las reacciones NO son mensajes: si se guardaran como uno, el hilo se llenaría
+ * de burbujas con un pulgar y el preview de la bandeja diría "👍" en vez de lo
+ * último que dijo el cliente. Van adentro del mensaje reaccionado, como en
+ * WhatsApp.
+ *
+ * `emoji` en null significa que la sacaron. Meta no manda ningún flag de borrado:
+ * manda el MISMO evento sin el campo `emoji`, así que la ausencia ES la señal
+ * (ojo, no un string vacío).
+ *
+ * Hay a lo sumo una reacción por lado en un chat de a dos, así que la dirección
+ * alcanza como identidad y no hace falta saber quién reaccionó.
+ */
+export async function applyReaction(
+  supabase: Admin,
+  agencyId: string,
+  input: {
+    /** wa_message_id del mensaje reaccionado */
+    messageId: string;
+    emoji: string | null;
+    direction: Enums<"message_direction">;
+  },
+): Promise<void> {
+  const { data: target } = await supabase
+    .from("messages")
+    .select("id, reactions")
+    .eq("wa_message_id", input.messageId)
+    // Con service role no hay RLS que ponga el límite: el agency_id lo pone acá.
+    .eq("agency_id", agencyId)
+    .maybeSingle();
+
+  // Reaccionar a un mensaje que no tenemos (anterior a la conexión, o de un lote
+  // que se perdió) no es un error: no hay nada que actualizar y listo.
+  if (!target) return;
+
+  const previas = Array.isArray(target.reactions)
+    ? (target.reactions as unknown as MessageReaction[])
+    : [];
+  const otras = previas.filter((r) => r.direction !== input.direction);
+  const proximas = input.emoji
+    ? [...otras, { emoji: input.emoji, direction: input.direction, at: new Date().toISOString() }]
+    : otras;
+
+  await supabase
+    .from("messages")
+    .update({ reactions: proximas as never })
+    .eq("id", target.id);
 }

@@ -94,10 +94,57 @@ import {
   verifyTokenMatches,
   type ResolvedCloudCreds,
 } from "@/lib/wa/cloud-credentials";
-import { handleInboundMessage } from "@/lib/wa/inbound";
+import {
+  applyReaction,
+  handleInboundMessage,
+  type InboundMediaSource,
+} from "@/lib/wa/inbound";
+import { getCloudMedia } from "@/lib/wa/cloud";
 import type { Enums } from "@/lib/types";
 
 /* ───────────────────────── payload de Meta ───────────────────────── */
+
+/**
+ * Un adjunto, como lo manda Meta. Todos comparten la misma forma: un `id` para
+ * pedir la URL, el MIME, y algunos campos propios de cada tipo. Desde hace poco
+ * el webhook trae además la `url` directa, lo que ahorra un viaje — pero
+ * igual hay que bajarla con el token.
+ */
+type CloudMediaPart = {
+  id?: string;
+  mime_type?: string;
+  url?: string;
+  caption?: string;
+  filename?: string;
+  /** sticker: la ÚNICA forma de saber si está animado (el MIME es webp siempre) */
+  animated?: boolean;
+  /** audio: grabado con el micrófono de WhatsApp vs archivo adjunto */
+  voice?: boolean;
+};
+
+type CloudMessage = {
+  id?: string;
+  from?: string;
+  timestamp?: string;
+  type?: string;
+  text?: { body?: string };
+  image?: CloudMediaPart;
+  video?: CloudMediaPart;
+  audio?: CloudMediaPart;
+  document?: CloudMediaPart;
+  sticker?: CloudMediaPart;
+  button?: { text?: string };
+  /** reacción a otro mensaje: sin `emoji` = la sacaron */
+  reaction?: { message_id?: string; emoji?: string };
+  location?: { latitude?: number; longitude?: number; name?: string; address?: string };
+  /** tarjetas de contacto compartidas (NO el perfil del remitente) */
+  contacts?: {
+    name?: { formatted_name?: string };
+    phones?: { phone?: string; wa_id?: string }[];
+  }[];
+  referral?: { source_id?: string; headline?: string; source_type?: string };
+  context?: { referred_product?: unknown };
+};
 
 type CloudPayload = {
   entry?: {
@@ -107,19 +154,7 @@ type CloudPayload = {
       value?: {
         metadata?: { phone_number_id?: string };
         contacts?: { profile?: { name?: string }; wa_id?: string }[];
-        messages?: {
-          id?: string;
-          from?: string;
-          timestamp?: string;
-          type?: string;
-          text?: { body?: string };
-          image?: { caption?: string };
-          video?: { caption?: string };
-          document?: { filename?: string };
-          button?: { text?: string };
-          referral?: { source_id?: string; headline?: string; source_type?: string };
-          context?: { referred_product?: unknown };
-        }[];
+        messages?: CloudMessage[];
         statuses?: { id?: string; status?: string; errors?: { title?: string }[] }[];
       };
     }[];
@@ -134,6 +169,49 @@ const KIND_BY_TYPE: Record<string, Enums<"message_kind">> = {
   document: "documento",
   sticker: "imagen",
 };
+
+/** Qué se ve en la bandeja cuando el mensaje no tiene texto propio. */
+const LABEL_BY_TYPE: Record<string, string> = {
+  image: "Foto",
+  video: "Video",
+  audio: "Mensaje de voz",
+  document: "Documento",
+  sticker: "Figurita",
+};
+
+/** El adjunto de un mensaje, sea del tipo que sea. */
+function mediaPartOf(message: CloudMessage): CloudMediaPart | null {
+  return (
+    message.image ?? message.video ?? message.audio ?? message.document ?? message.sticker ?? null
+  );
+}
+
+/**
+ * Ubicación y contactos no tienen dónde guardarse como tales, pero tampoco
+ * pueden entrar como una burbuja vacía: el vendedor tiene que ver QUÉ le
+ * mandaron. Se convierten en texto legible, que además es lo que va al preview
+ * de la bandeja y al aviso que le llega al operador.
+ */
+function describeMessage(message: CloudMessage): string {
+  if (message.location) {
+    const { name, address, latitude, longitude } = message.location;
+    const donde = [name, address].filter(Boolean).join(" · ");
+    const coords =
+      latitude != null && longitude != null
+        ? `https://maps.google.com/?q=${latitude},${longitude}`
+        : null;
+    return ["Ubicación", donde || null, coords].filter(Boolean).join("\n");
+  }
+  if (message.contacts?.length) {
+    const tarjetas = message.contacts.map((c) => {
+      const nombre = c.name?.formatted_name ?? "Contacto";
+      const tel = c.phones?.[0]?.phone;
+      return tel ? `${nombre} · ${tel}` : nombre;
+    });
+    return [`Contacto${tarjetas.length > 1 ? "s" : ""} compartido`, ...tarjetas].join("\n");
+  }
+  return "";
+}
 
 /* ───────────────────────── helpers ───────────────────────── */
 
@@ -450,13 +528,63 @@ async function processPayload(
       for (const message of value.messages ?? []) {
         if (!message.from) continue;
         const profileName = value.contacts?.[0]?.profile?.name ?? null;
+
+        /* Una reacción NO es un mensaje: se pega al mensaje al que apunta. Si
+           entrara como mensaje, el hilo se llenaría de burbujas con un pulgar y
+           la bandeja mostraría "👍" en vez de lo último que dijo el cliente. */
+        if (message.type === "reaction") {
+          if (message.reaction?.message_id) {
+            await applyReaction(supabase, creds.agencyId, {
+              messageId: message.reaction.message_id,
+              // Sin `emoji` significa que la sacaron: Meta no manda ningún flag
+              // de borrado, la ausencia del campo ES la señal.
+              emoji: message.reaction.emoji ?? null,
+              direction: "in",
+            });
+          }
+          continue;
+        }
+
+        const part = mediaPartOf(message);
         const text =
           message.text?.body ??
-          message.image?.caption ??
-          message.video?.caption ??
+          part?.caption ??
           message.button?.text ??
-          message.document?.filename ??
-          "";
+          (describeMessage(message) ||
+            (message.type ? (LABEL_BY_TYPE[message.type] ?? "") : ""));
+
+        /* El archivo hay que bajarlo YA: la URL de Meta vive cinco minutos y el
+           id, siete días. El webhook resuelve de dónde bajarlo y el inbound lo
+           guarda, que es donde ya se sabe a qué conversación pertenece. */
+        let media: InboundMediaSource | null = null;
+        if (part) {
+          // El webhook ya trae la URL; el GET por id queda como respaldo para
+          // las cuentas donde Meta todavía no la manda.
+          let url = part.url ?? null;
+          let mime = part.mime_type ?? null;
+          if (!url && part.id) {
+            const resolved = await getCloudMedia(creds, part.id);
+            if (resolved.ok) {
+              url = resolved.data.url;
+              mime = mime ?? resolved.data.mime;
+            } else {
+              console.warn(`[wa/cloud] archivo sin resolver: ${resolved.error}`);
+            }
+          }
+          if (url) {
+            media = {
+              url,
+              token: creds.token,
+              mime,
+              name: part.filename ?? null,
+              extra: {
+                voice: part.voice === true,
+                sticker: message.type === "sticker",
+                animated: part.animated === true,
+              },
+            };
+          }
+        }
 
         const result = await handleInboundMessage(
           {
@@ -471,6 +599,7 @@ async function processPayload(
             timestamp: message.timestamp ? Number(message.timestamp) * 1000 : Date.now(),
             // anuncios click-to-WhatsApp: Meta manda el referral del aviso
             campaign: message.referral?.headline ?? message.referral?.source_id ?? null,
+            media,
           },
           // Las credenciales ya resueltas: con estas sale la respuesta automática.
           creds,
