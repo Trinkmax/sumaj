@@ -7,7 +7,6 @@ import {
   ArrowUp,
   BadgeCheck,
   Ban,
-  CheckCheck,
   CircleDashed,
   CircleHelp,
   CirclePause,
@@ -15,7 +14,6 @@ import {
   Clock3,
   ExternalLink,
   Plus,
-  Reply,
   Send,
   ThumbsDown,
   ThumbsUp,
@@ -26,8 +24,10 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { ChoiceGrid, Tooltip } from "@/components/ui/misc";
+import { WaPreview } from "@/components/difusiones/wa-preview";
 import { saveTemplate, submitTemplateToMeta } from "@/lib/actions/templates";
-import { STAGES, fillTemplate } from "@/lib/domain";
+import { STAGES, fillTemplate, templateEstaCongelada } from "@/lib/domain";
+import { BROADCAST_VAR_KEYS } from "@/lib/broadcasts/audience";
 import type { BroadcastIntent, LeadStage, Tables, TemplateButton } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -94,21 +94,40 @@ export function metaStatusMeta(status: string): MetaStatusMeta {
   return META_STATUS[status] ?? META_STATUS.local;
 }
 
-/* ───────────────────────────── variables ───────────────────────────── */
+/* ───────────────────────────── variables ─────────────────────────────
+   Una plantilla se usa para dos cosas y no completan lo mismo: una DIFUSIÓN
+   solo sabe llenar `BROADCAST_VAR_KEYS`, mientras que un SEGUIMIENTO automático
+   sale desde un lead y ahí sí hay fecha de viaje.
 
-const VARIABLES = [
+   Por eso las de difusión van primero y `{{fecha}}` queda marcada: ofrecerla
+   como una más hacía que el dueño armara la plantilla con ella, esperara la
+   aprobación de Meta, y recién en el composer se enterara —con la plantilla ya
+   congelada e ineditable— de que esa difusión no se puede mandar. */
+
+const VARIABLES: { key: string; hint: string; soloSeguimientos?: boolean }[] = [
   { key: "nombre", hint: "nombre del cliente" },
-  { key: "vendedor", hint: "quien atiende" },
   { key: "destino", hint: "destino del viaje" },
-  { key: "fecha", hint: "fecha del viaje" },
+  { key: "agencia", hint: "el nombre de tu agencia" },
+  { key: "vendedor", hint: "quien atiende" },
+  { key: "fecha", hint: "fecha del viaje — solo en seguimientos, no en difusiones", soloSeguimientos: true },
 ];
 
 const SAMPLE_VARS = {
   nombre: "Caro",
   vendedor: "Vale",
   destino: "Cancún",
+  agencia: "la agencia",
   fecha: "12 de octubre",
 };
+
+/** Las {{variables}} de un texto, en orden y sin repetir. */
+function variablesDe(texto: string): string[] {
+  const out: string[] = [];
+  for (const m of texto.matchAll(/\{\{(\w+)\}\}/g)) {
+    if (!out.includes(m[1])) out.push(m[1]);
+  }
+  return out;
+}
 
 /* ───────────────────────────── botones ─────────────────────────────
    Tres respuestas rápidas es el techo a propósito: en un celular, cuatro
@@ -158,94 +177,6 @@ export function parseTemplateButtons(value: unknown): TemplateButton[] {
   return out;
 }
 
-/* ───────────────────── preview: la burbuja de WhatsApp ─────────────────────
-   La comparte la lista de plantillas y el resultado de una difusión: lo que se
-   ve acá tiene que ser exactamente lo que le llega a la persona. */
-
-export function WaTemplatePreview({
-  header,
-  body,
-  footer,
-  buttons,
-  time = "11:42",
-  className,
-}: {
-  header?: string | null;
-  body: string;
-  footer?: string | null;
-  buttons?: TemplateButton[];
-  time?: string;
-  className?: string;
-}) {
-  const btns = buttons ?? [];
-  return (
-    <div className={cn("wa-wallpaper overflow-hidden rounded-xl p-3 pl-8", className)}>
-      <div
-        className={cn(
-          "relative ml-auto mr-2 w-fit max-w-full overflow-hidden rounded-lg rounded-tr-none bg-wa-bubble-out shadow-sm bubble-tail-out",
-          btns.length > 0 && "min-w-[190px]",
-        )}
-      >
-        <div className="px-2.5 pb-1.5 pt-1.5">
-          {header && (
-            <p className="mb-0.5 text-[13.5px] font-semibold leading-snug text-wa-bubble-ink">
-              {header}
-            </p>
-          )}
-          <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-wa-bubble-ink">
-            {body}
-          </p>
-          {footer && (
-            <p className="mt-1 text-[11.5px] leading-snug text-wa-bubble-meta">{footer}</p>
-          )}
-          <span className="mt-0.5 flex items-center justify-end gap-1 text-[10px] leading-none text-wa-bubble-meta">
-            {time}
-            <CheckCheck className="size-3.5 text-wa-tick" strokeWidth={2} />
-          </span>
-        </div>
-        {btns.length > 0 && (
-          <div>
-            {btns.map((b, i) => (
-              <div
-                key={`${b.text}-${i}`}
-                className="flex items-center justify-center gap-1.5 border-t border-wa-bubble-ink/10 px-3 py-2 text-[13px] font-medium text-wa-tick"
-              >
-                {b.type === "url" ? (
-                  <ExternalLink className="size-3.5" strokeWidth={2} />
-                ) : (
-                  <Reply className="size-3.5" strokeWidth={2} />
-                )}
-                <span className="truncate">{b.text}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** Cuerpo con las {{variables}} resaltadas — para la tarjeta de la lista. */
-export function HighlightedBody({ body }: { body: string }) {
-  const parts = body.split(/(\{\{\w+\}\})/g);
-  return (
-    <>
-      {parts.map((p, i) =>
-        /^\{\{\w+\}\}$/.test(p) ? (
-          <code
-            key={i}
-            className="mx-px rounded-md bg-wa-accent/20 px-1 py-0.5 font-mono text-[11.5px] font-semibold"
-          >
-            {p}
-          </code>
-        ) : (
-          <React.Fragment key={i}>{p}</React.Fragment>
-        ),
-      )}
-    </>
-  );
-}
-
 /* ───────────────────────────── el diálogo ───────────────────────────── */
 
 export function TemplateDialog({
@@ -282,9 +213,13 @@ export function TemplateDialog({
   const status = template?.meta_status ?? "local";
   const meta = metaStatusMeta(status);
   const StatusIcon = meta.icon;
-  /* Lo que ya viajó a Meta no se edita desde acá: allá la plantilla es
-     inmutable y editarla de este lado dejaría a la base mintiendo. */
-  const locked = Boolean(template) && status !== "local";
+  /* Una aprobada (o una que Meta está revisando) no se edita: allá es inmutable
+     y editarla de este lado dejaría a la base mintiendo — y al despachador
+     mandando un texto con otra cantidad de variables que la aprobada.
+     Una RECHAZADA sí, y es lo que el propio chip le pide al admin: mandarla a
+     aprobar la borra en Meta y la vuelve a crear con el texto corregido. Sin
+     esto, el único camino era crear otra plantilla con otro nombre técnico. */
+  const locked = Boolean(template) && templateEstaCongelada(status);
   const busy = saving || sending;
 
   const buttons = orderButtons(quick, urlButton);
@@ -496,20 +431,37 @@ export function TemplateDialog({
               className="min-h-[120px]"
             />
             {!locked && (
-              <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <span className="text-xs text-ink-faint">Variables:</span>
-                {VARIABLES.map((v) => (
-                  <Tooltip key={v.key} content={v.hint}>
-                    <button
-                      type="button"
-                      onClick={() => insertVariable(v.key)}
-                      className="rounded-full border border-brand-tint-line bg-brand-tint px-2 py-0.5 font-mono text-[11px] font-medium text-brand-text transition-all hover:bg-brand-tint-strong active:scale-95 tap-highlight-none"
-                    >
-                      {`{{${v.key}}}`}
-                    </button>
-                  </Tooltip>
-                ))}
-              </div>
+              <>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-ink-faint">Variables:</span>
+                  {VARIABLES.map((v) => (
+                    <Tooltip key={v.key} content={v.hint}>
+                      <button
+                        type="button"
+                        onClick={() => insertVariable(v.key)}
+                        className={cn(
+                          "min-h-8 rounded-full border px-2.5 font-mono text-[11px] font-medium transition-all active:scale-95 tap-highlight-none",
+                          v.soloSeguimientos
+                            ? "border-line bg-sand-soft text-ink-soft hover:border-line-strong"
+                            : "border-brand-tint-line bg-brand-tint text-brand-text hover:bg-brand-tint-strong",
+                        )}
+                      >
+                        {`{{${v.key}}}`}
+                      </button>
+                    </Tooltip>
+                  ))}
+                </div>
+                {sinLlenarEnDifusion.length > 0 && (
+                  <p className="mt-2 flex items-start gap-2 rounded-xl border border-tone-amber-line bg-tone-amber-soft px-3 py-2 text-xs leading-snug text-tone-amber-text">
+                    <TriangleAlert className="mt-px size-3.5 shrink-0" strokeWidth={1.9} />
+                    <span>
+                      {sinLlenarEnDifusion.map((v) => `{{${v}}}`).join(", ")} no se puede completar
+                      en una difusión: sirve para los seguimientos automáticos. Si esta plantilla es
+                      para difundir, sacala antes de mandarla a aprobar.
+                    </span>
+                  </p>
+                )}
+              </>
             )}
           </div>
 
@@ -538,7 +490,7 @@ export function TemplateDialog({
               <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
                 Así lo recibe el cliente
               </p>
-              <WaTemplatePreview
+              <WaPreview
                 header={header.trim() || null}
                 body={preview}
                 footer={footer.trim() || null}

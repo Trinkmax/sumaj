@@ -14,6 +14,12 @@ import type { TemplateButton } from "@/lib/types";
  * WhatsApp muestra como mucho tres botones pegados a la burbuja; cuando hay
  * más, los agrupa detrás de "Ver todas las opciones". Se replica igual para no
  * prometer una pantalla que el cliente no va a ver.
+ *
+ * ES LA ÚNICA BURBUJA DEL SISTEMA. Antes había tres dibujos distintos de lo
+ * mismo (el editor de plantillas, la tarjeta de la lista y el resultado de la
+ * difusión) y prometían cosas diferentes: cuatro botones en una pantalla, tres
+ * más "Ver todas las opciones" en otra. La que manda es esta, porque es la que
+ * copia lo que de verdad hace WhatsApp.
  */
 const MAX_BOTONES_VISIBLES = 3;
 
@@ -22,7 +28,7 @@ export function WaPreview({
   body,
   footer,
   buttons = [],
-  vars,
+  vars = {},
   time = "11:42",
   className,
 }: {
@@ -31,7 +37,7 @@ export function WaPreview({
   footer?: string | null;
   buttons?: TemplateButton[];
   /** valores con los que se reemplazan las {{variables}} del texto */
-  vars: Record<string, string>;
+  vars?: Record<string, string>;
   time?: string;
   className?: string;
 }) {
