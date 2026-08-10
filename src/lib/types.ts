@@ -23,6 +23,56 @@ export type MessageStatus = Enums<"message_status">;
 export type MessageKind = Enums<"message_kind">;
 export type ActivityType = Enums<"activity_type">;
 export type DocumentType = Enums<"document_type">;
+export type BroadcastStatus = Enums<"broadcast_status">;
+export type BroadcastRecipientStatus = Enums<"broadcast_recipient_status">;
+export type BroadcastIntent = Enums<"broadcast_intent">;
+
+/**
+ * Un botón de una plantilla de WhatsApp (`wa_templates.buttons`).
+ *
+ * El ORDEN del array es el índice con el que Meta identifica al botón, tanto al
+ * enviar (`components[].index`) como al avisar del toque. Reordenarlos después
+ * de que la plantilla está aprobada rompe la lectura de las respuestas viejas:
+ * por eso el orden se congela en `broadcasts.buttons_snapshot`.
+ *
+ * `intent` es lo que convierte un toque en un lead calificado. Solo lo llevan
+ * los de respuesta rápida: un botón que abre un link se va de WhatsApp y no
+ * vuelve con nada que podamos leer.
+ */
+export type TemplateButton = {
+  type: "quick_reply" | "url";
+  /** lo que ve el cliente; Meta lo limita a 25 caracteres */
+  text: string;
+  /** solo en los de tipo url */
+  url?: string | null;
+  /** qué significa que lo toque — solo en quick_reply */
+  intent?: BroadcastIntent | null;
+};
+
+/**
+ * Los filtros con los que se armó la audiencia de una difusión
+ * (`broadcasts.audience`). Es el mismo objeto que recibe la función de base
+ * `public.broadcast_audience(agency, filters)`: si se agrega una clave acá,
+ * va también en el SQL, o el contador de la pantalla miente.
+ */
+export type BroadcastAudience = {
+  tags?: string[];
+  tags_mode?: "any" | "all";
+  stages?: LeadStage[];
+  clients?: "todos" | "clientes" | "no_clientes";
+  branch_id?: string | null;
+  assigned_to?: string | null;
+  destination?: string | null;
+  created_from?: string | null;
+  created_to?: string | null;
+  birthday_month?: number | null;
+  /** sin movimiento hace N días */
+  quiet_days?: number | null;
+  /** no repetirle a quien recibió una difusión hace menos de N días (default 7) */
+  no_broadcast_days?: number;
+  /** no interrumpir a los que están en presupuestado/negociación (default true) */
+  skip_active?: boolean;
+};
 
 /**
  * settings jsonb de agencies, tipado. Todas las claves son OPCIONALES a

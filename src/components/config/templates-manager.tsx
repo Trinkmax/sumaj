@@ -1,84 +1,51 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  BadgeCheck,
   CheckCheck,
-  Clock3,
+  ExternalLink,
   MessageSquareText,
   Pencil,
   Plus,
+  RefreshCw,
+  Reply,
+  Send,
   Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Switch, EmptyState, Tooltip } from "@/components/ui/misc";
 import { ConfirmDialog } from "@/components/config/confirm-dialog";
+import {
+  HighlightedBody,
+  TemplateDialog,
+  metaStatusMeta,
+  parseTemplateButtons,
+} from "@/components/config/template-dialog";
 import { deleteTemplate, upsertTemplate } from "@/lib/actions/settings";
-import { STAGES, STAGE_BY_KEY, fillTemplate } from "@/lib/domain";
-import type { LeadStage, Tables } from "@/lib/types";
+import { deleteMetaTemplateAction, submitTemplateToMeta, syncTemplatesFromMeta } from "@/lib/actions/templates";
+import { STAGES, STAGE_BY_KEY } from "@/lib/domain";
+import type { Tables } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Template = Tables<"wa_templates">;
 
-const VARIABLES = [
-  { key: "nombre", hint: "nombre del cliente" },
-  { key: "vendedor", hint: "quien atiende" },
-  { key: "destino", hint: "destino del viaje" },
-  { key: "fecha", hint: "fecha del viaje" },
-];
-
-const SAMPLE_VARS = {
-  nombre: "Caro",
-  vendedor: "Vale",
-  destino: "Cancún",
-  fecha: "12 de octubre",
-};
-
-/* ── La plantilla se previsualiza como burbuja saliente de WhatsApp ── */
-
-function WaBubble({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="wa-wallpaper overflow-hidden rounded-xl p-3 pl-8">
-      <div className="relative ml-auto mr-2 w-fit max-w-full rounded-lg rounded-tr-none bg-wa-bubble-out px-2.5 pb-1.5 pt-1.5 shadow-sm bubble-tail-out">
-        {children}
-        <span className="mt-0.5 flex items-center justify-end gap-1 text-[10px] leading-none text-wa-bubble-meta">
-          11:42
-          <CheckCheck className="size-3.5 text-wa-tick" strokeWidth={2} />
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/** Cuerpo del mensaje con las {{variables}} resaltadas (dentro de la burbuja). */
-function BubbleBody({ body }: { body: string }) {
-  const parts = body.split(/(\{\{\w+\}\})/g);
-  return (
-    <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-wa-bubble-ink">
-      {parts.map((p, i) =>
-        /^\{\{\w+\}\}$/.test(p) ? (
-          <code
-            key={i}
-            className="mx-px rounded-md bg-wa-accent/20 px-1 py-0.5 font-mono text-[11.5px] font-semibold"
-          >
-            {p}
-          </code>
-        ) : (
-          <React.Fragment key={i}>{p}</React.Fragment>
-        ),
-      )}
-    </p>
-  );
-}
-
-export function TemplatesManager({ templates }: { templates: Template[] }) {
+export function TemplatesManager({
+  templates,
+  cloudReady,
+}: {
+  templates: Template[];
+  /** número madre conectado: sin él no hay ni aprobación ni sincronización */
+  cloudReady: boolean;
+}) {
+  const router = useRouter();
   const [editing, setEditing] = React.useState<Template | null>(null);
   const [createOpen, setCreateOpen] = React.useState(false);
   const [toDelete, setToDelete] = React.useState<Template | null>(null);
+  const [syncing, setSyncing] = React.useState(false);
 
   const stageOrder = STAGES.map((s) => s.key);
   const sorted = [...templates].sort((a, b) => {
@@ -87,24 +54,69 @@ export function TemplatesManager({ templates }: { templates: Template[] }) {
     return ai - bi || a.name.localeCompare(b.name);
   });
 
+  async function sync() {
+    setSyncing(true);
+    const res = await syncTemplatesFromMeta();
+    setSyncing(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    const { actualizadas, nuevas } = res.data;
+    if (actualizadas === 0 && nuevas === 0) {
+      toast.success("Ya estaba todo al día.");
+    } else {
+      const partes = [
+        actualizadas > 0 ? `${actualizadas} actualizada${actualizadas === 1 ? "" : "s"}` : null,
+        nuevas > 0 ? `${nuevas} nueva${nuevas === 1 ? "" : "s"}` : null,
+      ].filter(Boolean);
+      toast.success(`Listo: ${partes.join(" y ")}.`);
+    }
+    router.refresh();
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-ink-soft">
-          Mensajes listos para enviar desde los chats y el seguimiento automático.
+          Los mensajes que salen del número madre. Meta las tiene que aprobar antes de usarlas.
         </p>
-        <Button onClick={() => setCreateOpen(true)} className="shrink-0">
-          <Plus />
-          <span className="hidden sm:inline">Nueva plantilla</span>
-          <span className="sm:hidden">Nueva</span>
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {cloudReady && (
+            <Button variant="secondary" onClick={sync} loading={syncing}>
+              <RefreshCw />
+              <span className="hidden sm:inline">Sincronizar con Meta</span>
+              <span className="sm:hidden">Sincronizar</span>
+            </Button>
+          )}
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus />
+            <span className="hidden sm:inline">Nueva plantilla</span>
+            <span className="sm:hidden">Nueva</span>
+          </Button>
+        </div>
       </div>
+
+      {!cloudReady && (
+        <div className="rounded-2xl border border-tone-amber-line bg-tone-amber-soft px-4 py-3">
+          <p className="text-sm font-medium text-tone-amber-text">
+            El número madre todavía no está conectado
+          </p>
+          <p className="mt-0.5 text-[13px] text-tone-amber-text/90">
+            Podés escribir las plantillas igual, pero para mandarlas a aprobar hace falta la
+            conexión con Meta.{" "}
+            <Link href="/config/whatsapp" className="font-medium underline underline-offset-2">
+              Conectar WhatsApp
+            </Link>
+          </p>
+        </div>
+      )}
 
       {sorted.length === 0 ? (
         <EmptyState
           icon={MessageSquareText}
           title="Todavía no hay plantillas"
-          description="Creá la primera para responder más rápido y activar el seguimiento automático."
+          description="Creá la primera para responder más rápido, activar el seguimiento automático y difundir."
           action={
             <Button onClick={() => setCreateOpen(true)}>
               <Plus />
@@ -118,6 +130,7 @@ export function TemplatesManager({ templates }: { templates: Template[] }) {
             <TemplateCard
               key={t.id}
               template={t}
+              cloudReady={cloudReady}
               onEdit={() => setEditing(t)}
               onDelete={() => setToDelete(t)}
             />
@@ -135,20 +148,31 @@ export function TemplatesManager({ templates }: { templates: Template[] }) {
             setEditing(null);
           }
         }}
+        onSaved={() => router.refresh()}
       />
 
       <ConfirmDialog
         open={toDelete !== null}
         onOpenChange={(o) => !o && setToDelete(null)}
         title={`¿Eliminar "${toDelete?.name}"?`}
-        description="Los seguimientos automáticos que la usen van a dejar de enviarla."
+        description={
+          toDelete && toDelete.meta_status !== "local"
+            ? "Se borra acá y también en Meta. Los seguimientos que la usen van a dejar de enviarla."
+            : "Los seguimientos automáticos que la usen van a dejar de enviarla."
+        }
         onConfirm={async () => {
           if (!toDelete) return;
-          const res = await deleteTemplate({ id: toDelete.id });
+          // Si vive en Meta hay que darla de baja allá también: si solo la
+          // borramos acá, el nombre queda tomado y no se puede volver a crear.
+          const res =
+            toDelete.meta_status === "local"
+              ? await deleteTemplate({ id: toDelete.id })
+              : await deleteMetaTemplateAction({ id: toDelete.id });
           if (!res.ok) {
             toast.error(res.error);
           } else {
             toast.success("Plantilla eliminada.");
+            router.refresh();
           }
           setToDelete(null);
         }}
@@ -159,15 +183,25 @@ export function TemplatesManager({ templates }: { templates: Template[] }) {
 
 function TemplateCard({
   template,
+  cloudReady,
   onEdit,
   onDelete,
 }: {
   template: Template;
+  cloudReady: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const router = useRouter();
   const [approved, setApproved] = React.useState(template.is_approved);
+  const [sending, setSending] = React.useState(false);
   const stage = template.stage ? STAGE_BY_KEY[template.stage] : null;
+  const meta = metaStatusMeta(template.meta_status);
+  const StatusIcon = meta.icon;
+  const buttons = parseTemplateButtons(template.buttons);
+  /* El tilde a mano sobrevive solo para las viejas: en las que viven en Meta,
+     `is_approved` la escribe un trigger desde `meta_status` y tocarla mentiría. */
+  const isLocal = template.meta_status === "local";
 
   async function toggleApproved(next: boolean) {
     const prev = approved;
@@ -184,6 +218,18 @@ function TemplateCard({
       setApproved(prev);
       toast.error(res.error);
     }
+  }
+
+  async function sendToMeta() {
+    setSending(true);
+    const res = await submitTemplateToMeta({ id: template.id });
+    setSending(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    toast.success("La mandamos a Meta. Suele tardar unos minutos en resolverse.");
+    router.refresh();
   }
 
   return (
@@ -204,17 +250,15 @@ function TemplateCard({
             ) : (
               <Badge>Genérica</Badge>
             )}
-            {approved ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-tone-emerald-line bg-tone-emerald-soft px-2 py-0.5 text-[11px] font-medium leading-4 text-tone-emerald-text">
-                <BadgeCheck className="size-3" />
-                Aprobada por Meta
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 rounded-full border border-tone-amber-line bg-tone-amber-soft px-2 py-0.5 text-[11px] font-medium leading-4 text-tone-amber-text">
-                <Clock3 className="size-3" />
-                Pendiente
-              </span>
-            )}
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4",
+                meta.chip,
+              )}
+            >
+              <StatusIcon className="size-3" strokeWidth={2} />
+              {meta.label}
+            </span>
           </div>
           <h3 className="mt-1.5 truncate font-medium text-ink">{template.name}</h3>
         </div>
@@ -238,191 +282,92 @@ function TemplateCard({
         </div>
       </div>
 
+      <p className="mt-1.5 text-xs text-ink-faint">{meta.hint}</p>
+      {template.rejected_reason && template.meta_status === "REJECTED" && (
+        <p className="mt-1 text-xs text-tone-red-text">Meta dijo: {template.rejected_reason}</p>
+      )}
+
       <div className="mt-3 flex-1">
-        <WaBubble>
-          <BubbleBody body={template.body} />
-        </WaBubble>
+        <div className="wa-wallpaper overflow-hidden rounded-xl p-3 pl-8">
+          <div
+            className={cn(
+              "relative ml-auto mr-2 w-fit max-w-full overflow-hidden rounded-lg rounded-tr-none bg-wa-bubble-out shadow-sm bubble-tail-out",
+              buttons.length > 0 && "min-w-[190px]",
+            )}
+          >
+            <div className="px-2.5 pb-1.5 pt-1.5">
+              {template.header_text && (
+                <p className="mb-0.5 text-[13.5px] font-semibold leading-snug text-wa-bubble-ink">
+                  {template.header_text}
+                </p>
+              )}
+              <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-wa-bubble-ink">
+                <HighlightedBody body={template.body} />
+              </p>
+              {template.footer_text && (
+                <p className="mt-1 text-[11.5px] leading-snug text-wa-bubble-meta">
+                  {template.footer_text}
+                </p>
+              )}
+              <span className="mt-0.5 flex items-center justify-end gap-1 text-[10px] leading-none text-wa-bubble-meta">
+                11:42
+                <CheckCheck className="size-3.5 text-wa-tick" strokeWidth={2} />
+              </span>
+            </div>
+            {buttons.length > 0 && (
+              <div>
+                {buttons.map((b, i) => (
+                  <div
+                    key={`${b.text}-${i}`}
+                    className="flex items-center justify-center gap-1.5 border-t border-wa-bubble-ink/10 px-3 py-2 text-[13px] font-medium text-wa-tick"
+                  >
+                    {b.type === "url" ? (
+                      <ExternalLink className="size-3.5" strokeWidth={2} />
+                    ) : (
+                      <Reply className="size-3.5" strokeWidth={2} />
+                    )}
+                    <span className="truncate">{b.text}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <code className="truncate font-mono text-[11px] text-ink-faint">{template.meta_name}</code>
-        <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-ink-faint">
-          Aprobada
-          <Switch checked={approved} onCheckedChange={toggleApproved} aria-label="Aprobada por Meta" />
-        </label>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <code className="min-w-0 truncate font-mono text-[11px] text-ink-faint">
+          {template.meta_name}
+        </code>
+        {isLocal ? (
+          <div className="flex shrink-0 items-center gap-2">
+            {cloudReady && (
+              <Button size="sm" variant="secondary" loading={sending} onClick={sendToMeta}>
+                <Send />
+                Mandar a aprobar
+              </Button>
+            )}
+            {/* El tilde a mano es para las que Meta ya aprobó por fuera del
+                sistema: sin él, esas plantillas viejas dejarían de enviarse. */}
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-faint">
+              Aprobada a mano
+              <Switch
+                checked={approved}
+                onCheckedChange={toggleApproved}
+                aria-label="Marcar como aprobada a mano"
+              />
+            </label>
+          </div>
+        ) : (
+          template.meta_status === "REJECTED" &&
+          cloudReady && (
+            <Button size="sm" variant="secondary" loading={sending} onClick={sendToMeta}>
+              <Send />
+              Volver a mandar
+            </Button>
+          )
+        )}
       </div>
     </article>
-  );
-}
-
-function TemplateDialog({
-  open,
-  template,
-  onOpenChange,
-}: {
-  open: boolean;
-  template: Template | null;
-  onOpenChange: (o: boolean) => void;
-}) {
-  const [name, setName] = React.useState(template?.name ?? "");
-  const [metaName, setMetaName] = React.useState(template?.meta_name ?? "");
-  const [stage, setStage] = React.useState<string>(template?.stage ?? "");
-  const [body, setBody] = React.useState(template?.body ?? "");
-  const [approved, setApproved] = React.useState(template?.is_approved ?? false);
-  const [loading, setLoading] = React.useState(false);
-  const bodyRef = React.useRef<HTMLTextAreaElement>(null);
-
-  function insertVariable(key: string) {
-    const el = bodyRef.current;
-    const token = `{{${key}}}`;
-    if (!el) {
-      setBody((b) => b + token);
-      return;
-    }
-    const start = el.selectionStart ?? body.length;
-    const end = el.selectionEnd ?? body.length;
-    const next = body.slice(0, start) + token + body.slice(end);
-    setBody(next);
-    requestAnimationFrame(() => {
-      el.focus();
-      const pos = start + token.length;
-      el.setSelectionRange(pos, pos);
-    });
-  }
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    const res = await upsertTemplate({
-      id: template?.id,
-      name: name.trim(),
-      meta_name: metaName.trim(),
-      stage: (stage || null) as LeadStage | null,
-      body: body.trim(),
-      is_approved: approved,
-    });
-    setLoading(false);
-    if (!res.ok) {
-      toast.error(res.error);
-      return;
-    }
-    toast.success(template ? "Plantilla guardada." : "Plantilla creada.");
-    onOpenChange(false);
-  }
-
-  const preview = fillTemplate(body, SAMPLE_VARS);
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !loading && onOpenChange(o)}>
-      <DialogContent
-        title={template ? "Editar plantilla" : "Nueva plantilla"}
-        description="Usá variables para personalizar cada mensaje."
-        size="lg"
-      >
-        <form onSubmit={submit} className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <Label htmlFor="tpl-name">Nombre *</Label>
-              <Input
-                id="tpl-name"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Ej: Primer contacto"
-                maxLength={80}
-                autoFocus
-              />
-            </div>
-            <div>
-              <Label htmlFor="tpl-stage">Etapa</Label>
-              <Select id="tpl-stage" value={stage} onChange={(e) => setStage(e.target.value)}>
-                <option value="">Genérica (cualquier etapa)</option>
-                {STAGES.map((s) => (
-                  <option key={s.key} value={s.key}>
-                    {s.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          </div>
-
-          <div>
-            <Label htmlFor="tpl-meta">Nombre técnico en Meta *</Label>
-            <Input
-              id="tpl-meta"
-              required
-              value={metaName}
-              onChange={(e) => setMetaName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"))}
-              placeholder="primer_contacto"
-              maxLength={80}
-              className="font-mono text-[13px]"
-            />
-            <p className="mt-1.5 text-xs text-ink-faint">
-              Tiene que coincidir con el nombre de la plantilla en la Cloud API.
-            </p>
-          </div>
-
-          <div>
-            <Label htmlFor="tpl-body">Mensaje *</Label>
-            <Textarea
-              id="tpl-body"
-              required
-              ref={bodyRef}
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder={"Hola {{nombre}}! Soy {{vendedor}} de la agencia…"}
-              maxLength={2000}
-              className="min-h-[120px]"
-            />
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-ink-faint">Variables:</span>
-              {VARIABLES.map((v) => (
-                <Tooltip key={v.key} content={v.hint}>
-                  <button
-                    type="button"
-                    onClick={() => insertVariable(v.key)}
-                    className="rounded-full border border-brand-tint-line bg-brand-tint px-2 py-0.5 font-mono text-[11px] font-medium text-brand-text transition-all hover:bg-brand-tint-strong active:scale-95 tap-highlight-none"
-                  >
-                    {`{{${v.key}}}`}
-                  </button>
-                </Tooltip>
-              ))}
-            </div>
-          </div>
-
-          {body.trim() && (
-            <div className="animate-fade-in">
-              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-                Así lo recibe el cliente
-              </p>
-              <WaBubble>
-                <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-wa-bubble-ink">
-                  {preview}
-                </p>
-              </WaBubble>
-            </div>
-          )}
-
-          <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-line px-3.5 py-3">
-            <span>
-              <span className="block text-sm font-medium text-ink">Aprobada por Meta</span>
-              <span className="block text-xs text-ink-faint">
-                Marcala cuando Meta la apruebe en la Cloud API.
-              </span>
-            </span>
-            <Switch checked={approved} onCheckedChange={setApproved} aria-label="Aprobada por Meta" />
-          </label>
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="secondary" onClick={() => onOpenChange(false)} disabled={loading}>
-              Cancelar
-            </Button>
-            <Button type="submit" loading={loading}>
-              {template ? "Guardar" : "Crear plantilla"}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
   );
 }

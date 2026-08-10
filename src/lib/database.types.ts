@@ -266,6 +266,235 @@ export type Database = {
           },
         ]
       }
+      broadcast_recipients: {
+        Row: {
+          agency_id: string
+          attempts: number
+          broadcast_id: string
+          button_label: string | null
+          claimed_at: string | null
+          contact_id: string
+          conversation_id: string | null
+          created_at: string
+          delivered_at: string | null
+          error_detail: string | null
+          id: string
+          intent: Database["public"]["Enums"]["broadcast_intent"] | null
+          lead_id: string | null
+          message_id: string | null
+          phone: string
+          read_at: string | null
+          replied_at: string | null
+          reply_text: string | null
+          sent_at: string | null
+          status: Database["public"]["Enums"]["broadcast_recipient_status"]
+          vars: Json
+          wa_message_id: string | null
+        }
+        Insert: {
+          agency_id: string
+          attempts?: number
+          broadcast_id: string
+          button_label?: string | null
+          claimed_at?: string | null
+          contact_id: string
+          conversation_id?: string | null
+          created_at?: string
+          delivered_at?: string | null
+          error_detail?: string | null
+          id?: string
+          intent?: Database["public"]["Enums"]["broadcast_intent"] | null
+          lead_id?: string | null
+          message_id?: string | null
+          phone: string
+          read_at?: string | null
+          replied_at?: string | null
+          reply_text?: string | null
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["broadcast_recipient_status"]
+          vars?: Json
+          wa_message_id?: string | null
+        }
+        Update: {
+          agency_id?: string
+          attempts?: number
+          broadcast_id?: string
+          button_label?: string | null
+          claimed_at?: string | null
+          contact_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          delivered_at?: string | null
+          error_detail?: string | null
+          id?: string
+          intent?: Database["public"]["Enums"]["broadcast_intent"] | null
+          lead_id?: string | null
+          message_id?: string | null
+          phone?: string
+          read_at?: string | null
+          replied_at?: string | null
+          reply_text?: string | null
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["broadcast_recipient_status"]
+          vars?: Json
+          wa_message_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "broadcast_recipients_agency_id_fkey"
+            columns: ["agency_id"]
+            isOneToOne: false
+            referencedRelation: "agencies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcast_recipients_broadcast_id_fkey"
+            columns: ["broadcast_id"]
+            isOneToOne: false
+            referencedRelation: "broadcasts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcast_recipients_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcast_recipients_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcast_recipients_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcast_recipients_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      broadcasts: {
+        Row: {
+          agency_id: string
+          audience: Json
+          body_snapshot: string
+          branch_id: string | null
+          buttons_snapshot: Json
+          channel_id: string | null
+          created_at: string
+          created_by: string | null
+          finished_at: string | null
+          footer_snapshot: string | null
+          header_snapshot: string | null
+          id: string
+          language_snapshot: string
+          name: string
+          scheduled_at: string | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["broadcast_status"]
+          template_id: string | null
+          template_name_snapshot: string | null
+          throttle_per_run: number
+          total_recipients: number
+          updated_at: string
+        }
+        Insert: {
+          agency_id: string
+          audience?: Json
+          body_snapshot: string
+          branch_id?: string | null
+          buttons_snapshot?: Json
+          channel_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          finished_at?: string | null
+          footer_snapshot?: string | null
+          header_snapshot?: string | null
+          id?: string
+          language_snapshot?: string
+          name: string
+          scheduled_at?: string | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["broadcast_status"]
+          template_id?: string | null
+          template_name_snapshot?: string | null
+          throttle_per_run?: number
+          total_recipients?: number
+          updated_at?: string
+        }
+        Update: {
+          agency_id?: string
+          audience?: Json
+          body_snapshot?: string
+          branch_id?: string | null
+          buttons_snapshot?: Json
+          channel_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          finished_at?: string | null
+          footer_snapshot?: string | null
+          header_snapshot?: string | null
+          id?: string
+          language_snapshot?: string
+          name?: string
+          scheduled_at?: string | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["broadcast_status"]
+          template_id?: string | null
+          template_name_snapshot?: string | null
+          throttle_per_run?: number
+          total_recipients?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "broadcasts_agency_id_fkey"
+            columns: ["agency_id"]
+            isOneToOne: false
+            referencedRelation: "agencies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcasts_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcasts_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "wa_channels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcasts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcasts_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "wa_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contact_tags: {
         Row: {
           agency_id: string
@@ -328,6 +557,8 @@ export type Database = {
           phone: string | null
           source: Database["public"]["Enums"]["lead_channel"]
           updated_at: string
+          wa_opt_out_at: string | null
+          wa_opt_out_reason: string | null
         }
         Insert: {
           address?: string | null
@@ -347,6 +578,8 @@ export type Database = {
           phone?: string | null
           source?: Database["public"]["Enums"]["lead_channel"]
           updated_at?: string
+          wa_opt_out_at?: string | null
+          wa_opt_out_reason?: string | null
         }
         Update: {
           address?: string | null
@@ -366,6 +599,8 @@ export type Database = {
           phone?: string | null
           source?: Database["public"]["Enums"]["lead_channel"]
           updated_at?: string
+          wa_opt_out_at?: string | null
+          wa_opt_out_reason?: string | null
         }
         Relationships: [
           {
@@ -2278,35 +2513,65 @@ export type Database = {
         Row: {
           agency_id: string
           body: string
+          buttons: Json
+          category: string
           created_at: string
+          footer_text: string | null
+          header_text: string | null
           id: string
           is_approved: boolean
           language: string
+          meta_id: string | null
           meta_name: string
+          meta_status: string
           name: string
+          quality_score: string | null
+          rejected_reason: string | null
           stage: Database["public"]["Enums"]["lead_stage"] | null
+          synced_at: string | null
+          variables: string[]
         }
         Insert: {
           agency_id: string
           body: string
+          buttons?: Json
+          category?: string
           created_at?: string
+          footer_text?: string | null
+          header_text?: string | null
           id?: string
           is_approved?: boolean
           language?: string
+          meta_id?: string | null
           meta_name: string
+          meta_status?: string
           name: string
+          quality_score?: string | null
+          rejected_reason?: string | null
           stage?: Database["public"]["Enums"]["lead_stage"] | null
+          synced_at?: string | null
+          variables?: string[]
         }
         Update: {
           agency_id?: string
           body?: string
+          buttons?: Json
+          category?: string
           created_at?: string
+          footer_text?: string | null
+          header_text?: string | null
           id?: string
           is_approved?: boolean
           language?: string
+          meta_id?: string | null
           meta_name?: string
+          meta_status?: string
           name?: string
+          quality_score?: string | null
+          rejected_reason?: string | null
           stage?: Database["public"]["Enums"]["lead_stage"] | null
+          synced_at?: string | null
+          variables?: string[]
         }
         Relationships: [
           {
@@ -2320,6 +2585,34 @@ export type Database = {
       }
     }
     Views: {
+      broadcast_totals: {
+        Row: {
+          bajas: number | null
+          broadcast_id: string | null
+          entregados: number | null
+          enviados: number | null
+          fallidos: number | null
+          interesados: number | null
+          leads: number | null
+          leidos: number | null
+          omitidos: number | null
+          pendientes: number | null
+          respondidos: number | null
+          tal_vez: number | null
+          total: number | null
+          venta_total: number | null
+          ventas: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "broadcast_recipients_broadcast_id_fkey"
+            columns: ["broadcast_id"]
+            isOneToOne: false
+            referencedRelation: "broadcasts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       file_totals: {
         Row: {
           agency_id: string | null
@@ -2347,6 +2640,19 @@ export type Database = {
       }
     }
     Functions: {
+      broadcast_audience: {
+        Args: { p_agency: string; p_filters?: Json }
+        Returns: {
+          branch_id: string
+          contact_id: string
+          full_name: string
+          is_client: boolean
+          last_broadcast_at: string
+          last_destination: string
+          last_lead_stage: Database["public"]["Enums"]["lead_stage"]
+          phone: string
+        }[]
+      }
       ig_config: { Args: { p_channel_id: string }; Returns: Json }
       ig_config_by_ig_user_id: { Args: { p_ig_user_id: string }; Returns: Json }
       ig_config_by_slug: { Args: { p_slug: string }; Returns: Json }
@@ -2386,6 +2692,21 @@ export type Database = {
         | "etapa"
         | "presupuesto"
         | "sistema"
+      broadcast_intent: "interesado" | "tal_vez" | "baja"
+      broadcast_recipient_status:
+        | "pendiente"
+        | "enviado"
+        | "entregado"
+        | "leido"
+        | "respondido"
+        | "fallido"
+        | "omitido"
+      broadcast_status:
+        | "borrador"
+        | "programada"
+        | "enviando"
+        | "enviada"
+        | "cancelada"
       conversation_status: "abierta" | "cerrada" | "spam"
       document_type: "dni" | "pasaporte" | "visa" | "otro"
       file_review_status: "pendiente" | "revisado"
@@ -2593,6 +2914,23 @@ export const Constants = {
         "etapa",
         "presupuesto",
         "sistema",
+      ],
+      broadcast_intent: ["interesado", "tal_vez", "baja"],
+      broadcast_recipient_status: [
+        "pendiente",
+        "enviado",
+        "entregado",
+        "leido",
+        "respondido",
+        "fallido",
+        "omitido",
+      ],
+      broadcast_status: [
+        "borrador",
+        "programada",
+        "enviando",
+        "enviada",
+        "cancelada",
       ],
       conversation_status: ["abierta", "cerrada", "spam"],
       document_type: ["dni", "pasaporte", "visa", "otro"],

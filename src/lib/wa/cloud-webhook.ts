@@ -100,7 +100,9 @@ import {
   type InboundMediaSource,
 } from "@/lib/wa/inbound";
 import { getCloudMedia } from "@/lib/wa/cloud";
-import type { Enums } from "@/lib/types";
+import type { Enums, TablesUpdate } from "@/lib/types";
+
+type Admin = ReturnType<typeof createAdminClient>;
 
 /* ───────────────────────── payload de Meta ───────────────────────── */
 
@@ -133,7 +135,13 @@ type CloudMessage = {
   audio?: CloudMediaPart;
   document?: CloudMediaPart;
   sticker?: CloudMediaPart;
-  button?: { text?: string };
+  /**
+   * Toque de un botón de PLANTILLA. `payload` es el dato que mandamos nosotros al
+   * enviar (las difusiones meten ahí el destinatario), `text` es lo que leyó la
+   * persona. Ojo: los botones de un mensaje libre son otra cosa
+   * (`type: "interactive"`), acá no llegan.
+   */
+  button?: { text?: string; payload?: string };
   /** reacción a otro mensaje: sin `emoji` = la sacaron */
   reaction?: { message_id?: string; emoji?: string };
   location?: { latitude?: number; longitude?: number; name?: string; address?: string };
@@ -143,7 +151,12 @@ type CloudMessage = {
     phones?: { phone?: string; wa_id?: string }[];
   }[];
   referral?: { source_id?: string; headline?: string; source_type?: string };
-  context?: { referred_product?: unknown };
+  /**
+   * `id` es el wamid del mensaje al que le está contestando. Cuando alguien toca
+   * el botón de una difusión, ese wamid es el de la difusión: es la prueba dura
+   * de que esta respuesta salió de ahí (la escribe Meta, no el cliente).
+   */
+  context?: { referred_product?: unknown; id?: string };
 };
 
 type CloudPayload = {
@@ -508,12 +521,10 @@ async function processPayload(
                   ? "fallido"
                   : null;
         if (!mapped) continue;
+        const detalle = status.errors?.[0]?.title ?? null;
         const { error } = await supabase
           .from("messages")
-          .update({
-            status: mapped,
-            error_detail: status.errors?.[0]?.title ?? null,
-          })
+          .update({ status: mapped, error_detail: detalle })
           .eq("wa_message_id", status.id)
           // Con service role no hay RLS que ponga el límite: el agency_id lo
           // pone acá. Un wa_message_id ajeno no puede pisar la fila de otro.
@@ -522,6 +533,14 @@ async function processPayload(
         // reintento del lote (volvería a procesar mensajes por un tilde de
         // "leído"): queda en el log y sigue.
         if (error) console.warn(`[wa/cloud] estado no actualizado: ${error.message}`);
+
+        // El mismo estado, pero del lado de la difusión: es de donde salen el
+        // embudo y la tasa de apertura. Que falle no puede voltear el lote.
+        await syncBroadcastRecipient(supabase, creds.agencyId, {
+          waMessageId: status.id,
+          status: mapped,
+          detalle,
+        });
       }
 
       /* mensajes entrantes */
@@ -600,6 +619,11 @@ async function processPayload(
             // anuncios click-to-WhatsApp: Meta manda el referral del aviso
             campaign: message.referral?.headline ?? message.referral?.source_id ?? null,
             media,
+            /* Las dos pistas con las que se sabe si esto contesta a una
+               difusión. Van crudas: quién las lee y con qué prioridad es
+               decisión de `lib/wa/broadcast-reply`, no del webhook. */
+            contextMessageId: message.context?.id ?? null,
+            buttonPayload: message.button?.payload ?? null,
           },
           // Las credenciales ya resueltas: con estas sale la respuesta automática.
           creds,
@@ -617,4 +641,86 @@ async function processPayload(
   }
 
   return failed;
+}
+
+/* ───────────────────────── difusiones ───────────────────────── */
+
+/**
+ * Qué tan lejos llegó un destinatario. Sirve para no retroceder: un "entregado"
+ * que llega tarde no puede borrar un "leído", y mucho menos un "respondido".
+ */
+const AVANCE: Record<Enums<"broadcast_recipient_status">, number> = {
+  pendiente: 0,
+  omitido: 0,
+  fallido: 1,
+  enviado: 2,
+  entregado: 3,
+  leido: 4,
+  respondido: 5,
+};
+
+/**
+ * El estado de entrega, aplicado al destinatario de la difusión.
+ *
+ * Es lo que hace que el embudo (enviados → entregados → leídos → respondidos)
+ * diga la verdad. Se busca por `wa_message_id` + `agency_id`: el wamid es único,
+ * pero con service role no hay RLS y la agencia la pone el caller.
+ *
+ * Nunca tira: la enorme mayoría de los wamid son de mensajes sueltos del chat y
+ * no encuentran nada, y un problema acá no puede voltear un lote entero de
+ * mensajes entrantes por un tilde de "leído".
+ */
+async function syncBroadcastRecipient(
+  supabase: Admin,
+  agencyId: string,
+  input: {
+    waMessageId: string;
+    status: Enums<"message_status">;
+    detalle: string | null;
+  },
+): Promise<void> {
+  const { data: destinatario, error: readError } = await supabase
+    .from("broadcast_recipients")
+    .select("id, status, delivered_at, read_at, replied_at")
+    .eq("wa_message_id", input.waMessageId)
+    .eq("agency_id", agencyId)
+    .maybeSingle();
+  if (readError) {
+    console.warn(`[wa/cloud] destinatario de difusión no leído: ${readError.message}`);
+    return;
+  }
+  // Lo normal: este wamid no es de ninguna difusión.
+  if (!destinatario) return;
+
+  const ahora = new Date().toISOString();
+  const patch: TablesUpdate<"broadcast_recipients"> = {};
+
+  if (input.status === "fallido") {
+    patch.error_detail = input.detalle;
+    /* Un fallo que llega después de que la persona contestó es un estado viejo
+       de Meta: se guarda el motivo, pero la respuesta no se pisa. */
+    if (!destinatario.replied_at) patch.status = "fallido";
+  } else {
+    // Meta a veces saltea el "delivered" y manda el "read" solo: si lo leyó,
+    // le llegó.
+    if (
+      (input.status === "entregado" || input.status === "leido") &&
+      !destinatario.delivered_at
+    ) {
+      patch.delivered_at = ahora;
+    }
+    if (input.status === "leido" && !destinatario.read_at) patch.read_at = ahora;
+
+    const proximo: Enums<"broadcast_recipient_status"> =
+      input.status === "leido" ? "leido" : input.status === "entregado" ? "entregado" : "enviado";
+    if (AVANCE[proximo] > AVANCE[destinatario.status]) patch.status = proximo;
+  }
+
+  if (Object.keys(patch).length === 0) return;
+
+  const { error } = await supabase
+    .from("broadcast_recipients")
+    .update(patch)
+    .eq("id", destinatario.id);
+  if (error) console.warn(`[wa/cloud] destinatario de difusión sin actualizar: ${error.message}`);
 }

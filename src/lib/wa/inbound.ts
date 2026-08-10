@@ -26,10 +26,15 @@ import {
   redeemBridgeLink,
   releaseBridgeLink,
 } from "@/lib/ig/bridge";
+import {
+  attributeReply,
+  recordBroadcastReply,
+  type BroadcastReply,
+} from "@/lib/wa/broadcast-reply";
 import { storeRemoteMedia, type MessageMedia } from "@/lib/media/store";
 import { fmtPhone } from "@/lib/format";
 import type { Database } from "@/lib/database.types";
-import type { Enums, MessageReaction } from "@/lib/types";
+import type { BroadcastIntent, Enums, MessageReaction } from "@/lib/types";
 
 /** Sirve tanto el cliente con service role (webhooks) como el de la sesión (actions). */
 type Admin = SupabaseClient<Database>;
@@ -65,6 +70,13 @@ export type InboundMessage = {
   campaign?: string | null;
   /** adjunto, si el mensaje trae uno */
   media?: InboundMediaSource | null;
+  /**
+   * wamid del mensaje al que le está contestando. Es la prueba dura de que esta
+   * respuesta viene de una difusión: lo escribe Meta, no el cliente.
+   */
+  contextMessageId?: string | null;
+  /** payload del botón de plantilla que tocó, si tocó uno */
+  buttonPayload?: string | null;
 };
 
 export type InboundResult = { ok: boolean; error?: string };
@@ -135,6 +147,11 @@ export async function routeToBranch(
  * Avisa a los operadores de la sucursal que hay una consulta nueva:
  * notificación in-app siempre, y además un WhatsApp al operador desde el
  * número de la sucursal (si está vinculado y el operador tiene teléfono).
+ *
+ * `broadcast` es opcional y cambia el tono del aviso a propósito: alguien que
+ * tocó "Quiero info" en una difusión NO es una consulta más, es un lead
+ * calificado que levantó la mano y está esperando. Si el aviso no lo dice, se
+ * pierde en la pila de los otros veinte.
  */
 export async function alertBranchOperators(
   supabase: Admin,
@@ -146,6 +163,11 @@ export async function alertBranchOperators(
     text: string;
     conversationId: string;
     leadId: string | null;
+    broadcast?: {
+      name: string;
+      intent: BroadcastIntent | null;
+      buttonLabel: string | null;
+    } | null;
   },
 ): Promise<void> {
   const membersQuery = supabase
@@ -164,13 +186,20 @@ export async function alertBranchOperators(
     ? `/crm/${input.leadId}`
     : `/crm?vista=chats&c=${input.conversationId}`;
 
+  const interesado = input.broadcast?.intent === "interesado";
+  const boton = input.broadcast?.buttonLabel;
+  const titulo = interesado ? "Lead calificado de una difusión" : "Consulta nueva";
+  const cuerpo = interesado
+    ? `${input.contactName} tocó "${boton ?? "Me interesa"}" en ${input.broadcast?.name}. Está esperando que lo contactes.`
+    : `${input.contactName}: ${snippet(input.text, 70)}`;
+
   await supabase.from("notifications").insert(
     members.map((m) => ({
       agency_id: input.agencyId,
       member_id: m.id,
       type: "lead_nuevo",
-      title: "Consulta nueva",
-      body: `${input.contactName}: ${snippet(input.text, 70)}`,
+      title: titulo,
+      body: cuerpo,
       link,
     })),
   );
@@ -189,9 +218,11 @@ export async function alertBranchOperators(
 
   const base = appUrl();
   const body = [
-    "Consulta nueva para atender",
+    interesado
+      ? `Lead calificado: respondió la difusión "${input.broadcast?.name}"`
+      : "Consulta nueva para atender",
     `${input.contactName}${input.contactPhone ? ` · ${fmtPhone(input.contactPhone)}` : ""}`,
-    `"${snippet(input.text, 140)}"`,
+    interesado && boton ? `Tocó "${boton}"` : `"${snippet(input.text, 140)}"`,
     base ? `${base}${link}` : null,
   ]
     .filter(Boolean)
@@ -400,7 +431,27 @@ export async function handleInboundMessage(
   });
   if (messageError) return { ok: false, error: "No se pudo guardar el mensaje." };
 
-  /* 5. lead: si no hay uno abierto, esta consulta lo crea */
+  /* 5. ¿esto contesta a una difusión?
+     Se resuelve ANTES del lead porque cambia qué hacer con él: una baja no abre
+     una oportunidad nueva, y un "quiero info" nace calificado y con la campaña
+     puesta. La atribución es toda de lectura, así que puede pasar antes sin
+     comprometerse a nada. Si falla, el mensaje entra igual: perder la atribución
+     es un número peor en un tablero, perder la consulta sería perder al cliente. */
+  let difusion: BroadcastReply | null = null;
+  try {
+    difusion = await attributeReply(supabase, {
+      agencyId,
+      contactId,
+      contextMessageId: msg.contextMessageId ?? null,
+      buttonPayload: msg.buttonPayload ?? null,
+      text: msg.text,
+    });
+  } catch (e) {
+    console.warn(`[wa] respuesta sin atribuir a su difusión: ${String(e)}`);
+  }
+  const esBaja = difusion?.intent === "baja";
+
+  /* 6. lead: si no hay uno abierto, esta consulta lo crea */
   const { data: openLead } = await supabase
     .from("leads")
     .select("id, branch_id")
@@ -415,7 +466,10 @@ export async function handleInboundMessage(
   let branchId = openLead?.branch_id ?? channel.branch_id ?? null;
   let leadIsNew = false;
 
-  if (!openLead) {
+  /* Una baja NO abre un lead. Alguien que acaba de pedir que no lo molesten más
+     no es una oportunidad de venta: sería regalarle trabajo al vendedor y una
+     tarjeta en el tablero que solo se puede perder. */
+  if (!openLead && !esBaja) {
     if (!branchId) {
       branchId = await routeToBranch(supabase, agencyId, msg.text, msg.campaign ?? null);
     }
@@ -427,7 +481,9 @@ export async function handleInboundMessage(
         branch_id: branchId,
         stage: "nuevo",
         origin_channel: "whatsapp",
-        origin_campaign: msg.campaign ?? null,
+        // De dónde salió esta oportunidad: la difusión gana sobre el anuncio
+        // porque es la que efectivamente lo hizo escribir hoy.
+        origin_campaign: difusion?.broadcastName ?? msg.campaign ?? null,
         initial_message: msg.text || null,
         position: Date.now(),
       })
@@ -442,11 +498,32 @@ export async function handleInboundMessage(
     await supabase.from("conversations").update({ branch_id: branchId }).eq("id", conversationId);
   }
 
-  /* 6. respuesta automática del número madre */
+  /* 7. la difusión se cierra: el destinatario queda respondido con su intención,
+     enganchado al lead, y la baja se aplica. Va acá y no antes porque recién
+     ahora existe el lead que hay que pegarle. */
+  if (difusion) {
+    try {
+      await recordBroadcastReply(supabase, {
+        reply: difusion,
+        contactId,
+        conversationId,
+        leadId,
+        text: msg.text,
+      });
+    } catch (e) {
+      console.warn(`[wa] respuesta de difusión sin registrar: ${String(e)}`);
+    }
+  }
+
+  /* 8. respuesta automática del número madre.
+     A quien pidió la baja no se le contesta "en seguida te contactamos": es
+     justo lo contrario de lo que pidió, y es la clase de mensaje que termina en
+     un reporte de spam. */
   if (
     channel.is_mother &&
     channel.auto_reply_enabled &&
     channel.auto_reply_text &&
+    !esBaja &&
     (isNewConversation || leadIsNew)
   ) {
     const text = channel.auto_reply_text;
@@ -472,8 +549,11 @@ export async function handleInboundMessage(
     });
   }
 
-  /* 7. alerta a los operadores de la sucursal */
-  if (leadIsNew) {
+  /* 9. alerta a los operadores de la sucursal.
+     Un interesado de una difusión avisa aunque el lead ya existiera: acaba de
+     levantar la mano y ese es el momento de llamarlo. Una baja no avisa nunca —
+     no hay nada que atender y el operador solo vería ruido. */
+  if (!esBaja && (leadIsNew || difusion?.intent === "interesado")) {
     await alertBranchOperators(supabase, {
       agencyId,
       branchId,
@@ -482,6 +562,9 @@ export async function handleInboundMessage(
       text: msg.text,
       conversationId,
       leadId,
+      broadcast: difusion
+        ? { name: difusion.broadcastName, intent: difusion.intent, buttonLabel: difusion.buttonLabel }
+        : null,
     });
   }
 

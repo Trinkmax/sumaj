@@ -824,8 +824,33 @@ export function quoteFont(key: string | undefined) {
 }
 
 /* ───────────────────────────────────────────
-   WhatsApp: interpolación de variables de plantillas
+   WhatsApp: plantillas
    ─────────────────────────────────────────── */
+
+/**
+ * Estados de Meta en los que el texto de una plantilla NO se toca.
+ *
+ * En Meta una plantilla aprobada es inmutable, y una en revisión se estaría
+ * revisando con un texto que ya cambió. Peor todavía: al lanzar una difusión se
+ * congela el body LOCAL pero se manda el `name` que Meta tiene aprobado — si los
+ * dos textos no coinciden en la cantidad de variables, Meta rechaza los mil
+ * mensajes juntos con un 132000.
+ *
+ * Una RECHAZADA (o pausada, o deshabilitada) SÍ se corrige: mandarla a aprobar
+ * la vuelve a crear desde cero, que es justo lo que el cartel le pide al admin.
+ * La lista la respetan el diálogo (para deshabilitar los campos) y la action
+ * (para que no dependa del cliente).
+ */
+export const TEMPLATE_ESTADOS_CONGELADOS: readonly string[] = [
+  "APPROVED",
+  "PENDING",
+  "PENDING_DELETION",
+];
+
+export function templateEstaCongelada(metaStatus: string | null | undefined): boolean {
+  return !!metaStatus && TEMPLATE_ESTADOS_CONGELADOS.includes(metaStatus);
+}
+
 export function fillTemplate(
   body: string,
   vars: Record<string, string | null | undefined>,

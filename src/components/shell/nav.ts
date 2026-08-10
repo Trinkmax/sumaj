@@ -4,6 +4,7 @@ import {
   IconClientes,
   IconConfig,
   IconCrm,
+  IconDifusiones,
   IconFiles,
   IconInicio,
   IconPresupuestos,
@@ -19,6 +20,7 @@ export type NavItem = {
 export const NAV_MAIN: NavItem[] = [
   { href: "/inicio", label: "Inicio", icon: IconInicio },
   { href: "/crm", label: "CRM", icon: IconCrm },
+  { href: "/difusiones", label: "Difusiones", icon: IconDifusiones },
   { href: "/presupuestos", label: "Presupuestos", icon: IconPresupuestos },
   { href: "/clientes", label: "Clientes", icon: IconClientes },
   { href: "/files", label: "Files", icon: IconFiles },

@@ -25,7 +25,8 @@ pnpm dev
 | `WA_CLOUD_LEGACY_AGENCY_ID` | **legacy y opcional**: uuid de la única agencia autorizada a usar el fallback de abajo. Sin ella, esas tres no se leen |
 | `WA_CLOUD_TOKEN` · `WA_CLOUD_VERIFY_TOKEN` · `WA_CLOUD_APP_SECRET` | **legacy y opcionales**: fallback para esa agencia mientras no cargue sus credenciales en Configuración → WhatsApp |
 | `WA_WORKER_URL` · `WA_WORKER_TOKEN` · `WA_WEBHOOK_SECRET` | worker de WhatsApp de las sucursales (ver `/worker`) |
-| `WA_CRON_SECRET` | despacho del seguimiento automático (`POST /api/wa/followups/run`) |
+| `WA_CRON_SECRET` | despacho del seguimiento automático (`POST /api/wa/followups/run`) y renovación del token de Instagram (`POST /api/ig/token/refresh`) |
+| `IG_GRAPH_VERSION` | versión del Graph API para Instagram — opcional, por defecto `v25.0` |
 
 `SUPABASE_SERVICE_ROLE_KEY` no es opcional en un deploy real, y desde que las
 credenciales de Meta viven en la base lo es todavía menos: los secretos de la Cloud API
@@ -140,6 +141,94 @@ update app_config set value = 'EL-MISMO-VALOR-DE-WA_CRON_SECRET', updated_at = n
 Si el secreto no coincide con `WA_CRON_SECRET`, la ruta responde 401 y los seguimientos
 quedan encolados sin salir.
 
+#### Difundir sin quemar el número
+
+Las difusiones (`/difusiones`) salen **solo por el número madre** y usan el mismo
+`app_config.followups_secret`; la URL (`broadcasts_url`) se completó sola al aplicar la
+migración a partir de la de seguimientos. Tres cosas que conviene saber antes de la primera:
+
+1. **Se paga.** Fuera de la ventana de 24 hs la única vía es una plantilla aprobada, y Meta
+   cobra por mensaje de marketing. Lo que **no** se paga es lo que viene después: el que
+   contesta abre la ventana, el chat se deriva a la sucursal y desde ahí se le habla gratis.
+   Difundir se paga una vez; vender, no.
+2. **El límite es de Meta, no nuestro.** Un número arranca en 250 destinatarios únicos cada
+   24 hs (1.000 después de verificar el negocio) y sube por calidad. Por eso el envío va de a
+   tandas y hay un tope diario. Si una difusión llega al tope, no falla: sigue al día
+   siguiente donde iba.
+3. **La baja es la mejor inversión.** Poner un botón "No me interesa" parece perder gente y
+   es al revés: cada baja respetada es un bloqueo que no pasó, y los bloqueos son lo que baja
+   la calidad y con ella el límite de envío. Los dados de baja quedan fuera de toda difusión
+   futura (`contacts.wa_opt_out_at`), sin frenar las conversaciones en curso.
+
+Las plantillas se crean en **Configuración · Plantillas** y se mandan a aprobar a Meta desde
+ahí mismo (suele tardar minutos). El estado que se muestra es el que dice Meta, no un tilde
+manual: si la rechaza, aparece el motivo textual para saber qué cambiar.
+
+### Instagram: los mensajes directos
+
+La segunda puerta de entrada, y hoy la más fácil de abrir: para la **propia cuenta de la
+agencia** Meta no pide verificación del negocio ni App Review — alcanza con que la cuenta
+de Instagram sea profesional (empresa o creador) y que tu usuario tenga rol en la app.
+
+Cada DM crea el contacto y el lead igual que un WhatsApp, se deriva a una sucursal con las
+mismas reglas y se contesta desde el mismo chat del CRM. La diferencia es lo que pasa
+después: la respuesta automática ofrece **pasar a WhatsApp**, que es donde la agencia
+vende, y el sistema se encarga de que sea la misma persona de los dos lados.
+
+#### Ponerlo en marcha
+
+1. En [Meta for Developers](https://developers.facebook.com/apps), app de tipo **Business**
+   (la misma que usás para WhatsApp sirve). Agregá el producto **Instagram** y entrá a
+   **API setup with Instagram login**.
+2. Vinculá ahí la cuenta profesional de Instagram de la agencia y generá el **token de
+   acceso** (paso *Generate access tokens*). Anotá también el **Instagram App ID** y el
+   **Instagram App Secret** de *Business login settings*, y el **App Secret** de
+   *Configuración → Básica*.
+3. En la app: **Configuración → Instagram**, "Crear el canal", y pegá esos cuatro datos.
+   Al guardar, el sistema valida contra Meta y te dice de qué cuenta se trata.
+4. La pantalla te muestra la **Callback URL** y el **verify token**. Copialos y pegalos en
+   Meta, en *Configure webhooks*, tildando el campo `messages`. Este paso es a mano y una
+   sola vez: Instagram —a diferencia de WhatsApp— no deja configurar esa URL por API.
+5. Volvé a la app y tocá **Conectar**. El diagnóstico te dice, punto por punto, qué falta.
+
+Para recibir notificaciones, Meta pide además que la app esté **publicada** (modo Live) en
+el panel. No hace falta App Review para tu propia cuenta, pero sí ese interruptor.
+
+#### El token vence a los 60 días
+
+No existe el token permanente que tiene WhatsApp. El sistema lo renueva solo con 15 días
+de margen, pero hay que programar el cron una vez (SQL editor de Supabase):
+
+```sql
+select cron.schedule(
+  'ig-token-refresh', '0 4 * * *',
+  $$ select net.http_post(
+       url     := 'https://TU-APP/api/ig/token/refresh',
+       headers := jsonb_build_object('x-cron-secret', 'EL-MISMO-VALOR-DE-WA_CRON_SECRET')
+     ) $$
+);
+```
+
+Mientras tanto, la pantalla avisa cuando quedan menos de 15 días y tiene un botón
+**Renovar token** que hace lo mismo a mano.
+
+#### El puente a WhatsApp
+
+- **El cliente salta**: la respuesta automática del DM lleva un link `wa.me` al número de
+  la sucursal que lo atiende, con un texto ya escrito que incluye una referencia corta
+  (`Ref. IG-…`). Cuando ese WhatsApp entra, el sistema reconoce la referencia y sigue en el
+  mismo contacto y el mismo lead — no aparece un duplicado.
+- **Nosotros saltamos**: si la persona deja su teléfono (escrito, o con el botón que
+  Instagram completa desde su perfil), queda en la ficha. Si activás *"Escribirle primero"*
+  en Configuración → Instagram, el sistema le manda un WhatsApp desde el número de la
+  sucursal en el acto. Viene apagado a propósito.
+- **A mano**: en cualquier chat de Instagram hay un botón verde que abre el WhatsApp de esa
+  persona con el saludo cargado.
+
+Fuera de las 24 hs Instagram no deja escribir y no hay plantillas pagas como en WhatsApp:
+o la persona vuelve a escribir, o se sigue por WhatsApp. Si Meta te aprueba el feature
+*Human Agent*, el interruptor de la pantalla habilita contestar hasta 7 días después.
+
 ### Cuentas
 
 La base de producción está en blanco: no hay datos de ejemplo ni usuarios demo. Queda un
@@ -155,6 +244,7 @@ con el rol de su invitación. Las contraseñas no viven en el repo.
 - **/presupuestos** — cotizador que replica la planilla (Final/Bruto/% comisión mayorista, markup, comisión por grupo) + presupuesto de papelería fina compartible: link público `/p/{token}`, imagen PNG para WhatsApp, temas de color y tipografía.
 - **/files** — la venta: servicios con costo/precio, utilidad y comisión del vendedor, pasajeros con vencimiento de documentos, cobros con recibo compartible `/r/{token}`.
 - **/caja** — movimientos, cuenta corriente con recordatorios por WhatsApp, comisiones por vendedor, multimoneda ARS/USD con cotización.
+- **/difusiones** — envíos masivos desde el número madre pensados para traer **leads calificados**, no para "mandar mensajes". Se arma en un scroll: a quiénes (presets tipo *clientes que ya viajaron*, *leads perdidos hace 60 días*, *cumpleañeros del mes*, con el contador vivo y los nombres a la vista), qué les decís (plantilla aprobada con botones de respuesta rápida, preview igual a WhatsApp) y cuándo. El resultado se mide en interesados, leads y plata — no en mensajes enviados — y se trabaja desde ahí: cada persona que respondió linkea a su chat o a su lead.
 - **/config** — agencia (logo, tema de comprobantes, fees del cotizador y comisión del vendedor), equipo (alta de usuarios con email y contraseña, listo para pasar por WhatsApp), etiquetas, proveedores mayoristas con su % de comisión, plantillas de WhatsApp, cadencia de seguimiento automático (48 h → 7 d → 21 d) y conexión con Meta (asistente de la Cloud API: credenciales, elección del número madre, suscripción del webhook y diagnóstico).
 
 ## Automatización
@@ -163,6 +253,7 @@ con el rol de su invitación. Las contraseñas no viven en el repo.
 - `POST /api/wa/cloud/webhook` — la misma ruta sin slug, viva para lo que ya estaba configurado en Meta desde antes: resuelve la agencia por el `phone_number_id` que viene en el payload.
 - `POST /api/wa/baileys/events` — entrantes de los números de sucursal, que le manda el worker firmados con `WA_WEBHOOK_SECRET`.
 - `app.enqueue_followups()` (pg_cron, minuto 15) encola el reenganche 48 h / día 7 / día 21 según etapa; `app.dispatch_followups()` (minuto 25) despierta `POST /api/wa/followups/run`, que lo manda **por el número de la sucursal** (sin ventana de 24 hs, sin costo) y solo cae a plantilla paga del número madre si la sucursal no tiene número vinculado.
+- `app.dispatch_broadcasts()` (pg_cron **cada 5 minutos**) despierta `POST /api/wa/broadcasts/run`, que manda las difusiones **de a tandas**: `broadcasts.throttle_per_run` por vuelta (60 por defecto) y un tope diario por agencia (`agencies.settings.broadcast_daily_cap`, 250 por defecto). Los frenos no son burocracia: Meta arranca a cada número en 250 destinatarios únicos cada 24 hs y sube el límite por calidad — blastear de golpe baja la calidad y con ella el límite. Usa el mismo secreto que los seguimientos (`WA_CRON_SECRET`) y la URL sale sola de `app_config.followups_url` al aplicar la migración.
 - `app.daily_notifications()` (pg_cron diario, 9:00 ART): documentos por vencer, salidas próximas, cumpleaños y seguimientos vencidos.
 
 **Ya no hay edge functions.** `supabase/functions/` (`wa-webhook`, `wa-send`,

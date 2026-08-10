@@ -55,6 +55,28 @@ export function IconCrm(p: NavIconProps) {
   );
 }
 
+/**
+ * Difusiones: las ondas salen del megáfono al hover.
+ * La animación va con utilidades de Tailwind y no con una clase `ni-*` porque
+ * son dos translates simples y no hace falta un keyframe nuevo en globals.css.
+ */
+export function IconDifusiones(p: NavIconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3 10.4a1.4 1.4 0 0 1 1-1.34L13 6.2v11.6l-9-2.86a1.4 1.4 0 0 1-1-1.34Z" />
+      <path d="M6.4 15.7v1.8a1.7 1.7 0 0 0 3.4 0v-.7" />
+      <path
+        className="transition-transform duration-300 ease-out group-hover:translate-x-[1.5px]"
+        d="M16.4 9.6a3.6 3.6 0 0 1 0 4.8"
+      />
+      <path
+        className="transition-transform delay-75 duration-300 ease-out group-hover:translate-x-[2.5px]"
+        d="M19.3 7.3a7.3 7.3 0 0 1 0 9.4"
+      />
+    </Svg>
+  );
+}
+
 /** Presupuestos: las líneas del recibo se deslizan en cascada. */
 export function IconPresupuestos(p: NavIconProps) {
   return (

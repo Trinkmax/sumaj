@@ -190,6 +190,86 @@ export function sendCloudTemplate(
   });
 }
 
+/** Un botón de respuesta rápida de la plantilla, con el dato que queremos que vuelva. */
+export type CloudTemplateButton = {
+  /** posición del botón en la plantilla (la que Meta usa para identificarlo) */
+  index: number;
+  /** lo que Meta nos devuelve en el webhook cuando lo tocan */
+  payload: string;
+};
+
+/**
+ * Meta rechaza (132000) los parámetros con saltos de línea, tabulaciones o más
+ * de cuatro espacios seguidos. Un nombre pegado de una planilla trae cualquiera
+ * de las tres y tira abajo el envío entero, así que se limpian acá y no en cada
+ * caller.
+ */
+function templateParam(value: string): string {
+  return value
+    .replace(/[\n\r\t]+/g, " ")
+    .replace(/ {5,}/g, "    ")
+    .trim()
+    .slice(0, 1024);
+}
+
+/**
+ * Plantilla aprobada CON contenido: variables del cuerpo y botones de respuesta
+ * rápida con payload propio. Es la que usan las difusiones.
+ *
+ * Dos cosas que no son obvias:
+ *   · Las variables van por NOMBRE (`parameter_name`), que es como las declara
+ *     la plantilla al crearse ({{nombre}}) y como las escribe `fillTemplate`.
+ *     Con nombres el orden deja de importar, pero la cantidad sigue importando:
+ *     una variable de más o de menos es un rechazo.
+ *   · Cada botón viaja en su PROPIO componente con su índice. El payload es lo
+ *     que hace que un toque se pueda atribuir a la difusión y a la persona: sin
+ *     mandarlo, Meta devuelve el texto del botón y dos difusiones con el mismo
+ *     botón se vuelven indistinguibles.
+ */
+export function sendCloudTemplateMessage(
+  creds: CloudCreds,
+  to: string,
+  input: {
+    name: string;
+    language: string;
+    bodyParams: Record<string, string>;
+    buttons: CloudTemplateButton[];
+  },
+): Promise<CloudResult> {
+  const components: unknown[] = [];
+
+  const parameters = Object.entries(input.bodyParams).map(([name, value]) => ({
+    type: "text",
+    parameter_name: name,
+    text: templateParam(value),
+  }));
+  if (parameters.length > 0) components.push({ type: "body", parameters });
+
+  for (const button of input.buttons) {
+    components.push({
+      type: "button",
+      sub_type: "quick_reply",
+      // Meta lo quiere como string, aunque sea un número.
+      index: String(button.index),
+      parameters: [{ type: "payload", payload: button.payload }],
+    });
+  }
+
+  return send(creds, {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: to.replace(/\D/g, ""),
+    type: "template",
+    template: {
+      name: input.name,
+      language: { code: input.language },
+      // Una plantilla sin variables ni botones no lleva `components`: mandarlo
+      // vacío es un 100.
+      ...(components.length > 0 ? { components } : {}),
+    },
+  });
+}
+
 /* ═══════════════════════════════════════════════════════════
    VALIDACIÓN DE CREDENCIALES
    ═══════════════════════════════════════════════════════════ */
