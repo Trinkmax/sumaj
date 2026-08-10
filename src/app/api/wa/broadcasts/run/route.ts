@@ -447,7 +447,7 @@ async function reclamarLote(
 
   const { data: candidatos, error: errorLectura } = await supabase
     .from("broadcast_recipients")
-    .select("id")
+    .select("id, contact_id, phone, vars, attempts, contact:contacts(wa_opt_out_at)")
     .eq("broadcast_id", broadcastId)
     .eq("status", "pendiente")
     .or(libre)
@@ -468,12 +468,16 @@ async function reclamarLote(
     )
     .eq("status", "pendiente")
     .or(libre)
-    .select("id, contact_id, phone, vars, attempts, contact:contacts(wa_opt_out_at)");
+    // Solo los ids: el resto ya se leyó arriba y así el reclamo no depende de
+    // que el RETURNING sepa traer relaciones embebidas.
+    .select("id");
   if (errorReclamo) {
     console.error(`[wa/broadcasts] ${broadcastId} sin reclamar: ${errorReclamo.message}`);
     return null;
   }
-  return (reclamados ?? []) as Destinatario[];
+
+  const mios = new Set((reclamados ?? []).map((r) => r.id));
+  return (candidatos as Destinatario[]).filter((c) => mios.has(c.id));
 }
 
 /** ¿Queda alguien sin mandar en esta difusión? */

@@ -52,7 +52,7 @@ export default async function NuevaDifusionPage({
     contactosRes,
     sinTelefonoRes,
     bajasRes,
-    enviadosHoyRes,
+    enviadosHoy,
     borradorRes,
   ] = await Promise.all([
     supabase
@@ -102,11 +102,7 @@ export default async function NuevaDifusionPage({
        despachador descuenta el tope. Sin esto la pantalla prometía el cupo
        entero a las 17 aunque a las 9 se hubieran ido 200 mensajes, y el dueño
        veía el progreso clavado sin entender por qué. */
-    supabase
-      .from("broadcast_recipients")
-      .select("id", { count: "exact", head: true })
-      .eq("agency_id", agency.id)
-      .gte("sent_at", new Date(Date.now() - HORAS_24).toISOString()),
+    contarEnviadosHoy(supabase, agency.id),
     draftId
       ? supabase
           .from("broadcasts")
@@ -122,7 +118,7 @@ export default async function NuevaDifusionPage({
     typeof settings?.broadcast_daily_cap === "number" && settings.broadcast_daily_cap > 0
       ? settings.broadcast_daily_cap
       : CUPO_DIARIO_DEFAULT;
-  const cupoRestante = Math.max(0, cupoDiario - (enviadosHoyRes.count ?? 0));
+  const cupoRestante = Math.max(0, cupoDiario - enviadosHoy);
 
   /* Solo un borrador se puede retomar: una que ya salió se mira, no se edita. */
   const raw = borradorRes.data;
@@ -177,4 +173,24 @@ export default async function NuevaDifusionPage({
       />
     </>
   );
+}
+
+/**
+ * Cuántos mensajes de difusión salieron en las últimas 24 hs.
+ *
+ * Es el mismo criterio con el que el despachador descuenta el tope diario de
+ * Meta: si acá se contara otra cosa, la pantalla prometería un cupo que el cron
+ * no va a respetar.
+ */
+async function contarEnviadosHoy(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  agencyId: string,
+): Promise<number> {
+  const desde = new Date(Date.now() - HORAS_24).toISOString();
+  const { count } = await supabase
+    .from("broadcast_recipients")
+    .select("id", { count: "exact", head: true })
+    .eq("agency_id", agencyId)
+    .gte("sent_at", desde);
+  return count ?? 0;
 }

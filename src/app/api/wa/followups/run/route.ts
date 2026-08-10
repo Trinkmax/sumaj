@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
-import { sendCloudTemplate } from "@/lib/wa/cloud";
+import { sendCloudTemplateMessage } from "@/lib/wa/cloud";
 import { getCloudCreds, type ResolvedCloudCreds } from "@/lib/wa/cloud-credentials";
 import { hasWorker, sendViaBaileys } from "@/lib/wa/worker";
 import { fillTemplate } from "@/lib/domain";
+import { fmtDate } from "@/lib/format";
 
 /**
  * Despacha los seguimientos encolados (app.enqueue_followups los crea cada hora).
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
        lead:leads(id, destination, branch_id, trip_date_from,
                   contact:contacts(id, full_name, phone),
                   assignee:members!leads_assigned_to_fkey(display_name)),
-       template:wa_templates(id, meta_name, body)`,
+       template:wa_templates(id, meta_name, body, language, variables)`,
     )
     .eq("status", "pendiente")
     .lte("scheduled_at", new Date().toISOString())
@@ -84,15 +85,21 @@ export async function POST(request: Request) {
       continue;
     }
 
+    /* Los valores de las variables. Se usan para DOS cosas que tienen que dar
+       igual: el texto que se manda por el número de la sucursal (interpolado
+       acá) y los parámetros que viajan a Meta si hay que caer en la plantilla
+       paga. Si se separan, el cliente recibe una cosa y el hilo guarda otra. */
+    const vars: Record<string, string> = {
+      nombre: contact.full_name.split(" ")[0],
+      vendedor: lead.assignee?.display_name ?? "",
+      destino: lead.destination ?? "tu viaje",
+      fecha: lead.trip_date_from ? fmtDate(lead.trip_date_from) : "",
+    };
+
     const body = fillTemplate(
       followup.template?.body ??
         "Hola {{nombre}}, ¿seguís con la idea del viaje a {{destino}}? Cualquier cosa te armo opciones nuevas.",
-      {
-        nombre: contact.full_name.split(" ")[0],
-        vendedor: lead.assignee?.display_name ?? "",
-        destino: lead.destination ?? "tu viaje",
-        fecha: lead.trip_date_from ?? "",
-      },
+      vars,
     );
 
     /* 1. por el número de la sucursal — gratis */
@@ -151,11 +158,35 @@ export async function POST(request: Request) {
          el resto del lote —que puede ser de otras agencias— sigue. */
       const creds = await credsDe(followup.agency_id);
       if (creds?.phoneNumberId) {
-        const res = await sendCloudTemplate(creds, phone, followup.template.meta_name);
-        ok = res.ok;
-        templateName = followup.template.meta_name;
-        if (res.ok) waMessageId = res.waMessageId;
-        else errorDetail = res.error;
+        /* Las variables van con NOMBRE y tienen que ser exactamente las que la
+           plantilla declara en Meta: una de más o de menos es un rechazo
+           (132000). Antes acá se mandaba la plantilla PELADA, sin parámetros,
+           que funcionaba solo mientras las plantillas eran texto suelto con un
+           tilde manual; con las plantillas creadas de verdad contra Meta —las
+           que usan las difusiones— eso falla siempre. */
+        const declaradas = followup.template.variables ?? [];
+        const faltantes = declaradas.filter((v) => !vars[v]);
+
+        if (faltantes.length > 0) {
+          /* Un parámetro vacío también lo rechaza Meta, y rellenarlo con algo
+             inventado le manda al cliente una frase rota ("vence el "). Mejor
+             que el seguimiento quede fallido con el motivo a la vista: es un
+             dato que falta en el lead, y alguien lo puede completar. */
+          errorDetail = `A la plantilla le faltan datos del lead: ${faltantes.join(", ")}.`;
+        } else {
+          const res = await sendCloudTemplateMessage(creds, phone, {
+            name: followup.template.meta_name,
+            language: followup.template.language,
+            bodyParams: Object.fromEntries(declaradas.map((v) => [v, vars[v]])),
+            // El seguimiento no lleva botones: no es una difusión, es una
+            // conversación que ya venía.
+            buttons: [],
+          });
+          ok = res.ok;
+          templateName = followup.template.meta_name;
+          if (res.ok) waMessageId = res.waMessageId;
+          else errorDetail = res.error;
+        }
       } else {
         errorDetail = "El número madre de la agencia no está conectado con Meta.";
       }

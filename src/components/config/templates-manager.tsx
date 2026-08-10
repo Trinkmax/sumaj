@@ -4,27 +4,13 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import {
-  CheckCheck,
-  ExternalLink,
-  MessageSquareText,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Reply,
-  Send,
-  Trash2,
-} from "lucide-react";
+import { MessageSquareText, Pencil, Plus, RefreshCw, Send, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch, EmptyState, Tooltip } from "@/components/ui/misc";
 import { ConfirmDialog } from "@/components/config/confirm-dialog";
-import {
-  HighlightedBody,
-  TemplateDialog,
-  metaStatusMeta,
-  parseTemplateButtons,
-} from "@/components/config/template-dialog";
+import { TemplateDialog, metaStatusMeta, parseTemplateButtons } from "@/components/config/template-dialog";
+import { WaPreview } from "@/components/difusiones/wa-preview";
 import { deleteTemplate, upsertTemplate } from "@/lib/actions/settings";
 import { deleteMetaTemplateAction, submitTemplateToMeta, syncTemplatesFromMeta } from "@/lib/actions/templates";
 import { STAGES, STAGE_BY_KEY } from "@/lib/domain";
@@ -46,6 +32,21 @@ export function TemplatesManager({
   const [createOpen, setCreateOpen] = React.useState(false);
   const [toDelete, setToDelete] = React.useState<Template | null>(null);
   const [syncing, setSyncing] = React.useState(false);
+  /* El diálogo arranca su estado en el primer render. Con `key={editing?.id ??
+     "new"}`, crear dos plantillas seguidas no lo remontaba (la key seguía en
+     "new") y la segunda aparecía con el texto, el nombre técnico y los botones
+     de la primera. La secuencia fuerza el remonte en cada apertura. */
+  const [dialogSeq, setDialogSeq] = React.useState(0);
+
+  function abrirNueva() {
+    setDialogSeq((n) => n + 1);
+    setCreateOpen(true);
+  }
+
+  function abrirEdicion(t: Template) {
+    setDialogSeq((n) => n + 1);
+    setEditing(t);
+  }
 
   const stageOrder = STAGES.map((s) => s.key);
   const sorted = [...templates].sort((a, b) => {
@@ -89,7 +90,7 @@ export function TemplatesManager({
               <span className="sm:hidden">Sincronizar</span>
             </Button>
           )}
-          <Button onClick={() => setCreateOpen(true)}>
+          <Button onClick={abrirNueva}>
             <Plus />
             <span className="hidden sm:inline">Nueva plantilla</span>
             <span className="sm:hidden">Nueva</span>
@@ -118,7 +119,7 @@ export function TemplatesManager({
           title="Todavía no hay plantillas"
           description="Creá la primera para responder más rápido, activar el seguimiento automático y difundir."
           action={
-            <Button onClick={() => setCreateOpen(true)}>
+            <Button onClick={abrirNueva}>
               <Plus />
               Crear plantilla
             </Button>
@@ -131,7 +132,7 @@ export function TemplatesManager({
               key={t.id}
               template={t}
               cloudReady={cloudReady}
-              onEdit={() => setEditing(t)}
+              onEdit={() => abrirEdicion(t)}
               onDelete={() => setToDelete(t)}
             />
           ))}
@@ -139,7 +140,7 @@ export function TemplatesManager({
       )}
 
       <TemplateDialog
-        key={editing?.id ?? "new"}
+        key={`tpl-${editing?.id ?? "new"}-${dialogSeq}`}
         open={createOpen || editing !== null}
         template={editing}
         onOpenChange={(o) => {
@@ -288,51 +289,16 @@ function TemplateCard({
       )}
 
       <div className="mt-3 flex-1">
-        <div className="wa-wallpaper overflow-hidden rounded-xl p-3 pl-8">
-          <div
-            className={cn(
-              "relative ml-auto mr-2 w-fit max-w-full overflow-hidden rounded-lg rounded-tr-none bg-wa-bubble-out shadow-sm bubble-tail-out",
-              buttons.length > 0 && "min-w-[190px]",
-            )}
-          >
-            <div className="px-2.5 pb-1.5 pt-1.5">
-              {template.header_text && (
-                <p className="mb-0.5 text-[13.5px] font-semibold leading-snug text-wa-bubble-ink">
-                  {template.header_text}
-                </p>
-              )}
-              <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-wa-bubble-ink">
-                <HighlightedBody body={template.body} />
-              </p>
-              {template.footer_text && (
-                <p className="mt-1 text-[11.5px] leading-snug text-wa-bubble-meta">
-                  {template.footer_text}
-                </p>
-              )}
-              <span className="mt-0.5 flex items-center justify-end gap-1 text-[10px] leading-none text-wa-bubble-meta">
-                11:42
-                <CheckCheck className="size-3.5 text-wa-tick" strokeWidth={2} />
-              </span>
-            </div>
-            {buttons.length > 0 && (
-              <div>
-                {buttons.map((b, i) => (
-                  <div
-                    key={`${b.text}-${i}`}
-                    className="flex items-center justify-center gap-1.5 border-t border-wa-bubble-ink/10 px-3 py-2 text-[13px] font-medium text-wa-tick"
-                  >
-                    {b.type === "url" ? (
-                      <ExternalLink className="size-3.5" strokeWidth={2} />
-                    ) : (
-                      <Reply className="size-3.5" strokeWidth={2} />
-                    )}
-                    <span className="truncate">{b.text}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+        {/* La misma burbuja que ve el composer y la pantalla de resultados: si
+            acá se dibujara distinto, tres pantallas prometerían tres cosas
+            sobre el mismo mensaje. Las {{variables}} sin valor quedan
+            resaltadas, que es lo que hace falta en una lista de plantillas. */}
+        <WaPreview
+          header={template.header_text}
+          body={template.body}
+          footer={template.footer_text}
+          buttons={buttons}
+        />
       </div>
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">

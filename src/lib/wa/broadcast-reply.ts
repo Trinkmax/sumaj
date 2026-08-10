@@ -128,7 +128,13 @@ export async function attributeReply(
     row = data;
   }
 
-  // 3. el que contestó escribiendo, dentro de la ventana
+  /* 3. el que contestó escribiendo, dentro de la ventana.
+     A propósito NO se filtra por canal: el cliente contesta la difusión por
+     donde se le canta, y muchas veces sigue la charla con el vendedor por el
+     número de la sucursal. Filtrar acá dejaría esas respuestas —las que más
+     valen— fuera del embudo. Lo que sí se cuidó es la BAJA escrita a mano
+     (`looksLikeOptOut`, abajo): es lo único de este camino que toma una
+     decisión irreversible, y por eso es deliberadamente difícil de disparar. */
   if (!row) {
     const limite = new Date(Date.now() - VENTANA_HORAS * 3_600_000).toISOString();
     const { data } = await destinatarios()

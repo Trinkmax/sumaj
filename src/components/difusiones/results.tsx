@@ -18,7 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { AnimatedNumber } from "@/components/ui/misc";
 import { ConfirmDialog } from "@/components/config/confirm-dialog";
-import { WaTemplatePreview } from "@/components/config/template-dialog";
+import { WaPreview } from "@/components/difusiones/wa-preview";
 import { cancelBroadcast } from "@/lib/actions/broadcasts";
 import { fmtDate, fmtMoney, fmtNumber, fmtTime } from "@/lib/format";
 import type { BroadcastStatus, TemplateButton } from "@/lib/types";
@@ -53,6 +53,14 @@ export type BroadcastSummary = {
   body: string;
   footer: string | null;
   buttons: TemplateButton[];
+  /**
+   * Los valores con los que salió UNO de los mensajes.
+   *
+   * Sin esto la burbuja mostraba "Hola {{nombre}}!" y el dueño creía,
+   * razonablemente, que eso fue lo que le llegó a las 312 personas. Están
+   * congelados en cada destinatario: alcanza con los del primero.
+   */
+  vars: Record<string, string>;
   branchName: string | null;
   templateName: string | null;
 };
@@ -172,16 +180,20 @@ export function Results({
         </section>
       )}
 
-      {/* ── el embudo real ── */}
-      <section className="card p-4 md:p-5">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-sm font-medium text-ink">De la salida a la venta</h2>
-          {ventana && <p className="text-[11px] text-ink-faint">{ventana}</p>}
-        </div>
-        <div className="mt-3">
-          <Funnel totals={totals} />
-        </div>
-      </section>
+      {/* ── el embudo real ──
+          Programada = siete filas en cero. Es ruido: hasta que no arranca,
+          alcanza con el bloque de progreso de arriba. */}
+      {broadcast.status !== "programada" && (
+        <section className="card p-4 md:p-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-medium text-ink">De la salida a la venta</h2>
+            {ventana && <p className="text-[11px] text-ink-faint">{ventana}</p>}
+          </div>
+          <div className="mt-3">
+            <Funnel totals={totals} />
+          </div>
+        </section>
+      )}
 
       {/* ── lo que no hay que festejar, pero hay que ver ── */}
       <section className="flex flex-wrap gap-2">
@@ -206,11 +218,12 @@ export function Results({
           )}
         </div>
         <div className="mt-3">
-          <WaTemplatePreview
+          <WaPreview
             header={broadcast.header}
             body={broadcast.body}
             footer={broadcast.footer}
             buttons={broadcast.buttons}
+            vars={broadcast.vars}
           />
         </div>
         {broadcast.templateName && (
@@ -224,7 +237,7 @@ export function Results({
         open={cancelOpen}
         onOpenChange={setCancelOpen}
         title="¿Frenar la difusión?"
-        description="Los que ya la recibieron la tienen. Al resto no les llega y no se puede retomar."
+        description="Los que ya la recibieron la tienen. Al resto no le llega y no se puede retomar. Si justo hay una tanda en el aire, pueden salir unos pocos más."
         confirmLabel="Frenar"
         onConfirm={async () => {
           const res = await cancelBroadcast({ id: broadcast.id });

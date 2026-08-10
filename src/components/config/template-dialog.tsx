@@ -18,6 +18,7 @@ import {
   ThumbsDown,
   ThumbsUp,
   Trash2,
+  TriangleAlert,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -184,11 +185,21 @@ export function TemplateDialog({
   onOpenChange,
   template,
   onSaved,
+  emphasis = "guardar",
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   template: Template | null;
   onSaved?: (t: Template) => void;
+  /**
+   * Cuál es LA acción de este diálogo.
+   *
+   * En Configuración una plantilla se puede guardar y mandarse más tarde. Pero
+   * abierto desde el composer, guardar sin mandar no acerca a nada: la pantalla
+   * queda idéntica ("no hay ninguna plantilla aprobada") y no hay una sola
+   * pista de que faltaba un paso. Ahí el primario es "Mandar a aprobar".
+   */
+  emphasis?: "guardar" | "meta";
 }) {
   const [name, setName] = React.useState(template?.name ?? "");
   const [metaName, setMetaName] = React.useState(template?.meta_name ?? "");
@@ -305,6 +316,9 @@ export function TemplateDialog({
 
   const preview = fillTemplate(body, SAMPLE_VARS);
   const canSendToMeta = !locked && body.trim().length > 0 && name.trim().length > 0;
+  const conBotones: readonly string[] = BROADCAST_VAR_KEYS;
+  const sinLlenarEnDifusion = variablesDe(body).filter((v) => !conBotones.includes(v));
+  const metaEsPrimario = emphasis === "meta" && canSendToMeta;
 
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
@@ -508,21 +522,40 @@ export function TemplateDialog({
             >
               Cancelar
             </Button>
-            {canSendToMeta && (
-              <Button
-                type="button"
-                variant="brand"
-                loading={sending}
-                disabled={saving}
-                onClick={sendToMeta}
-              >
-                <Send />
-                Mandar a aprobar
-              </Button>
+            {metaEsPrimario ? (
+              <>
+                <Button
+                  type="submit"
+                  variant="secondary"
+                  loading={saving}
+                  disabled={sending}
+                >
+                  Guardar borrador
+                </Button>
+                <Button type="button" loading={sending} disabled={saving} onClick={sendToMeta}>
+                  <Send />
+                  Mandar a aprobar
+                </Button>
+              </>
+            ) : (
+              <>
+                {canSendToMeta && (
+                  <Button
+                    type="button"
+                    variant="brand"
+                    loading={sending}
+                    disabled={saving}
+                    onClick={sendToMeta}
+                  >
+                    <Send />
+                    Mandar a aprobar
+                  </Button>
+                )}
+                <Button type="submit" loading={saving} disabled={sending}>
+                  {template ? "Guardar" : "Crear plantilla"}
+                </Button>
+              </>
             )}
-            <Button type="submit" loading={saving} disabled={sending}>
-              {template ? "Guardar" : "Crear plantilla"}
-            </Button>
           </div>
         </form>
       </DialogContent>
@@ -618,12 +651,16 @@ function ButtonsBuilder({
                   </p>
                 </div>
                 {!locked && (
-                  <div className="flex shrink-0 items-center">
+                  /* 44px y separados: con tres targets de 32 pegados, "bajar el
+                     botón 2" y "borrar el botón 2" quedaban a un pulgar de
+                     distancia y el borrado no tiene deshacer. */
+                  <div className="flex shrink-0 items-center gap-1">
                     <Tooltip content="Subir">
                       <Button
                         type="button"
-                        size="icon-sm"
+                        size="icon"
                         variant="ghost"
+                        className="size-11"
                         disabled={i === 0}
                         onClick={() => move(i, -1)}
                         aria-label={`Subir el botón ${i + 1}`}
@@ -634,8 +671,9 @@ function ButtonsBuilder({
                     <Tooltip content="Bajar">
                       <Button
                         type="button"
-                        size="icon-sm"
+                        size="icon"
                         variant="ghost"
+                        className="size-11"
                         disabled={i === quick.length - 1}
                         onClick={() => move(i, 1)}
                         aria-label={`Bajar el botón ${i + 1}`}
@@ -646,11 +684,11 @@ function ButtonsBuilder({
                     <Tooltip content="Borrar">
                       <Button
                         type="button"
-                        size="icon-sm"
+                        size="icon"
                         variant="ghost"
                         onClick={() => onQuickChange(quick.filter((_, j) => j !== i))}
                         aria-label={`Borrar el botón ${i + 1}`}
-                        className="text-tone-red-text hover:bg-tone-red-soft hover:text-tone-red-text"
+                        className="size-11 text-tone-red-text hover:bg-tone-red-soft hover:text-tone-red-text"
                       >
                         <Trash2 />
                       </Button>
@@ -709,11 +747,11 @@ function ButtonsBuilder({
                 <Tooltip content="Borrar">
                   <Button
                     type="button"
-                    size="icon-sm"
+                    size="icon"
                     variant="ghost"
                     onClick={() => onUrlChange(null)}
                     aria-label="Borrar el botón con link"
-                    className="shrink-0 text-tone-red-text hover:bg-tone-red-soft hover:text-tone-red-text"
+                    className="size-11 shrink-0 text-tone-red-text hover:bg-tone-red-soft hover:text-tone-red-text"
                   >
                     <Trash2 />
                   </Button>

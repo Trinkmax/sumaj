@@ -344,6 +344,7 @@ export function BroadcastComposer({
           onOpenChange={setTemplateDialogOpen}
           template={null}
           onSaved={plantillaGuardada}
+          emphasis="meta"
         />
       </div>
     );
@@ -867,6 +868,7 @@ export function BroadcastComposer({
         onOpenChange={setTemplateDialogOpen}
         template={null}
         onSaved={plantillaGuardada}
+        emphasis="meta"
       />
     </div>
   );

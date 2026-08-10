@@ -42,7 +42,7 @@ export default async function DifusionPage({ params }: { params: Promise<{ id: s
   const { isAdmin } = await requireMember();
   const supabase = await createClient();
 
-  const [broadcastRes, totalsRes, recipientsRes] = await Promise.all([
+  const [broadcastRes, totalsRes, recipientsRes, muestraRes] = await Promise.all([
     supabase
       .from("broadcasts")
       .select(
@@ -66,6 +66,16 @@ export default async function DifusionPage({ params }: { params: Promise<{ id: s
       .or("replied_at.not.is.null,status.eq.fallido")
       .order("replied_at", { ascending: false, nullsFirst: false })
       .limit(300),
+    /* Un destinatario cualquiera, solo por sus `vars`: es lo que convierte la
+       burbuja de "Lo que recibieron" en el mensaje de verdad y no en el texto
+       con las llaves crudas. */
+    supabase
+      .from("broadcast_recipients")
+      .select("vars")
+      .eq("broadcast_id", id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   const raw = broadcastRes.data;
@@ -126,6 +136,7 @@ export default async function DifusionPage({ params }: { params: Promise<{ id: s
     body: raw.body_snapshot,
     footer: raw.footer_snapshot,
     buttons: parseTemplateButtons(raw.buttons_snapshot),
+    vars: varsDeMuestra(muestraRes.data?.vars),
     branchName: raw.branch?.name ?? null,
     templateName: raw.template_name_snapshot,
   };
@@ -191,6 +202,21 @@ export default async function DifusionPage({ params }: { params: Promise<{ id: s
       </div>
     </div>
   );
+}
+
+/**
+ * Las variables congeladas de un destinatario, saneadas.
+ *
+ * Es jsonb: puede venir cualquier cosa. Lo que no sea texto se descarta y esa
+ * variable queda resaltada en la burbuja, que es la verdad.
+ */
+function varsDeMuestra(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [clave, valor] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof valor === "string" && valor.trim()) out[clave] = valor;
+  }
+  return out;
 }
 
 /** "Armada por Vale el 12/07/2026 · 312 personas" */

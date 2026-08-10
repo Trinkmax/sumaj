@@ -2,7 +2,17 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Cake, Home, IdCard, NotebookPen, Pencil, StickyNote, type LucideIcon } from "lucide-react";
+import {
+  BellOff,
+  Cake,
+  Home,
+  IdCard,
+  Megaphone,
+  NotebookPen,
+  Pencil,
+  StickyNote,
+  type LucideIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -10,6 +20,7 @@ import { Input, Label, Textarea } from "@/components/ui/input";
 import { ChoiceGrid } from "@/components/ui/misc";
 import { fmtDate } from "@/lib/format";
 import { updateContact } from "@/lib/actions/contacts";
+import { optOutContact, undoOptOut } from "@/lib/actions/broadcasts";
 import { DOC_TYPE_LABELS, DOC_TYPE_KEYS, birthdayThisMonth, type ContactRow } from "./types";
 import type { DocumentType } from "@/lib/types";
 
@@ -17,6 +28,32 @@ export function DatosCard({ contact }: { contact: ContactRow }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [cambiandoBaja, setCambiandoBaja] = React.useState(false);
+
+  const deBaja = Boolean(contact.wa_opt_out_at);
+
+  /* "Che, no me manden más promos" llega por chat al vendedor, no a un admin.
+     Hasta acá las actions existían y no las llamaba nadie: la única baja posible
+     era que la persona tocara el botón de la plantilla. El que no tenía forma de
+     que se lo respeten terminaba bloqueando el número madre, que es exactamente
+     lo que le baja la calidad —y el límite de envío— a toda la agencia. */
+  async function cambiarBaja() {
+    setCambiandoBaja(true);
+    const res = deBaja
+      ? await undoOptOut({ contactId: contact.id })
+      : await optOutContact({ contactId: contact.id });
+    setCambiandoBaja(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    toast.success(
+      deBaja
+        ? "Vuelve a recibir difusiones."
+        : "Listo: no le van a llegar más difusiones. Por chat le seguís escribiendo igual.",
+    );
+    router.refresh();
+  }
 
   const [form, setForm] = React.useState({
     fullName: contact.full_name,
@@ -134,6 +171,31 @@ export function DatosCard({ contact }: { contact: ContactRow }) {
           </Button>
         </div>
       )}
+
+      {/* Difusiones: estado a la vista y un solo toque para cambiarlo. */}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+        <p className="flex min-w-0 items-start gap-2 text-[13px] text-ink-soft">
+          {deBaja ? (
+            <BellOff className="mt-0.5 size-3.5 shrink-0 text-ink-faint" strokeWidth={1.9} />
+          ) : (
+            <Megaphone className="mt-0.5 size-3.5 shrink-0 text-ink-faint" strokeWidth={1.9} />
+          )}
+          <span className="min-w-0">
+            {deBaja
+              ? `Se dio de baja de las difusiones${contact.wa_opt_out_reason ? ` — ${contact.wa_opt_out_reason}` : ""}.`
+              : "Recibe las difusiones de la agencia."}
+          </span>
+        </p>
+        <Button
+          variant={deBaja ? "secondary" : "ghost"}
+          size="sm"
+          loading={cambiandoBaja}
+          onClick={cambiarBaja}
+          className="shrink-0"
+        >
+          {deBaja ? "Volver a incluirlo" : "Dar de baja"}
+        </Button>
+      </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent title="Editar datos" size="lg">
