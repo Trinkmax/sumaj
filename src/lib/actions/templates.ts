@@ -347,6 +347,25 @@ export async function saveTemplate(
     variables: extractVariables(datos.body),
   };
 
+  /* El nombre técnico es único por agencia y el diálogo lo deriva solo del
+     nombre humano ("Promo Brasil" → promo_brasil), así que chocar es lo NORMAL
+     cuando alguien reusa un nombre. Sin este chequeo el insert explota con un
+     23505 y el admin ve "No se pudo crear la plantilla": un cartel que no dice
+     qué pasó ni qué hacer, sobre un error que se arregla en dos segundos. */
+  const { data: chocada } = await supabase
+    .from("wa_templates")
+    .select("id, name")
+    .eq("agency_id", agency.id)
+    .eq("meta_name", fila.meta_name)
+    .maybeSingle();
+
+  if (chocada && chocada.id !== datos.id) {
+    return fail(
+      `Ya tenés una plantilla con el nombre técnico "${fila.meta_name}" (${chocada.name}). ` +
+        `Cambiá el nombre, o editá esa en vez de crear una nueva.`,
+    );
+  }
+
   if (datos.id) {
     /* El `agency_id` va explícito aunque la RLS ya lo cubra: `my_agency_ids()`
        es PLURAL y `getMemberContext` elige una agencia con un limit(1). Alguien
@@ -396,7 +415,16 @@ export async function saveTemplate(
     .insert({ agency_id: agency.id, ...fila })
     .select("*")
     .single();
-  if (error || !data) return fail("No se pudo crear la plantilla.");
+  if (error || !data) {
+    // Red de contención del chequeo de arriba: entre el select y el insert
+    // alguien pudo crear la misma. El motivo tiene que llegar igual.
+    if (error?.code === "23505") {
+      return fail(
+        `Ya tenés una plantilla con el nombre técnico "${fila.meta_name}". Cambiá el nombre.`,
+      );
+    }
+    return fail("No se pudo crear la plantilla.");
+  }
 
   revalidate();
   return succeed(data);
