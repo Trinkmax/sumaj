@@ -175,6 +175,19 @@ function nombreOcupado(error: string): boolean {
 }
 
 /**
+ * Meta borra las plantillas en DIFERIDO y mientras tanto no deja reusar el
+ * nombre en ese idioma (error 100 / subcódigo 2388023). En la práctica tarda
+ * más de un minuto, así que reintentar dentro del mismo request no sirve: lo
+ * único honesto es decirle a la agencia que espere y vuelva a tocar el botón.
+ *
+ * Pasa siempre que se remanda una plantilla RECHAZADA, que es justo el camino
+ * más transitado: se rechaza, se corrige, se remanda.
+ */
+function borradoEnCurso(error: string): boolean {
+  return /being deleted|se está eliminando|is being deleted/i.test(error);
+}
+
+/**
  * La intención de cada botón la ponemos NOSOTROS: Meta no la conoce, no la
  * guarda y no la devuelve (`parseButtons` la trae siempre en null).
  *
@@ -562,6 +575,16 @@ export async function submitTemplateToMeta(
     creada = await createMetaTemplate(creds, payload);
   }
   if (!creada.ok) {
+    /* El borrado quedó pedido pero Meta todavía no liberó el nombre. No es un
+       error del texto y mandar a la agencia a "corregir el mensaje" la hace
+       buscar un problema que no existe: hay que decirle que espere. */
+    if (borradoEnCurso(creada.error)) {
+      return fail(
+        "Meta está borrando la versión anterior y tarda hasta un minuto en liberar el nombre. " +
+          "Esperá un minuto y volvé a tocar “Mandar a aprobar”.",
+      );
+    }
+
     /* Lo que dice Meta es lo ÚNICO que le dice a la agencia qué cambiar, así
        que el detalle va entero — pero enmarcado, porque llega en inglés y solo
        con eso nadie sabe qué hacer. Nuestras propias validaciones (code null)

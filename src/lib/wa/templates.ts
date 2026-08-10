@@ -592,6 +592,22 @@ export async function createMetaTemplate(
       name: input.name,
       language: input.language,
       category: input.category,
+      /**
+       * SIN ESTO, TODA PLANTILLA CON VARIABLES SE RECHAZA. No es un detalle
+       * de configuración: es la línea que hace que la feature exista.
+       *
+       * Meta soporta dos formatos de variable y el que asume por defecto es el
+       * POSICIONAL ({{1}}, {{2}}). Nosotros escribimos {{nombre}} —que es lo
+       * que ya usaba `fillTemplate` en todo el sistema— y mandamos los ejemplos
+       * en `body_text_named_params`, pero si no se declara el formato Meta lee
+       * "{{nombre}}" como un marcador posicional mal escrito, ACEPTA la
+       * creación y recién la rechaza en la revisión, con un `INVALID_FORMAT`
+       * seco que no menciona los nombres por ningún lado.
+       *
+       * Se declara solo cuando hay variables: una plantilla sin ninguna no
+       * tiene formato que elegir.
+       */
+      ...(variables.length ? { parameter_format: "NAMED" } : {}),
       components,
     },
   });
