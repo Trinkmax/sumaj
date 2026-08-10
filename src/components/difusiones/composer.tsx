@@ -5,12 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
+  Banknote,
   Building2,
   CalendarClock,
   Check,
   Clock,
   MessageSquareText,
   Plus,
+  RefreshCw,
   Send,
   TriangleAlert,
   Unplug,
@@ -28,7 +30,7 @@ import {
   type PickerTag,
 } from "@/components/difusiones/audience-picker";
 import { WaPreview } from "@/components/difusiones/wa-preview";
-import { fmtNumber, fmtPhone } from "@/lib/format";
+import { fmtDate, fmtNumber, fmtPhone, fmtTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { BroadcastAudience, BroadcastIntent, Tables } from "@/lib/types";
 import {
@@ -39,8 +41,23 @@ import {
   type AudienceRow,
 } from "@/lib/broadcasts/audience";
 import { launchBroadcast, previewAudience, saveBroadcast } from "@/lib/actions/broadcasts";
+import { syncTemplatesFromMeta } from "@/lib/actions/templates";
 
 type Template = Tables<"wa_templates">;
+
+/**
+ * Un borrador que se retoma. Lo trae el RSC cuando la URL llega con `?id=`, que
+ * es a donde apunta "Seguir armando" desde la pantalla de la difusión.
+ */
+export type BroadcastDraft = {
+  id: string;
+  name: string;
+  templateId: string;
+  audience: BroadcastAudience;
+  branchId: string | null;
+  scheduledAt: string | null;
+  throttlePerRun: number;
+};
 
 /** El cron de difusiones corre cada 5 minutos: de ahí sale el "cuánto tarda". */
 const MINUTOS_POR_TANDA = 5;
@@ -87,6 +104,8 @@ export function BroadcastComposer({
   agencyName,
   sellerName,
   dailyCap,
+  dailyLeft,
+  draft,
   stats,
 }: {
   templates: Template[];
@@ -99,26 +118,36 @@ export function BroadcastComposer({
   sellerName: string;
   /** tope diario de envíos de la agencia (agencies.settings.broadcast_daily_cap) */
   dailyCap: number;
+  /** cuánto queda de ese tope hoy: el despachador ya descontó lo que salió */
+  dailyLeft: number;
+  /** borrador que se está retomando, si la URL trajo un `?id=` */
+  draft: BroadcastDraft | null;
   stats: ContactStats;
 }) {
   const router = useRouter();
 
   const [templates, setTemplates] = React.useState(templatesIniciales);
-  const [templateId, setTemplateId] = React.useState<string | null>(null);
+  const [templateId, setTemplateId] = React.useState<string | null>(draft?.templateId ?? null);
   const [templateDialogOpen, setTemplateDialogOpen] = React.useState(false);
+  const [sincronizando, setSincronizando] = React.useState(false);
   // el editor de plantillas arranca su estado en el primer render: sin una key
   // nueva, la segunda vez que se abre aparece con lo que quedó de la anterior
   const [templateDialogSeq, setTemplateDialogSeq] = React.useState(0);
 
-  const [audience, setAudience] = React.useState<BroadcastAudience>(EMPTY_AUDIENCE);
+  const [audience, setAudience] = React.useState<BroadcastAudience>(
+    draft?.audience ?? EMPTY_AUDIENCE,
+  );
   const [presetKey, setPresetKey] = React.useState<string | null>(null);
 
-  const [branchId, setBranchId] = React.useState<string | null>(null);
-  const [cuando, setCuando] = React.useState<"ahora" | "programar">("ahora");
-  const [scheduledAt, setScheduledAt] = React.useState("");
-  const [throttle, setThrottle] = React.useState(60);
-  const [nombre, setNombre] = React.useState("");
-  const [nombreTocado, setNombreTocado] = React.useState(false);
+  const [branchId, setBranchId] = React.useState<string | null>(draft?.branchId ?? null);
+  const [cuando, setCuando] = React.useState<"ahora" | "programar">(
+    draft?.scheduledAt ? "programar" : "ahora",
+  );
+  const [scheduledAt, setScheduledAt] = React.useState(paraInputLocal(draft?.scheduledAt));
+  const [throttle, setThrottle] = React.useState(draft?.throttlePerRun ?? 60);
+  const [nombre, setNombre] = React.useState(draft?.name ?? "");
+  // el nombre del borrador ya lo eligió una persona: no se pisa con el del preset
+  const [nombreTocado, setNombreTocado] = React.useState(Boolean(draft));
 
   const [total, setTotal] = React.useState<number | null>(null);
   const [sample, setSample] = React.useState<AudienceRow[]>([]);
@@ -130,7 +159,10 @@ export function BroadcastComposer({
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [enviando, setEnviando] = React.useState(false);
   const [guardando, setGuardando] = React.useState(false);
-  const [draftId, setDraftId] = React.useState<string | null>(null);
+  /* Retomar un borrador guarda SOBRE ese mismo id. Sin esto, "Seguir armando"
+     creaba una difusión nueva cada vez y el borrador original quedaba huérfano
+     en la lista, sin manera de retomarlo. */
+  const [draftId, setDraftId] = React.useState<string | null>(draft?.id ?? null);
 
   const seqRef = React.useRef(0);
 
@@ -229,6 +261,25 @@ export function BroadcastComposer({
       return [...otras, t].sort((a, b) => a.name.localeCompare(b.name, "es-AR"));
     });
     if (t.meta_status === "APPROVED") elegirPlantilla(t.id);
+    else if (t.meta_status === "PENDING") {
+      toast.success(`Mandaste "${t.name}" a Meta. Cuando la apruebe la vas a ver acá.`);
+    }
+  }
+
+  /** Le pregunta a Meta si ya resolvió las plantillas que están en revisión. */
+  async function buscarNovedades() {
+    setSincronizando(true);
+    const res = await syncTemplatesFromMeta();
+    setSincronizando(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    if (res.data.actualizadas === 0 && res.data.nuevas === 0) {
+      toast.success("Todavía no hay novedades. Meta suele tardar unos minutos.");
+      return;
+    }
+    router.refresh();
   }
 
   /* ── estados vacíos: sin infraestructura no hay difusión que valga ── */
@@ -258,17 +309,28 @@ export function BroadcastComposer({
           title="No hay ninguna plantilla aprobada"
           description={
             pendientes > 0
-              ? "Tenés plantillas esperando el visto bueno de Meta. Cuando alguna quede aprobada podés difundirla desde acá."
+              ? "Tenés plantillas esperando el visto bueno de Meta. Cuando alguna quede aprobada podés difundirla desde acá — el estado no llega solo, hay que preguntarle."
               : "Para escribirle a alguien que no te habló primero, Meta pide una plantilla aprobada. Creá una y mandala a aprobar: suele tardar unos minutos."
           }
           action={
             <div className="flex flex-col-reverse items-center gap-2 sm:flex-row">
-              <Link
-                href="/config/plantillas"
-                className={buttonVariants({ variant: "secondary" })}
-              >
-                Ver mis plantillas
-              </Link>
+              {pendientes > 0 ? (
+                /* El `meta_status` solo se refresca a mano. Sin este botón, la
+                   plantilla se aprobaba a los cinco minutos y esta pantalla
+                   seguía diciendo que no había ninguna, para siempre, salvo que
+                   alguien adivinara que tenía que ir a Configuración. */
+                <Button variant="secondary" loading={sincronizando} onClick={buscarNovedades}>
+                  <RefreshCw />
+                  Buscar novedades en Meta
+                </Button>
+              ) : (
+                <Link
+                  href="/config/plantillas"
+                  className={buttonVariants({ variant: "secondary" })}
+                >
+                  Ver mis plantillas
+                </Link>
+              )}
               <Button onClick={abrirPlantillaNueva}>
                 <Plus />
                 Crear plantilla
@@ -290,10 +352,14 @@ export function BroadcastComposer({
   /* ── números del disparo ── */
 
   const destinatarios = total ?? 0;
-  const hoy = Math.min(destinatarios, dailyCap);
+  /* Contra lo que QUEDA del cupo, no contra el cupo entero: si a las 9 salieron
+     200 de los 250 del día, a las 17 no salen otras 200. Es el mismo número que
+     usa el despachador para decidir. */
+  const hoy = Math.min(destinatarios, dailyLeft);
   const tandas = hoy > 0 ? Math.ceil(hoy / throttle) : 0;
   const minutos = Math.max(MINUTOS_POR_TANDA, tandas * MINUTOS_POR_TANDA);
-  const excedeCupo = destinatarios > dailyCap;
+  const excedeCupo = destinatarios > dailyLeft;
+  const cupoYaUsado = dailyLeft < dailyCap;
 
   /* La vista previa se arma con el MISMO helper que usa el disparo: si acá se
      ve bien, sale bien. Y las variables que faltan se ven antes de apretar, no
@@ -657,8 +723,9 @@ export function BroadcastComposer({
             <p className="flex items-start gap-2 rounded-xl border border-line bg-sand-soft/60 px-3 py-2.5 text-[12.5px] leading-snug text-ink-soft">
               <Clock className="mt-px size-4 shrink-0 text-ink-faint" strokeWidth={1.9} />
               <span>
-                Hoy salen hasta {fmtNumber(dailyCap)}. Las {fmtNumber(destinatarios - dailyCap)}{" "}
-                restantes siguen mañana solas, sin que hagas nada.
+                {dailyLeft === 0
+                  ? `Hoy ya salieron los ${fmtNumber(dailyCap)} mensajes que permite Meta por día. Esta arranca mañana sola, sin que hagas nada.`
+                  : `${cupoYaUsado ? `Hoy quedan ${fmtNumber(dailyLeft)} de los ${fmtNumber(dailyCap)} del día` : `Hoy salen hasta ${fmtNumber(dailyLeft)}`}. Las ${fmtNumber(destinatarios - dailyLeft)} restantes siguen mañana solas, sin que hagas nada.`}
               </span>
             </p>
           )}
@@ -699,7 +766,11 @@ export function BroadcastComposer({
               <>
                 <p className="truncate text-[15px] font-semibold leading-tight text-ink">
                   Le llega a{" "}
-                  <AnimatedNumber value={destinatarios} format={(n) => fmtNumber(n)} />{" "}
+                  <AnimatedNumber
+                    value={destinatarios}
+                    duration={300}
+                    format={(n) => fmtNumber(n)}
+                  />{" "}
                   {destinatarios === 1 ? "persona" : "personas"}
                 </p>
                 <p className="truncate text-[11.5px] text-ink-faint">
@@ -747,7 +818,9 @@ export function BroadcastComposer({
               </ConfirmRow>
               {excedeCupo && (
                 <ConfirmRow icon={CalendarClock}>
-                  Hoy salen {fmtNumber(dailyCap)} y el resto sigue mañana.
+                  {dailyLeft === 0
+                    ? "Hoy ya se usó el cupo diario: arranca mañana."
+                    : `Hoy salen ${fmtNumber(dailyLeft)} y el resto sigue mañana.`}
                 </ConfirmRow>
               )}
               {cuando === "programar" && scheduledAt && (
@@ -756,6 +829,12 @@ export function BroadcastComposer({
                   <span className="font-medium text-ink">{fmtCuando(scheduledAt)}</span>.
                 </ConfirmRow>
               )}
+              {/* Nadie debería enterarse de que esto se paga cuando le llega la
+                  factura de Meta a fin de mes. */}
+              <ConfirmRow icon={Banknote}>
+                Cada mensaje de una difusión lo cobra Meta. El seguimiento de los que contesten
+                sigue siendo gratis, desde la sucursal.
+              </ConfirmRow>
               <ConfirmRow icon={TriangleAlert}>
                 Podés cancelarla mientras está saliendo, pero lo que ya salió no se puede volver
                 atrás.
@@ -874,11 +953,21 @@ function fmtEta(minutos: number): string {
   return m > 0 ? `${h} h ${m} min` : `${h} h`;
 }
 
-/** "11/08 a las 09:00" — el valor crudo del input datetime-local, en criollo. */
+/** "11 ago a las 09:00" — el valor crudo del input datetime-local, en criollo. */
 function fmtCuando(valor: string): string {
   const d = new Date(valor);
   if (Number.isNaN(d.getTime())) return valor;
-  const fecha = d.toLocaleDateString("es-AR", { day: "numeric", month: "long" });
-  const hora = d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false });
-  return `${fecha} a las ${hora}`;
+  return `${fmtDate(d)} a las ${fmtTime(d)}`;
+}
+
+/**
+ * Un ISO como lo quiere un `datetime-local`: "YYYY-MM-DDTHH:mm" en hora local.
+ * Sin esto, retomar un borrador programado perdía la hora que ya había elegido.
+ */
+function paraInputLocal(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const dos = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}T${dos(d.getHours())}:${dos(d.getMinutes())}`;
 }

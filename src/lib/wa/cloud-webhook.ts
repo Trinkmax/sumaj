@@ -679,6 +679,27 @@ async function syncBroadcastRecipient(
     detalle: string | null;
   },
 ): Promise<void> {
+  /* El try/catch no es decorativo: supabase-js devuelve los errores del Postgres
+     en `error`, pero un fallo de RED hace que el fetch interno RECHACE, y esa
+     excepción subiría hasta `handleCloudWebhook` —que no la agarra— abortando el
+     barrido y dejando sin procesar los mensajes que venían atrás en el mismo
+     payload. Un tilde de "leído" no puede costar eso. */
+  try {
+    await aplicarEstadoAlDestinatario(supabase, agencyId, input);
+  } catch (e) {
+    console.warn(`[wa/cloud] destinatario de difusión sin actualizar: ${String(e)}`);
+  }
+}
+
+async function aplicarEstadoAlDestinatario(
+  supabase: Admin,
+  agencyId: string,
+  input: {
+    waMessageId: string;
+    status: Enums<"message_status">;
+    detalle: string | null;
+  },
+): Promise<void> {
   const { data: destinatario, error: readError } = await supabase
     .from("broadcast_recipients")
     .select("id, status, delivered_at, read_at, replied_at")

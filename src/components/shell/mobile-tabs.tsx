@@ -4,13 +4,17 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { LogOut, MoreHorizontal } from "lucide-react";
-import { IconCaja, IconClientes, IconConfig } from "./nav-icons";
+import { IconCaja, IconClientes, IconConfig, IconDifusiones } from "./nav-icons";
 import { cn } from "@/lib/utils";
 import { NAV_MOBILE } from "./nav";
 import { createClient } from "@/lib/supabase/client";
 import { ThemeToggle } from "./theme";
 
+/* Todo lo que no entra en las 4 tabs vive acá. Si una sección está en la
+   sidebar de desktop y no está en esta lista, en el celular no existe: no hay
+   otra forma de llegar que escribir la URL a mano. */
 const MORE_ITEMS = [
+  { href: "/difusiones", label: "Difusiones", icon: IconDifusiones },
   { href: "/clientes", label: "Clientes", icon: IconClientes },
   { href: "/caja", label: "Caja", icon: IconCaja },
   { href: "/config", label: "Configuración", icon: IconConfig },

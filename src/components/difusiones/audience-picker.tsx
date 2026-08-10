@@ -214,7 +214,7 @@ export function AudiencePicker({
             {tags.length > 0 && (
               <div>
                 <Label>Etiquetas</Label>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-2">
                   {tags.map((t) => {
                     const activo = etiquetas.includes(t.id);
                     return (
@@ -224,7 +224,7 @@ export function AudiencePicker({
                         onClick={() => toggleTag(t.id)}
                         aria-pressed={activo}
                         className={cn(
-                          "inline-flex min-h-8 items-center gap-1.5 rounded-full border px-2.5 text-[12.5px] transition-all tap-highlight-none active:scale-95",
+                          "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 text-[12.5px] transition-all tap-highlight-none active:scale-95",
                           activo
                             ? "border-brand-500 bg-brand-tint font-medium text-brand-text"
                             : "border-line bg-paper text-ink-soft hover:border-line-strong",
@@ -259,7 +259,7 @@ export function AudiencePicker({
 
             <div>
               <Label>Etapa del último lead</Label>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-2">
                 {STAGES.map((s) => {
                   const activo = etapas.includes(s.key);
                   return (
@@ -269,7 +269,7 @@ export function AudiencePicker({
                       onClick={() => toggleStage(s.key)}
                       aria-pressed={activo}
                       className={cn(
-                        "inline-flex min-h-8 items-center gap-1.5 rounded-full border px-2.5 text-[12.5px] transition-all tap-highlight-none active:scale-95",
+                        "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 text-[12.5px] transition-all tap-highlight-none active:scale-95",
                         activo
                           ? cn(s.chip, "font-medium")
                           : "border-line bg-paper text-ink-soft hover:border-line-strong",
@@ -427,6 +427,7 @@ export function AudiencePicker({
                   <AnimatedNumber
                     value={total}
                     from={0}
+                    duration={300}
                     format={(n) => fmtNumber(n)}
                     className="font-display text-[38px] font-semibold leading-none text-ink"
                   />
@@ -485,33 +486,40 @@ export function AudiencePicker({
       {/* a quién NO le llega: sin esto el usuario desconfía del número de arriba */}
       {hayExclusiones && (
         <div className="rounded-xl border border-line bg-sand-soft/40 p-3.5">
+          {/* Antes decía "De tus 1.240 contactos…" y abajo listaba números de
+              toda la agencia junto a otros relativos a los filtros: el dueño
+              hacía la resta, no le daba, y el bloque que existe para dar
+              confianza terminaba sembrando dudas. */}
           <p className="text-[12.5px] font-medium text-ink-soft">
-            De tus {fmtNumber(stats.total)} contactos, no a todos se les puede difundir.
+            Además de tus filtros, siempre quedan afuera:
           </p>
           <ul className="mt-2 space-y-1.5">
             {stats.sinTelefono > 0 && (
               <ExcluidoRow icon={PhoneOff}>
-                {fmtNumber(stats.sinTelefono)} sin teléfono cargado.
+                {fmtNumber(stats.sinTelefono)} contactos sin teléfono cargado.
               </ExcluidoRow>
             )}
             {stats.bajas > 0 && (
               <ExcluidoRow icon={Ban}>
-                {fmtNumber(stats.bajas)} se dieron de baja de las difusiones.
+                {fmtNumber(stats.bajas)} que se dieron de baja de las difusiones.
               </ExcluidoRow>
             )}
             {protectedCount !== null && protectedCount > 0 && (
               <ExcluidoRow icon={ShieldCheck}>
-                <span>
+                <span className="block">
                   {fmtNumber(protectedCount)} protegidos: están en medio de una negociación o ya
                   recibieron una difusión hace poco.
-                </span>{" "}
-                <button
-                  type="button"
+                </span>
+                {/* Cambia a cuánta gente le llega el mensaje: merece un target
+                    de verdad y no una palabra subrayada adentro del párrafo. */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="-ml-3 mt-1 text-brand-text hover:text-brand-text"
                   onClick={() => onCare({ skip_active: false, no_broadcast_days: 0 })}
-                  className="whitespace-nowrap font-medium text-brand-text underline underline-offset-2 tap-highlight-none"
                 >
                   Incluirlos igual
-                </button>
+                </Button>
               </ExcluidoRow>
             )}
             {/* si la medición exacta no salió, se dice el motivo sin inventar el número */}

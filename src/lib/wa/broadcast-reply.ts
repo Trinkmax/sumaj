@@ -184,7 +184,7 @@ export async function recordBroadcastReply(
 ): Promise<void> {
   const { data: row, error: readError } = await supabase
     .from("broadcast_recipients")
-    .select("id, agency_id, replied_at, intent, button_label, reply_text, lead_id")
+    .select("id, agency_id, replied_at, intent, button_label, reply_text, lead_id, conversation_id")
     .eq("id", input.reply.recipientId)
     .maybeSingle();
   if (readError || !row) return;
@@ -203,7 +203,11 @@ export async function recordBroadcastReply(
       button_label: input.reply.buttonLabel ?? row.button_label,
       reply_text: row.reply_text ?? (texto || null),
       lead_id: input.leadId ?? row.lead_id,
-      conversation_id: input.conversationId,
+      /* El hilo que se guarda es el de la difusión —el del número madre, que es
+         donde salió—. La respuesta puede entrar por el número de la sucursal, y
+         pisarlo dejaría el link "ir al chat" de la pantalla de resultados
+         apuntando a otro lado. Solo se completa si estaba vacío. */
+      conversation_id: row.conversation_id ?? input.conversationId,
     })
     .eq("id", row.id);
   if (updateError) {
@@ -290,7 +294,14 @@ const BAJA_EXACTA = new Set([
   "no molestar",
 ]);
 
-/** Frases que, en un mensaje corto, son una baja. */
+/**
+ * Frases que, ARRANCANDO el mensaje y sin nada más atrás, son una baja.
+ *
+ * Tienen que estar al principio: la versión con `includes` daba de baja para
+ * siempre a quien escribía "ese paquete no me interesa, mostrame otro" —el
+ * mensaje más caliente que puede mandar un cliente— y encima le sacaba el aviso
+ * al vendedor.
+ */
 const BAJA_FRASES = [
   "dar de baja",
   "darme de baja",
@@ -305,6 +316,16 @@ const BAJA_FRASES = [
   "borrame de la lista",
   "dejen de escribirme",
 ];
+
+/** Lo que puede venir detrás de la frase sin dejar de ser una baja: "gracias". */
+const COLA_MAXIMA = 18;
+
+/**
+ * Si después de la frase aparece cualquiera de estas, el mensaje sigue: no está
+ * pidiendo la baja, está pidiendo otra cosa.
+ */
+const SIGUE_LA_CHARLA =
+  /\b(pero|otro|otra|otros|otras|mostra|mostrame|manda|mandame|mandenme|tenes|tienen|hay|queda|quedan|cuanto|precio|info|informacion|opcion|opciones|quiero|busco|necesito)\b/;
 
 /** Sin acentos, sin puntuación y en minúscula: la gente escribe como puede. */
 function normalizar(text: string): string {
@@ -321,9 +342,16 @@ function normalizar(text: string): string {
  * ¿Está pidiendo la baja?
  *
  * Deliberadamente corta de manga: dar de baja a alguien que quería comprar es
- * mucho peor que mandarle una difusión de más. Por eso una frase de baja solo
- * cuenta si el mensaje es corto y no está preguntando nada — "no me interesa
- * Brasil, ¿tenés algo del Caribe?" es una consulta caliente, no una baja.
+ * mucho peor que mandarle una difusión de más, y la baja es para siempre. Por
+ * eso la frase tiene que ABRIR el mensaje, casi no puede haber nada detrás, y
+ * nada de lo que haya puede sonar a "seguime mostrando".
+ *
+ * Además de esos tres frenos siguen los de antes: mensaje corto y sin preguntas
+ * ("no me interesa Brasil, ¿tenés algo del Caribe?" es una consulta caliente).
+ *
+ * Lo que ESTO NO ES: un detector de intención. La baja de verdad es el botón de
+ * la plantilla, que viene con su `intent` declarado. Esto solo agarra al que la
+ * escribe, y prefiere dejar pasar diez antes que equivocarse con uno.
  */
 export function looksLikeOptOut(text: string): boolean {
   const limpio = normalizar(text);
@@ -331,5 +359,14 @@ export function looksLikeOptOut(text: string): boolean {
   if (BAJA_EXACTA.has(limpio)) return true;
   if (limpio.length > 60) return false;
   if (text.includes("?") || text.includes("¿")) return false;
-  return BAJA_FRASES.some((frase) => limpio.includes(frase));
+
+  // La más larga gana: "darme de baja" antes que "dar de baja".
+  const frase = BAJA_FRASES.filter((f) => limpio.startsWith(f)).sort(
+    (a, b) => b.length - a.length,
+  )[0];
+  if (!frase) return false;
+
+  const cola = limpio.slice(frase.length).trim();
+  if (cola.length > COLA_MAXIMA) return false;
+  return !SIGUE_LA_CHARLA.test(cola);
 }

@@ -125,18 +125,21 @@ async function cargarAudiencia(
   const filtros = toFilters(audience);
   const rows: AudienceRow[] = [];
 
-  for (let desde = 0; desde < MAX_AUDIENCIA; desde += PAGINA) {
+  /* Se avanza por lo que DEVOLVIÓ cada página, no por lo que se pidió: si el
+     tope del servidor fuera menor que PAGINA, cortar por "vino corta" dejaría
+     gente afuera en silencio, que es justo lo que se está arreglando. La vuelta
+     final devuelve cero filas y termina el bucle. */
+  let desde = 0;
+  while (desde < MAX_AUDIENCIA) {
     const { data, error } = await supabase
       .rpc("broadcast_audience", { p_agency: agencyId, p_filters: filtros })
       .range(desde, desde + PAGINA - 1);
     if (error) return { ok: false, error: "No se pudo calcular la audiencia. Probá de nuevo." };
 
     const pagina = (data ?? []) as AudienceRpcRow[];
+    if (pagina.length === 0) break;
     for (const row of pagina) rows.push(toAudienceRow(row));
-    // Página incompleta = era la última. (Si el tope del servidor fuera menor
-    // que PAGINA, la primera página ya vuelve corta y cortamos de más: por eso
-    // el rango se pide explícito y no se confía en el default.)
-    if (pagina.length < PAGINA) break;
+    desde += pagina.length;
   }
 
   return { ok: true, rows };
@@ -198,6 +201,10 @@ export async function saveBroadcast(
     .from("wa_templates")
     .select("id, body, header_text, footer_text, buttons, meta_name, language")
     .eq("id", d.templateId)
+    // La RLS de wa_templates cubre `my_agency_ids()`, que es PLURAL, y la sesión
+    // resuelve UNA agencia: sin este filtro alguien activo en dos podría difundir
+    // la plantilla de la otra con las credenciales de esta.
+    .eq("agency_id", agency.id)
     .maybeSingle();
   if (!template) return fail("No encontramos la plantilla. Elegí otra y guardá de nuevo.");
 
@@ -226,6 +233,7 @@ export async function saveBroadcast(
       .from("broadcasts")
       .select("id, status")
       .eq("id", d.id)
+      .eq("agency_id", agency.id)
       .maybeSingle();
     if (!actual) return fail("No encontramos la difusión.");
     if (actual.status !== "borrador") {
@@ -290,6 +298,7 @@ export async function launchBroadcast(
     .from("broadcasts")
     .select("id, name, status, template_id, audience")
     .eq("id", id)
+    .eq("agency_id", agency.id)
     .maybeSingle();
   if (!difusion) return fail("No encontramos la difusión.");
 
@@ -310,6 +319,7 @@ export async function launchBroadcast(
       "id, name, body, header_text, footer_text, buttons, meta_name, language, meta_status, rejected_reason",
     )
     .eq("id", difusion.template_id)
+    .eq("agency_id", agency.id)
     .maybeSingle();
   if (!template) return fail("La plantilla ya no existe. Elegí otra y guardá.");
 
@@ -472,6 +482,7 @@ export async function cancelBroadcast(input: { id: string }): Promise<ActionResu
     .from("broadcasts")
     .select("id, name, status")
     .eq("id", id)
+    .eq("agency_id", agency.id)
     .maybeSingle();
   if (!difusion) return fail("No encontramos la difusión.");
   if (difusion.status === "cancelada") return succeed(null);
@@ -544,6 +555,7 @@ export async function optOutContact(
     .from("contacts")
     .select("id, full_name, wa_opt_out_at")
     .eq("id", contactId)
+    .eq("agency_id", agency.id)
     .maybeSingle();
   if (!contacto) return fail("No encontramos el contacto.");
   if (contacto.wa_opt_out_at) return succeed(null);
