@@ -86,6 +86,7 @@
  *         vuelva cuando el deploy esté sano.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
 import {
@@ -164,15 +165,127 @@ type CloudPayload = {
     /** WABA ID. Solo se usa para el log cuando no se pudo resolver el tenant. */
     id?: string;
     changes?: {
+      /** Qué clase de novedad es. Los de plantilla NO traen metadata. */
+      field?: string;
       value?: {
         metadata?: { phone_number_id?: string };
         contacts?: { profile?: { name?: string }; wa_id?: string }[];
         messages?: CloudMessage[];
         statuses?: { id?: string; status?: string; errors?: { title?: string }[] }[];
+        /* ── message_template_status_update / _quality_update ──
+           Meta manda `message_template_id` como NÚMERO, no como string. */
+        event?: string;
+        message_template_id?: number | string;
+        message_template_name?: string;
+        message_template_language?: string;
+        reason?: string;
+        new_quality_score?: string;
       };
     }[];
   }[];
 };
+
+/**
+ * El veredicto de Meta sobre una plantilla, traducido a nuestro `meta_status`.
+ *
+ * Solo los eventos que entendemos: cualquier otro devuelve null y la fila queda
+ * COMO ESTÁ. Es a propósito y es lo contrario de lo que hace `toStatus()` en el
+ * sync, que ante la duda cae en PAUSED. Allá el listado es la foto completa y
+ * conservador significa "no la uses"; acá es una señal suelta, y un evento que
+ * no supimos leer —FLAGGED, por ejemplo, que no impide enviar— apagaría en
+ * silencio una plantilla que funciona. Ante la duda, no tocar: el sync manda.
+ */
+function estadoDeEvento(event: string | undefined): string | null {
+  switch ((event ?? "").toUpperCase()) {
+    case "APPROVED":
+      return "APPROVED";
+    case "REJECTED":
+      return "REJECTED";
+    case "PAUSED":
+      return "PAUSED";
+    case "DISABLED":
+      return "DISABLED";
+    case "PENDING":
+      return "PENDING";
+    // Apelada = vuelve a estar en revisión, que es lo que le importa al admin.
+    case "IN_APPEAL":
+      return "PENDING";
+    case "PENDING_DELETION":
+    case "DELETED":
+      return "PENDING_DELETION";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Meta avisó de una plantilla: la aprobó, la rechazó, la pausó.
+ *
+ * Sin esto, `message_template_status_update` estaba SUSCRIPTO pero no lo
+ * manejaba nadie —el webhook descartaba el change porque no trae
+ * `phone_number_id`— y la única forma de enterarse de una aprobación era que
+ * alguien tocara "Sincronizar con Meta". Una plantilla aprobada por Meta a los
+ * dos minutos podía figurar "En revisión" durante días, y mientras tanto el chat
+ * no la ofrecía para reabrir una conversación.
+ */
+async function aplicarEstadoDePlantilla(
+  supabase: ReturnType<typeof createAdminClient>,
+  agencyId: string,
+  change: NonNullable<NonNullable<CloudPayload["entry"]>[number]["changes"]>[number],
+): Promise<void> {
+  const value = change.value;
+  if (!value) return;
+
+  const metaId = value.message_template_id != null ? String(value.message_template_id) : null;
+  const nombre = value.message_template_name ?? null;
+  if (!metaId && !nombre) return;
+
+  const patch: TablesUpdate<"wa_templates"> = { synced_at: new Date().toISOString() };
+
+  if (change.field === "message_template_quality_update") {
+    const score = value.new_quality_score?.toUpperCase() ?? null;
+    patch.quality_score = score && score !== "UNKNOWN" ? score : null;
+  } else {
+    const estado = estadoDeEvento(value.event);
+    if (!estado) {
+      console.warn(`[wa/cloud] evento de plantilla no manejado: ${value.event ?? "?"}`);
+      return;
+    }
+    patch.meta_status = estado;
+    // "NONE" es lo que manda Meta cuando no hay rechazo: guardarlo como motivo
+    // haría que la pantalla muestre "rechazada: NONE".
+    const motivo = value.reason ?? null;
+    patch.rejected_reason =
+      estado === "REJECTED" && motivo && motivo.toUpperCase() !== "NONE" ? motivo : null;
+  }
+
+  /* Se busca por `meta_id`, que es la identidad real. El nombre es el respaldo
+     para las filas que se crearon antes de guardarlo, y ahí el idioma importa:
+     Meta devuelve UNA plantilla por idioma bajo el mismo nombre. */
+  let query = supabase.from("wa_templates").update(patch).eq("agency_id", agencyId);
+  if (metaId) {
+    query = query.eq("meta_id", metaId);
+  } else {
+    query = query.eq("meta_name", nombre!);
+    if (value.message_template_language) {
+      query = query.eq("language", value.message_template_language);
+    }
+  }
+
+  const { error } = await query;
+  // Que no se pueda guardar no justifica pedirle a Meta que reintente el lote:
+  // el sync a mano sigue estando y un 500 acá haría volver los mensajes también.
+  if (error) {
+    console.warn(`[wa/cloud] plantilla no actualizada: ${error.message}`);
+    return;
+  }
+
+  /* Las pantallas que muestran el estado son Server Components: sin esto la
+     aprobación queda escrita pero se sigue leyendo "En revisión" hasta que el
+     caché se vence solo. */
+  revalidatePath("/config/plantillas");
+  revalidatePath("/difusiones/nueva");
+}
 
 const KIND_BY_TYPE: Record<string, Enums<"message_kind">> = {
   text: "texto",
@@ -421,11 +534,15 @@ async function handleByPhoneNumberId(raw: string, signature: string | null): Pro
 
   const phoneNumberIds = collectPhoneNumberIds(payload);
   if (phoneNumberIds.length === 0) {
-    // Los eventos que no son de mensajería (plantilla aprobada, alertas de la
-    // cuenta) no traen número: no hay tenant que resolver ni nada que guardar.
-    // 200 y no 401: un 401 acá hace que Meta reintente durante días y termine
-    // deshabilitando la suscripción del webhook, y como no se escribe nada
-    // tampoco hay costo de seguridad en contestar bien.
+    /* Los eventos que no son de mensajería (plantilla aprobada, alertas de la
+       cuenta) no traen número, y ESTA ruta resuelve el tenant justamente por el
+       número: no hay a quién atribuirle el evento ni contra qué App Secret
+       validar la firma. Las novedades de plantilla SÍ se procesan, pero solo por
+       la ruta con slug (`handleBySlug`), donde la agencia sale de la URL. Es un
+       motivo más para migrar las cuentas viejas al webhook con slug.
+       200 y no 401: un 401 acá hace que Meta reintente durante días y termine
+       deshabilitando la suscripción del webhook, y como no se escribe nada
+       tampoco hay costo de seguridad en contestar bien. */
     const wabaId = payload.entry?.[0]?.id;
     console.warn(
       `[wa/cloud] payload sin phone_number_id (waba ${wabaId ? safeId(wabaId) : "?"}): nada que procesar`,
@@ -497,9 +614,21 @@ async function processPayload(
       const value = change.value;
       if (!value) continue;
 
+      /* Las novedades de plantilla van PRIMERO porque no traen
+         `phone_number_id` (son de la WABA, no de un número) y el filtro de abajo
+         las descartaba a todas. La firma ya probó de qué agencia es el lote, que
+         es lo único que hace falta para escribir en `wa_templates`. */
+      if (
+        change.field === "message_template_status_update" ||
+        change.field === "message_template_quality_update"
+      ) {
+        await aplicarEstadoDePlantilla(supabase, creds.agencyId, change);
+        continue;
+      }
+
       const phoneNumberId = value.metadata?.phone_number_id ?? null;
-      // Cambios que no son de mensajería (plantillas aprobadas, alertas de la
-      // cuenta) no traen número: no hay nada que guardar acá.
+      // El resto de los cambios que no son de mensajería (alertas de la cuenta)
+      // no traen número: no hay nada que guardar acá.
       if (!phoneNumberId) continue;
 
       if (onlyPhoneNumberId && phoneNumberId !== onlyPhoneNumberId) {
