@@ -34,6 +34,13 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# …menos las plantillas de ejemplo, que NO tienen secretos y son la única
+# documentación de qué variables hacen falta. Estaban ignoradas, así que un clon
+# nuevo se quedaba sin ellas y el README mandaba a copiar un archivo inexistente
+# (`cp .env.example .env`) — que es la razón por la que el worker nunca se pudo
+# levantar en otra máquina.
+!.env.example
+!worker/.env.example
 
 # vercel
 .vercel

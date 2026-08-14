@@ -3,7 +3,7 @@ import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
 import { sendCloudTemplateMessage } from "@/lib/wa/cloud";
 import { getCloudCreds, type ResolvedCloudCreds } from "@/lib/wa/cloud-credentials";
 import { hasWorker, sendViaBaileys } from "@/lib/wa/worker";
-import { fillTemplate } from "@/lib/domain";
+import { fillTemplate, motivoPlantillaNoEnviable } from "@/lib/domain";
 import { fmtDate } from "@/lib/format";
 
 /**
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
        lead:leads(id, destination, branch_id, trip_date_from,
                   contact:contacts(id, full_name, phone),
                   assignee:members!leads_assigned_to_fkey(display_name)),
-       template:wa_templates(id, meta_name, body, language, variables)`,
+       template:wa_templates(id, name, meta_name, body, language, variables, meta_status)`,
     )
     .eq("status", "pendiente")
     .lte("scheduled_at", new Date().toISOString())
@@ -166,8 +166,16 @@ export async function POST(request: Request) {
            que usan las difusiones— eso falla siempre. */
         const declaradas = followup.template.variables ?? [];
         const faltantes = declaradas.filter((v) => !vars[v]);
+        /* Por Baileys una plantilla es texto y no importa qué opine Meta, así
+           que `enqueue_followups` elige por `is_approved` —que sigue en true en
+           las filas `local`—. Recién en este fallback la plantilla tiene que
+           existir de verdad allá: sin este corte se gasta un pedido al Graph
+           para recibir "template name does not exist". */
+        const motivo = motivoPlantillaNoEnviable(followup.template);
 
-        if (faltantes.length > 0) {
+        if (motivo) {
+          errorDetail = `«${followup.template.name}» no salió por el número madre: ${motivo}`;
+        } else if (faltantes.length > 0) {
           /* Un parámetro vacío también lo rechaza Meta, y rellenarlo con algo
              inventado le manda al cliente una frase rota ("vence el "). Mejor
              que el seguimiento quede fallido con el motivo a la vista: es un

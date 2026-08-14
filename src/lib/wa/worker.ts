@@ -7,6 +7,8 @@
  * igual y la UI avisa que el número no está vinculado.
  */
 
+import { cache } from "react";
+
 const WORKER_URL = process.env.WA_WORKER_URL?.replace(/\/$/, "") ?? "";
 const WORKER_TOKEN = process.env.WA_WORKER_TOKEN ?? "";
 
@@ -14,14 +16,41 @@ export function hasWorker(): boolean {
   return !!WORKER_URL && !!WORKER_TOKEN;
 }
 
-export type WorkerResult<T> = { ok: true; data: T } | { ok: false; error: string };
+/**
+ * Por qué falló, no solo que falló.
+ *
+ *   · `sin-configurar` — faltan las variables. Lo arregla quien deploya.
+ *   · `sin-respuesta`  — hay URL pero del otro lado no hay nadie (proceso
+ *                        caído, host mal escrito, timeout). Lo arregla quien
+ *                        deploya, y NO es un problema del número.
+ *   · `rechazado`      — el worker CONTESTÓ y dijo que no (bearer equivocado,
+ *                        error de la sesión de Baileys). Eso sí es del canal.
+ *
+ * La distinción no es cosmética: `linkChannel` marcaba el canal como "con
+ * problemas" cuando el que estaba caído era el servicio, y la sucursal quedaba
+ * en rojo por algo que no tenía nada que ver con su número.
+ */
+export type WorkerFailure = "sin-configurar" | "sin-respuesta" | "rechazado";
+
+export type WorkerResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string; kind: WorkerFailure };
+
+/* Los textos hablan del SERVICIO, no del "worker": del otro lado hay un
+   vendedor que no deployó nada y solo quiere saber si el mensaje sale. El
+   detalle técnico vive en la pantalla de Sucursales, que es donde el admin
+   puede hacer algo al respecto. */
+const NO_CONFIGURADO =
+  "El servicio que maneja los números de las sucursales todavía no está configurado. Avisale a quien administra el sistema.";
+const SIN_RESPUESTA =
+  "El servicio que maneja los números de las sucursales no está respondiendo. Avisale a quien administra el sistema.";
 
 async function call<T>(
   path: string,
   init?: { method?: "GET" | "POST"; body?: unknown; timeoutMs?: number },
 ): Promise<WorkerResult<T>> {
   if (!hasWorker()) {
-    return { ok: false, error: "El worker de WhatsApp no está configurado." };
+    return { ok: false, error: NO_CONFIGURADO, kind: "sin-configurar" };
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), init?.timeoutMs ?? 15_000);
@@ -40,18 +69,65 @@ async function call<T>(
       | ({ ok?: boolean; error?: string } & Record<string, unknown>)
       | null;
     if (!res.ok || !payload?.ok) {
-      return { ok: false, error: payload?.error ?? `El worker respondió ${res.status}.` };
+      /* Contestó: sea 401 o un error de la sesión, del otro lado hay alguien.
+         Un 502/503 en cambio suele ser el proxy del hosting diciendo que el
+         proceso no está: eso es lo mismo que no responder. */
+      const proxyCaido = res.status === 502 || res.status === 503 || res.status === 504;
+      return {
+        ok: false,
+        error: payload?.error ?? `El worker respondió ${res.status}.`,
+        kind: proxyCaido ? "sin-respuesta" : "rechazado",
+      };
     }
     return { ok: true, data: payload as T };
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      return { ok: false, error: "El worker no respondió a tiempo." };
+      return { ok: false, error: "El worker no respondió a tiempo.", kind: "sin-respuesta" };
     }
-    return { ok: false, error: "No se pudo hablar con el worker de WhatsApp." };
+    return { ok: false, error: SIN_RESPUESTA, kind: "sin-respuesta" };
   } finally {
     clearTimeout(timeout);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   ESTADO DEL SERVICIO
+   ═══════════════════════════════════════════════════════════ */
+
+/**
+ * En qué anda el worker, de verdad.
+ *
+ * `hasWorker()` solo mira que existan dos variables de entorno, así que una URL
+ * apuntando a un proceso que nunca se desplegó daba "listo": la pantalla ofrecía
+ * "Vincular número" y el toque moría en un toast rojo. Esto pregunta.
+ */
+export type WorkerState = "ok" | "sin-configurar" | "caido";
+
+/**
+ * Memoizado por render: la página de sucursales lo consulta una vez y todas las
+ * cards comparten la respuesta. `cache()` de React solo dedupe dentro del mismo
+ * render, que es exactamente lo que hace falta acá.
+ *
+ * El timeout es corto A PROPÓSITO: esto corre dentro de un Server Component y un
+ * worker colgado no puede quedarse con el render de la pantalla. Si tarda más de
+ * tres segundos en decir "estoy vivo", a los fines del operador está caído.
+ */
+export const workerState = cache(async function workerState(): Promise<WorkerState> {
+  if (!hasWorker()) return "sin-configurar";
+  try {
+    const res = await fetch(`${WORKER_URL}/health`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(3_000),
+    });
+    return res.ok ? "ok" : "caido";
+  } catch {
+    return "caido";
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════
+   SESIONES
+   ═══════════════════════════════════════════════════════════ */
 
 export type SessionStatus = { running: boolean; connected: boolean; phone: string | null };
 

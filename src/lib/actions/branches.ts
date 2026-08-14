@@ -71,6 +71,19 @@ export async function upsertBranch(
       .update({ ...row, is_default: fields.is_default })
       .eq("id", id);
     if (error) return fail("No se pudo guardar la sucursal. ¿Ya existe una con ese nombre?");
+
+    /* El canal nace con el nombre de la sucursal ("Sucursal Casa central") y
+       antes se quedaba con ese para siempre: al renombrar la sucursal, el chat
+       y la bandeja seguían mostrando el nombre viejo, que es el que el vendedor
+       lee para saber por qué número está hablando. Solo se pisa si nadie lo
+       editó a mano. */
+    await supabase
+      .from("wa_channels")
+      .update({ label: `Sucursal ${fields.name}` })
+      .eq("branch_id", id)
+      .eq("kind", "baileys")
+      .like("label", "Sucursal %");
+
     revalidateBranches();
     return succeed({ id });
   }
@@ -244,6 +257,8 @@ export async function linkChannel(input: {
       "Falta configurar el worker de WhatsApp (WA_WORKER_URL y WA_WORKER_TOKEN).",
     );
 
+  const estadoPrevio = channel.status;
+
   await supabase
     .from("wa_channels")
     .update({ status: "vinculando", last_error: null, qr: null })
@@ -251,11 +266,27 @@ export async function linkChannel(input: {
 
   const res = await startChannel(channel.id);
   if (!res.ok) {
+    /* Un worker caído NO es un problema del número de la sucursal.
+       Antes se marcaba el canal como `error` con el texto crudo del fetch y la
+       sucursal quedaba en rojo con "No se pudo hablar con el worker de
+       WhatsApp." pegado para siempre: nadie lo limpiaba, el chat mostraba
+       "Número sin vincular" y el seguimiento automático dejaba de usar el canal
+       gratis. Si el servicio no contesta, el canal vuelve a donde estaba y el
+       problema se cuenta donde corresponde — en la card del worker. */
+    const esInfra = res.kind !== "rechazado";
     await supabase
       .from("wa_channels")
-      .update({ status: "error", last_error: res.error })
+      .update(
+        esInfra
+          ? { status: estadoPrevio === "vinculando" ? "desconectado" : estadoPrevio, last_error: null }
+          : { status: "error", last_error: res.error },
+      )
       .eq("id", channel.id);
-    return fail(res.error);
+    return fail(
+      esInfra
+        ? "El servicio que vincula los números no está respondiendo. No es tu número: avisale a quien administra el sistema."
+        : res.error,
+    );
   }
 
   return getChannelState({ channelId: channel.id });
@@ -297,7 +328,15 @@ export async function unlinkChannel(input: {
   return succeed(null);
 }
 
-/** Sincroniza el estado real del worker (por si se reinició el proceso). */
+/**
+ * Sincroniza el estado real del worker (por si se reinició el proceso).
+ *
+ * Es además la ÚNICA forma de destrabar un canal: manda lo que dice el worker,
+ * en las dos direcciones. Antes solo sabía bajar de `conectado` a
+ * `desconectado`, así que un canal que quedaba en `error` se quedaba en `error`
+ * aunque el número estuviera perfecto — y con él se apagaba el seguimiento
+ * gratis por la sucursal, que mira `status = 'conectado'`.
+ */
 export async function syncChannel(input: {
   channelId: string;
 }): Promise<ActionResult<ChannelState>> {
@@ -310,12 +349,37 @@ export async function syncChannel(input: {
   }
 
   const res = await channelStatus(channel.id);
-  if (res.ok && !res.data.connected && channel.status === "conectado") {
+  if (!res.ok) {
+    /* Sin respuesta del worker no sabemos nada nuevo: devolvemos lo guardado.
+       Inventar un estado acá sería peor que no saber. */
+    return res.kind === "rechazado"
+      ? fail(res.error)
+      : fail("El servicio que maneja los números no está respondiendo. Probá de nuevo en un rato.");
+  }
+
+  if (res.data.connected) {
+    if (channel.status !== "conectado") {
+      await supabase
+        .from("wa_channels")
+        .update({
+          status: "conectado",
+          last_error: null,
+          qr: null,
+          qr_expires_at: null,
+          ...(res.data.phone ? { phone: res.data.phone } : {}),
+        })
+        .eq("id", channel.id);
+    }
+  } else if (channel.status === "conectado" || channel.status === "error") {
+    /* `vinculando` se respeta: ahí el worker todavía no ve la sesión porque
+       nadie escaneó el QR, y pisarlo cortaría la vinculación en curso. */
     await supabase
       .from("wa_channels")
-      .update({ status: "desconectado" })
+      .update({ status: "desconectado", last_error: null })
       .eq("id", channel.id);
   }
+
+  revalidateBranches();
   return getChannelState({ channelId: channel.id });
 }
 

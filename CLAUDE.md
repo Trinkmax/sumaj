@@ -1,6 +1,6 @@
 # viajerOS (repo sumaj)
 
-Producto: **viajerOS** — sistema multi-tenant para agencias de viaje. Primera agencia/tenant: Sumaj Viajes (logo en storage + agencies.logo_url). Logos del sistema en /public (viajerOS-2.png)  (CRM + WhatsApp + cotizador + files + caja).
+Producto: **viajerOS** — sistema multi-tenant para agencias de viaje. Primera agencia/tenant: Sumaj Viajes (logo en storage + agencies.logo_url). Logos del sistema en /public (viajerOS-2.png)  (CRM + WhatsApp + Instagram + cotizador + files + caja).
 
 - **Leer SIEMPRE**: `CONVENTIONS.md` (arquitectura, contratos, patrones) y `DESIGN.md` (UI/UX) antes de escribir código.
 - Stack: Next.js 16 App Router + React 19 + Tailwind v4 + Supabase (proyecto `zgfquryagiuncndjbmhf`).

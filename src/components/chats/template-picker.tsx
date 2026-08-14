@@ -19,7 +19,12 @@ export function TemplatePicker({
 }: {
   templates: TemplateRow[];
   vars: Record<string, string>;
-  onSend: (template: TemplateRow, body: string) => Promise<boolean>;
+  /**
+   * Manda la plantilla. El texto NO viaja: lo arma el servidor con las mismas
+   * variables, porque Meta arma el mensaje con los parámetros y no con el texto
+   * que le pasemos. Acá `vars` es solo para la vista previa.
+   */
+  onSend: (template: TemplateRow) => Promise<boolean>;
 }) {
   const [selected, setSelected] = useState<TemplateRow | null>(null);
   const [sending, setSending] = useState(false);
@@ -29,10 +34,10 @@ export function TemplatePicker({
       <p className="px-1 py-2 text-center text-[13px] text-wa-ink-faint">
         No hay plantillas aprobadas todavía. Cargalas en{" "}
         <Link
-          href="/config"
+          href="/config/plantillas"
           className="font-medium text-wa-accent-deep underline underline-offset-2"
         >
-          Configuración
+          Configuración · Plantillas
         </Link>
         .
       </p>
@@ -76,7 +81,7 @@ export function TemplatePicker({
   async function handleSend() {
     if (sending || !selected) return;
     setSending(true);
-    const ok = await onSend(selected, filled);
+    const ok = await onSend(selected);
     setSending(false);
     if (ok) setSelected(null);
   }

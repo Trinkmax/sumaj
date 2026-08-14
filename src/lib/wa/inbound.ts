@@ -18,7 +18,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
-import { sendCloudText, type CloudCreds, type CloudResult } from "@/lib/wa/cloud";
+import { cloudFailure, sendCloudText, type CloudCreds, type CloudResult } from "@/lib/wa/cloud";
 import { hasWorker, sendViaBaileys } from "@/lib/wa/worker";
 import {
   attachBridgeConversation,
@@ -533,7 +533,7 @@ export async function handleInboundMessage(
     // aborta el barrido del webhook y se pierden los mensajes que vienen atrás).
     const result: CloudResult = creds
       ? await sendCloudText(creds, phone, text)
-      : { ok: false, error: "La agencia todavía no conectó su cuenta de Meta." };
+      : cloudFailure("La agencia todavía no conectó su cuenta de Meta.");
 
     await supabase.from("messages").insert({
       agency_id: agencyId,

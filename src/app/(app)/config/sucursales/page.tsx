@@ -3,13 +3,18 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { ConfigNav } from "@/components/config/config-nav";
 import { BranchesManager, type BranchItem } from "@/components/config/branches-manager";
-import { hasWorker } from "@/lib/wa/worker";
+import { workerState } from "@/lib/wa/worker";
 
 export default async function SucursalesPage() {
   const { agency, isAdmin } = await requireMember();
   const supabase = await createClient();
 
-  const [{ data: branches }, { data: members }] = await Promise.all([
+  /* En paralelo con las consultas: `workerState` le pregunta al worker si está
+     vivo (antes solo se miraba que existieran las variables de entorno, así que
+     una URL apuntando a un proceso que nunca se desplegó daba "listo" y el
+     operador se enteraba recién al tocar Vincular). Tiene corte a 3 s: si tarda
+     más, a los fines de esta pantalla está caído. */
+  const [{ data: branches }, { data: members }, worker] = await Promise.all([
     supabase
       .from("branches")
       // sin `*`: qr / qr_expires_at / last_error no son legibles por `authenticated`
@@ -26,6 +31,7 @@ export default async function SucursalesPage() {
       .eq("agency_id", agency.id)
       .eq("is_active", true)
       .order("display_name", { ascending: true }),
+    workerState(),
   ]);
 
   const items: BranchItem[] = (branches ?? []).map((b) => {
@@ -70,7 +76,7 @@ export default async function SucursalesPage() {
           branches={items}
           members={members ?? []}
           isAdmin={isAdmin}
-          workerReady={hasWorker()}
+          worker={worker}
         />
       </div>
     </>

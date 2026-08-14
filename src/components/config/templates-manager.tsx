@@ -313,14 +313,24 @@ function TemplateCard({
                 Mandar a aprobar
               </Button>
             )}
-            {/* El tilde a mano es para las que Meta ya aprobó por fuera del
-                sistema: sin él, esas plantillas viejas dejarían de enviarse. */}
+            {/* Antes decía "Aprobada a mano" y era el generador del estado
+                imposible: prendido, la plantilla quedaba con `is_approved` en
+                true sin existir en Meta, y el chat —que filtraba por esa
+                columna— la ofrecía para reabrir una conversación. Meta la
+                contestaba con "template name does not exist".
+                El tilde SÍ tiene un uso real y es este: por el número de la
+                sucursal la plantilla es texto libre y no hay nada que aprobar.
+                Ahora el nombre dice eso y nada más. */}
             <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-faint">
-              Aprobada a mano
+              <Tooltip content="Solo sale por el número de la sucursal, donde una plantilla es texto común. Para el número madre hay que mandarla a aprobar.">
+                <span className="underline decoration-dotted underline-offset-2">
+                  Usar en el seguimiento
+                </span>
+              </Tooltip>
               <Switch
                 checked={approved}
                 onCheckedChange={toggleApproved}
-                aria-label="Marcar como aprobada a mano"
+                aria-label="Usar esta plantilla en el seguimiento automático por la sucursal"
               />
             </label>
           </div>

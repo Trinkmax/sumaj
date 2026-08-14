@@ -117,7 +117,14 @@ falta tener nada de Meta a mano, y renovar un token dejó de ser un redeploy.
    Si nadie lo recuerda, resetearlo en WhatsApp Manager → el número → Verificación en dos
    pasos **antes** de reintentar: Meta permite 10 registros por número cada 72 hs y al
    pasarse devuelve 133016 y bloquea el número tres días.
-7. Vincular por QR el número de cada sucursal en Configuración → Sucursales (pide el worker vivo).
+7. **Desplegar el worker** (`/worker`) y recién ahí vincular por QR el número de cada
+   sucursal en Configuración → Sucursales. El worker es un proceso aparte que **no viaja
+   con la app**: Baileys mantiene un WebSocket abierto y eso no existe en serverless.
+   `cd worker && railway up` con el `Dockerfile` de esa carpeta, cargarle sus cinco
+   variables y poner el dominio que devuelve en la `WA_WORKER_URL` de la app (dejarla en
+   `http://localhost:8088` —el valor de ejemplo— es la causa número uno de "no anda el
+   worker": desde Vercel, localhost es la propia función). Los pasos completos, en
+   [`worker/README.md`](worker/README.md). Para chequear: `curl https://TU-WORKER/health`.
 
 **Qué falta hoy**: en `.env.local` solo están `NEXT_PUBLIC_SUPABASE_URL`,
 `NEXT_PUBLIC_SUPABASE_ANON_KEY` y `NEXT_PUBLIC_APP_URL`. Faltan cargar

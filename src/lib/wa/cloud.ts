@@ -11,6 +11,8 @@
  * excepciones. Quién las resuelve: `lib/wa/cloud-credentials.ts`.
  */
 
+import { errorDeMeta } from "@/lib/wa/meta-errors";
+
 /**
  * Versión del Graph API. v21 (la que había hardcodeada) expira en enero de 2027;
  * v25 es la que usan hoy los ejemplos oficiales y vence en julio de 2028.
@@ -145,14 +147,27 @@ async function graph<T>(
    ENVÍO DE MENSAJES
    ═══════════════════════════════════════════════════════════ */
 
-export type CloudResult = { ok: true; waMessageId: string | null } | { ok: false; error: string };
+/**
+ * `error` es lo que lee el vendedor, ya traducido por `errorDeMeta`. `raw` es
+ * lo que dijo Meta, palabra por palabra: se guarda para poder diagnosticar sin
+ * tener que reproducir el envío, y es lo único que sirve cuando el código todavía
+ * no está en la tabla de traducciones.
+ */
+export type CloudResult =
+  | { ok: true; waMessageId: string | null }
+  | { ok: false; error: string; raw: string; code: number | null };
+
+/** Falla que no llegó a salir del sistema: no hay nada que Meta haya dicho. */
+export function cloudFailure(error: string): Extract<CloudResult, { ok: false }> {
+  return { ok: false, error, raw: error, code: null };
+}
 
 type SendResponse = { messages?: { id: string }[] };
 
 async function send(creds: CloudCreds, payload: unknown): Promise<CloudResult> {
-  if (!creds.token) return { ok: false, error: "Falta el token de la Cloud API." };
+  if (!creds.token) return cloudFailure("Falta el token de la Cloud API.");
   if (!isMetaId(creds.phoneNumberId)) {
-    return { ok: false, error: "El número madre no tiene un phone number ID válido." };
+    return cloudFailure("El número madre no tiene un phone number ID válido.");
   }
 
   const res = await graph<SendResponse>(`/${creds.phoneNumberId}/messages`, {
@@ -160,7 +175,12 @@ async function send(creds: CloudCreds, payload: unknown): Promise<CloudResult> {
     token: creds.token,
     body: payload,
   });
-  if (!res.ok) return { ok: false, error: res.error };
+  /* Único punto por el que pasan TODOS los envíos a Meta: traducir acá es lo que
+     hace que el chat, las difusiones, el seguimiento y la respuesta automática
+     hablen el mismo idioma sin que cada uno arme su propio mensaje. */
+  if (!res.ok) {
+    return { ok: false, error: errorDeMeta(res.error, res.code), raw: res.error, code: res.code };
+  }
   return { ok: true, waMessageId: res.data.messages?.[0]?.id ?? null };
 }
 
@@ -175,20 +195,15 @@ export function sendCloudText(creds: CloudCreds, to: string, body: string): Prom
   });
 }
 
-/** Plantilla aprobada — la única vía fuera de la ventana de 24 hs. */
-export function sendCloudTemplate(
-  creds: CloudCreds,
-  to: string,
-  templateName: string,
-  language = "es_AR",
-): Promise<CloudResult> {
-  return send(creds, {
-    messaging_product: "whatsapp",
-    to: to.replace(/\D/g, ""),
-    type: "template",
-    template: { name: templateName, language: { code: language } },
-  });
-}
+/**
+ * NO agregues acá un `sendCloudTemplate(creds, to, name)` "simple".
+ *
+ * Existió y era una trampa: asumía `es_AR` y no mandaba parámetros. Con eso,
+ * toda plantilla en otro idioma fallaba con 132001 ("does not exist in es_AR") y
+ * toda plantilla con variables con 132000. Andaba solo con el caso más pobre
+ * —aprobada, en español y sin una sola `{{variable}}`— que es justo el que no
+ * sirve para vender. Hay UNA forma de mandar una plantilla y es la de abajo.
+ */
 
 /** Un botón de respuesta rápida de la plantilla, con el dato que queremos que vuelva. */
 export type CloudTemplateButton = {

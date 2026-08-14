@@ -851,6 +851,66 @@ export function templateEstaCongelada(metaStatus: string | null | undefined): bo
   return !!metaStatus && TEMPLATE_ESTADOS_CONGELADOS.includes(metaStatus);
 }
 
+/**
+ * La plantilla de ejemplo que Meta crea sola en toda cuenta nueva. Aparece
+ * APROBADA en el listado, así que cae en cualquier filtro razonable — pero Meta
+ * **solo la deja salir desde sus números de prueba** (error 131058), y aunque
+ * saliera diría "Welcome and congratulations!! This message demonstrates your
+ * ability to send a WhatsApp message notification from the Cloud API" a un
+ * cliente que preguntó por un viaje. No se ofrece en ninguna pantalla.
+ */
+export const META_SAMPLE_TEMPLATE = "hello_world";
+
+/**
+ * El motivo por el que esta plantilla NO se puede mandar por la Cloud API, o
+ * null si se puede. Lo comparten la pantalla (para no ofrecerla) y la action
+ * (para no depender del cliente): si cada una decidiera por su cuenta, el
+ * vendedor vería en la lista algo que el servidor rechaza.
+ *
+ * OJO: el predicado es `meta_status`, NUNCA `is_approved`. Esa columna es
+ * derivada y el trigger `app.sync_template_approved` la deja intacta en las
+ * filas `local`, así que una plantilla cargada a mano que jamás viajó a Meta
+ * queda con el tilde puesto. Filtrar por ahí es lo que hacía que el chat
+ * ofreciera plantillas que Meta contesta con "template name does not exist".
+ */
+export function motivoPlantillaNoEnviable(t: {
+  meta_status: string | null;
+  meta_name: string;
+}): string | null {
+  if (t.meta_name === META_SAMPLE_TEMPLATE) {
+    return "«Hello world» es la plantilla de ejemplo de Meta: solo sale desde sus números de prueba y no le dice nada al cliente.";
+  }
+  switch (t.meta_status) {
+    case "APPROVED":
+      return null;
+    case "local":
+      return "Está guardada acá pero nunca se mandó a aprobar, así que en Meta no existe.";
+    case "PENDING":
+      return "Meta la está revisando. Suele tardar unos minutos.";
+    case "REJECTED":
+      return "Meta la rechazó. Corregí el texto y volvé a mandarla a aprobar.";
+    case "PAUSED":
+      return "Meta la pausó por baja calidad. No se puede usar hasta que la libere.";
+    case "DISABLED":
+      return "Meta la deshabilitó definitivamente. Hay que armar una nueva.";
+    case "PENDING_DELETION":
+      return "Se está borrando en Meta.";
+    default:
+      return "No está aprobada por Meta.";
+  }
+}
+
+/** Etiqueta corta del estado, para un chip al lado del nombre. */
+export const TEMPLATE_ESTADO_CORTO: Record<string, string> = {
+  APPROVED: "Aprobada",
+  PENDING: "En revisión",
+  REJECTED: "Rechazada",
+  PAUSED: "Pausada",
+  DISABLED: "Deshabilitada",
+  PENDING_DELETION: "Borrándose",
+  local: "Sin publicar",
+};
+
 export function fillTemplate(
   body: string,
   vars: Record<string, string | null | undefined>,

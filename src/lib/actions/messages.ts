@@ -11,7 +11,7 @@ import {
 } from "@/lib/actions/core";
 import {
   sendCloudMedia,
-  sendCloudTemplate,
+  sendCloudTemplateMessage,
   sendCloudText,
   uploadCloudMedia,
   type CloudCreds,
@@ -24,7 +24,7 @@ import { alertBranchOperators } from "@/lib/wa/inbound";
 import { sendIgText } from "@/lib/ig/graph";
 import { getIgCreds, type ResolvedIgCreds } from "@/lib/ig/credentials";
 import { toE164 } from "@/lib/ig/phone";
-import { fillTemplate } from "@/lib/domain";
+import { fillTemplate, motivoPlantillaNoEnviable } from "@/lib/domain";
 import { fmtPhone } from "@/lib/format";
 import type {
   MessageKind,
@@ -788,20 +788,26 @@ export async function bridgeToWhatsapp(input: {
 
 /* ───────────────────────────────────────────
    sendTemplate — plantilla aprobada (única vía
-   fuera de la ventana de 24 hs). Recibe el body
-   ya interpolado con fillTemplate en el cliente.
+   fuera de la ventana de 24 hs).
    ─────────────────────────────────────────── */
 
 const templateSchema = z.object({
   conversationId: z.string().uuid(),
   templateId: z.string().uuid(),
-  body: z.string().trim().min(1).max(4096),
+  /**
+   * Los valores de las `{{variables}}`, por nombre. El texto final NO viene del
+   * cliente: lo arma el servidor con `fillTemplate` sobre el cuerpo guardado.
+   * Antes llegaba el body ya interpolado y se guardaba tal cual, así que lo que
+   * quedaba en el hilo era lo que el navegador decía haber mandado y no lo que
+   * Meta recibió — y Meta arma el mensaje con estos parámetros, no con el texto.
+   */
+  vars: z.record(z.string(), z.string().trim().max(1024)).default({}),
 });
 
 export async function sendTemplate(input: {
   conversationId: string;
   templateId: string;
-  body: string;
+  vars?: Record<string, string>;
 }): Promise<ActionResult<SentMessage>> {
   const parsed = templateSchema.safeParse(input);
   if (!parsed.success) return fail("Datos inválidos.");
@@ -814,13 +820,18 @@ export async function sendTemplate(input: {
     .maybeSingle();
   if (!conversation) return fail("No encontramos la conversación.");
 
+  /* El `agency_id` explícito no es redundante con la RLS: `my_agency_ids()` es
+     plural y la sesión resuelve UNA agencia. Sin el filtro, alguien activo en
+     dos agencias podría mandarle a un cliente de la A una plantilla de la B —y
+     con el `meta_name` de la B contra la WABA de la A, que ni existe. Mismo
+     criterio que ya usa `submitTemplateToMeta`. */
   const { data: template } = await supabase
     .from("wa_templates")
-    .select("id, meta_name, is_approved")
+    .select("id, name, meta_name, language, meta_status, body")
     .eq("id", parsed.data.templateId)
+    .eq("agency_id", agency.id)
     .maybeSingle();
   if (!template) return fail("No encontramos la plantilla.");
-  if (!template.is_approved) return fail("Esa plantilla todavía no está aprobada por Meta.");
 
   const routed = await resolveRoute(
     agency.id,
@@ -831,13 +842,34 @@ export async function sendTemplate(input: {
   if (!routed.ok) return fail(routed.error);
   const route = routed.route;
 
+  /* Las variables mandan: el cuerpo guardado es el contrato con Meta. Una sola
+     sin valor hace que Meta rechace el mensaje ENTERO, así que se corta acá y
+     con el nombre de la que falta — no vale mandar "{{destino}}" a un cliente. */
+  const requeridas = [...template.body.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]);
+  const vars: Record<string, string> = {};
+  const faltantes: string[] = [];
+  for (const nombre of requeridas) {
+    const valor = parsed.data.vars[nombre]?.trim();
+    if (valor) vars[nombre] = valor;
+    else if (!faltantes.includes(nombre)) faltantes.push(nombre);
+  }
+  if (faltantes.length > 0) {
+    return fail(
+      `Falta completar ${faltantes.map((v) => `{{${v}}}`).join(", ")} para poder mandar «${template.name}».`,
+    );
+  }
+
+  const body = fillTemplate(template.body, vars);
+
   let status: MessageStatus = "enviado";
   let waMessageId: string | null = null;
   let errorDetail: string | null = null;
+  /** Lo que dijo Meta palabra por palabra, para poder diagnosticar después. */
+  let errorCrudo: { code: number | null; raw: string } | null = null;
 
   if (route.via === "baileys") {
     // por el número de la sucursal no hace falta plantilla: va como texto
-    const res = await sendViaBaileys(route.channelId, route.to, parsed.data.body);
+    const res = await sendViaBaileys(route.channelId, route.to, body);
     if (res.ok) waMessageId = res.data.waMessageId;
     else {
       status = "fallido";
@@ -849,7 +881,7 @@ export async function sendTemplate(input: {
     // ventana la valida Meta del otro lado.
     const state = windowState(conversation.last_inbound_at, route.creds.humanAgentEnabled);
     if (!state.open) return fail(IG_WINDOW_CLOSED);
-    const res = await sendIgText(route.creds, route.to, parsed.data.body, {
+    const res = await sendIgText(route.creds, route.to, body, {
       humanAgent: state.needsHumanAgent,
     });
     if (res.ok) waMessageId = res.messageId;
@@ -858,11 +890,35 @@ export async function sendTemplate(input: {
       errorDetail = res.error;
     }
   } else {
-    const res = await sendCloudTemplate(route.creds, route.to, template.meta_name);
+    /* Recién acá se exige el estado en Meta: por Baileys y por Instagram la
+       plantilla es texto y no hay nada que aprobar. Mismo criterio que usa la
+       pantalla para no ofrecerla — la regla vive en domain.ts para que no puedan
+       discrepar. */
+    const motivo = motivoPlantillaNoEnviable(template);
+    if (motivo) {
+      return fail(
+        `«${template.name}» no se puede mandar por WhatsApp: ${motivo} Revisala en Configuración → Plantillas.`,
+      );
+    }
+
+    /* `sendCloudTemplateMessage` y no `sendCloudTemplate`: hay que mandar el
+       IDIOMA REAL de la fila (el otro asumía es_AR y hacía fallar cualquier
+       plantilla en otro idioma) y los parámetros del cuerpo (sin ellos Meta
+       rechaza con 132000 toda plantilla que tenga variables). Es la misma
+       función que usan las difusiones, que es el camino que sí funcionaba. */
+    const res = await sendCloudTemplateMessage(route.creds, route.to, {
+      name: template.meta_name,
+      language: template.language,
+      bodyParams: vars,
+      /* Sin componente de botones: el payload de atribución es cosa de las
+         difusiones. Acá los botones salen con el suyo por defecto. */
+      buttons: [],
+    });
     if (res.ok) waMessageId = res.waMessageId;
     else {
       status = "fallido";
       errorDetail = res.error;
+      errorCrudo = { code: res.code, raw: res.raw };
     }
   }
 
@@ -871,13 +927,16 @@ export async function sendTemplate(input: {
     conversation_id: conversation.id,
     direction: "out",
     kind: "plantilla",
-    body: parsed.data.body,
+    body,
     template_name: template.meta_name,
     sent_by: member.id,
     status,
     wa_message_id: waMessageId,
     error_detail: errorDetail,
-    metadata: { template_id: template.id },
+    metadata: {
+      template_id: template.id,
+      ...(errorCrudo ? { meta_error: errorCrudo } : {}),
+    },
   });
   if (!message) return fail("No se pudo enviar la plantilla. Probá de nuevo.");
 

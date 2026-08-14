@@ -42,6 +42,55 @@ Los dos secretos tienen que ser **los mismos** que en el `.env.local` de la app
 (`WA_WEBHOOK_SECRET` y `WA_WORKER_TOKEN`), y la app tiene que apuntar acá con
 `WA_WORKER_URL`.
 
+## Desplegarlo (esto es lo que falta si "no anda el worker")
+
+El síntoma clásico —la app dice *"El servicio que maneja los números de las
+sucursales no está respondiendo"* al tocar **Vincular número**— casi siempre es
+uno de estos dos, y ninguno se arregla desde la app:
+
+1. **`WA_WORKER_URL` quedó en `http://localhost:8088`** (el valor de ejemplo).
+   Desde un deploy en Vercel, `localhost` es la propia función serverless: no hay
+   nada escuchando ahí. Tiene que ser la dirección pública del worker.
+2. **El worker nunca se desplegó.** Es un proceso aparte: no viaja con la app.
+
+### Railway (lo más corto)
+
+```bash
+railway init            # dentro de /worker
+railway up              # usa el Dockerfile de esta carpeta
+```
+
+En **Settings → Root Directory** poné `worker` si el repo es el monorepo entero.
+El `railway.json` ya deja armado el health check contra `/health` y el reinicio
+automático. Después, en **Variables**, cargá las cinco de la tabla de arriba
+(`APP_URL` es la URL pública de la app, **no** localhost) y copiá el dominio que
+te da Railway a la `WA_WORKER_URL` de la app. **Redeploy de la app**: las envs se
+leen en el servidor y sin redeploy no toman efecto.
+
+### Cualquier otro lado (Fly, Render, un VPS)
+
+```bash
+docker build -t viajeros-wa-worker .
+docker run -p 8088:8088 --env-file .env viajeros-wa-worker
+```
+
+### Una sola instancia, siempre
+
+`numReplicas: 1` no es una economía: cada sesión de Baileys es **un dispositivo
+vinculado** con estado en memoria. Dos réplicas levantando la misma sesión se
+pelean por el socket y WhatsApp termina cerrando las dos. Si algún día hace falta
+escalar, se escala por sharding de canales, no por réplicas.
+
+### Cómo saber si está vivo
+
+```bash
+curl https://TU-WORKER/health     # -> {"ok":true,"uptime":123}
+```
+
+`/health` es la única ruta sin bearer, justamente para esto. La pantalla de
+**Configuración → Sucursales** la consulta en cada carga: si no contesta en 3
+segundos, muestra el aviso de servicio caído en vez de ofrecer el QR.
+
 ## Cómo se vincula una sucursal
 
 1. En la app: **Configuración → Sucursales → Vincular número**.

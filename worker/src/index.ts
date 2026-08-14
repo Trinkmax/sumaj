@@ -132,9 +132,27 @@ server.listen(config.port, async () => {
   }
 });
 
+/**
+ * Apagado ordenado. El orden importa: primero se deja de aceptar pedidos (si no,
+ * la app puede pedir un envío mientras las sesiones se están cerrando y recibe
+ * un error que no significa nada), después se cierran las sesiones de Baileys.
+ *
+ * El `exit` forzado queda como red: un socket colgado de Baileys puede impedir
+ * que el proceso termine solo, y un contenedor que no muere en el plazo del
+ * hosting se lleva un SIGKILL en el medio del cierre.
+ */
+let cerrando = false;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
+    if (cerrando) return;
+    cerrando = true;
     console.log(`[worker] ${signal}: cerrando sesiones…`);
+    const forzar = setTimeout(() => {
+      console.warn("[worker] el cierre tardó demasiado: salgo igual");
+      process.exit(0);
+    }, 10_000);
+    forzar.unref();
+    server.close();
     shutdownAll().finally(() => process.exit(0));
   });
 }

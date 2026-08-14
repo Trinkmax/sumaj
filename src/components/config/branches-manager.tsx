@@ -35,6 +35,7 @@ import { TAG_COLORS, TAG_DOTS } from "@/lib/domain";
 import { fmtPhone } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { MemberRole } from "@/lib/types";
+import type { WorkerState } from "@/lib/wa/worker";
 
 export type BranchItem = {
   id: string;
@@ -78,12 +79,12 @@ export function BranchesManager({
   branches,
   members,
   isAdmin,
-  workerReady,
+  worker,
 }: {
   branches: BranchItem[];
   members: BranchMember[];
   isAdmin: boolean;
-  workerReady: boolean;
+  worker: WorkerState;
 }) {
   const [draft, setDraft] = React.useState<BranchDraft | null>(null);
   const [toDelete, setToDelete] = React.useState<BranchItem | null>(null);
@@ -194,7 +195,7 @@ export function BranchesManager({
               branches={branches}
               members={team.filter((m) => m.branch_id === branch.id)}
               isAdmin={isAdmin}
-              workerReady={workerReady}
+              worker={worker}
               onEdit={() => openEdit(branch)}
               onDelete={() => setToDelete(branch)}
               onMoveMember={moveMember}
@@ -261,7 +262,7 @@ function BranchCard({
   branches,
   members,
   isAdmin,
-  workerReady,
+  worker,
   onEdit,
   onDelete,
   onMoveMember,
@@ -270,7 +271,7 @@ function BranchCard({
   branches: BranchItem[];
   members: BranchMember[];
   isAdmin: boolean;
-  workerReady: boolean;
+  worker: WorkerState;
   onEdit: () => void;
   onDelete: () => void;
   onMoveMember: (memberId: string, branchId: string | null) => void;
@@ -428,7 +429,7 @@ function BranchCard({
         {branch.channel ? (
           <ChannelLinkCard
             channel={branch.channel}
-            workerReady={workerReady}
+            worker={worker}
             isAdmin={isAdmin}
           />
         ) : (

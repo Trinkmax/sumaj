@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Clock, ReceiptText, Send, StickyNote, TriangleAlert } from "lucide-react";
+import {
+  ChevronRight,
+  Clock,
+  NotebookText,
+  ReceiptText,
+  Send,
+  StickyNote,
+  TriangleAlert,
+} from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -10,6 +18,7 @@ import { Tooltip } from "@/components/ui/misc";
 import { WhatsAppIcon } from "@/components/quotes/wa-icon";
 import { markConversationRead, sendMessage, sendTemplate } from "@/lib/actions/messages";
 import { sendInternalNote } from "@/lib/actions/crm-panel";
+import { fillTemplate, motivoPlantillaNoEnviable } from "@/lib/domain";
 import { fmtDate } from "@/lib/format";
 import type { Tables } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -249,7 +258,10 @@ export function EmbeddedChat({
           .eq("conversation_id", conversationId)
           .order("created_at", { ascending: false })
           .limit(200),
-        supabase.from("wa_templates").select("*").eq("is_approved", true).order("name"),
+        /* Sin filtro de estado: las que NO se pueden mandar también hacen falta
+           para poder explicar por qué no hay ninguna. Filtrar por `is_approved`
+           —como se hacía— traía las `local`, que en Meta no existen. */
+        supabase.from("wa_templates").select("*").order("name"),
         supabase.from("members").select("display_name").eq("id", meId).maybeSingle(),
       ]);
 
@@ -286,7 +298,11 @@ export function EmbeddedChat({
       setInitialIds(new Set(initialMsgs.map((m) => m.id)));
       setConversation(conv);
       setMessages(initialMsgs);
-      setTemplates(tplRes.data ?? []);
+      /* Filtrado por agencia acá y no en el query porque el `agency_id` sale de
+         la conversación, que se resuelve en el mismo lote. La RLS de
+         `wa_templates` es plural (`my_agency_ids()`): quien esté activo en dos
+         agencias vería las plantillas de las dos mezcladas. */
+      setTemplates((tplRes.data ?? []).filter((t) => t.agency_id === conv?.agency_id));
       setMeName(meRes.data?.display_name ?? "");
       setLead(activeLead);
       setQuoteValidUntil(validUntil);
@@ -441,18 +457,14 @@ export function EmbeddedChat({
     reconcile(tempId, res);
   }
 
-  async function handleSendTemplate(template: TemplateRow, body: string): Promise<boolean> {
-    const tempId = makeOptimistic(body, "plantilla", template.meta_name);
-    const res = await sendTemplate({ conversationId, templateId: template.id, body });
-    const ok = reconcile(tempId, res);
-    if (ok) toast.success("Plantilla enviada");
-    return ok;
-  }
-
   /* ── variables de plantilla ──
      Solo las que se pueden completar de verdad: mandarle "tu viaje" o "los
      próximos días" a un cliente real es peor que no mandar nada. Lo que falta
-     queda afuera del mapa y la plantilla que lo necesita no se ofrece. */
+     queda afuera del mapa y la plantilla que lo necesita no se ofrece.
+
+     Va ANTES de handleSendTemplate a propósito: leerlo desde una función
+     declarada más arriba deja al compilador de React sin poder preservar el
+     useMemo (TDZ) y el componente entero se queda sin optimizar. */
   const templateVars = useMemo(() => {
     const vars: Record<string, string> = {};
     const nombre = conversation?.contact?.full_name.trim().split(/\s+/)[0];
@@ -463,23 +475,102 @@ export function EmbeddedChat({
     return vars;
   }, [conversation, meName, lead, quoteValidUntil]);
 
-  /* Plantillas enviables (todas sus variables resueltas) y qué datos faltan
-     para las otras: nunca se manda un placeholder inventado. */
-  const { readyTemplates, missingVars } = useMemo(() => {
+  async function handleSendTemplate(template: TemplateRow): Promise<boolean> {
+    /* El texto que sale lo arma el servidor con las mismas variables: acá se
+       interpola solo para la burbuja optimista. Si mandáramos el texto, lo que
+       queda en el hilo sería lo que dijo el navegador y no lo que recibió Meta. */
+    const tempId = makeOptimistic(
+      fillTemplate(template.body, templateVars),
+      "plantilla",
+      template.meta_name,
+    );
+    const res = await sendTemplate({
+      conversationId,
+      templateId: template.id,
+      vars: templateVars,
+    });
+    const ok = reconcile(tempId, res);
+    if (ok) toast.success("Plantilla enviada");
+    return ok;
+  }
+
+  /**
+   * Dos filtros, en este orden, porque son dos problemas distintos y cada uno
+   * lo arregla otra persona:
+   *   1. ¿Meta la tiene aprobada? Si no, no existe para la Cloud API. Lo
+   *      resuelve un admin publicándola.
+   *   2. ¿Tenemos con qué completar sus `{{variables}}`? Lo resuelve el
+   *      vendedor cargando el dato en el lead. Nunca se manda un placeholder.
+   */
+  const { readyTemplates, missingVars, bloqueadas } = useMemo(() => {
+    const enviables: TemplateRow[] = [];
+    const trabadas: { t: TemplateRow; motivo: string }[] = [];
+    for (const t of templates) {
+      const motivo = motivoPlantillaNoEnviable(t);
+      if (motivo) trabadas.push({ t, motivo });
+      else enviables.push(t);
+    }
+
     const missing = new Set<string>();
-    const ready = templates.filter((t) => {
+    const ready = enviables.filter((t) => {
       const holes = [...t.body.matchAll(TEMPLATE_VAR_RE)]
         .map((m) => m[1])
         .filter((v) => templateVars[v] == null);
       for (const v of holes) missing.add(v);
       return holes.length === 0;
     });
-    return { readyTemplates: ready, missingVars: [...missing] };
+    return { readyTemplates: ready, missingVars: [...missing], bloqueadas: trabadas };
   }, [templates, templateVars]);
 
   const missingVarsLabel = missingVars
     .map((v) => VAR_LABELS[v] ?? `{{${v}}}`)
     .join(", ");
+
+  /**
+   * Qué contarle al vendedor cuando NO hay ninguna plantilla que Meta acepte.
+   * Es el estado en el que quedó la agencia y el que antes no se podía ver: la
+   * pantalla ofrecía plantillas locales y el envío moría contra Meta con un
+   * error en inglés. Acá se dice la verdad y quién la destraba.
+   */
+  const sinPlantillas = useMemo(() => {
+    if (readyTemplates.length > 0 || missingVars.length > 0) return null;
+    const enRevision = bloqueadas.filter((b) => b.t.meta_status === "PENDING").length;
+    const sinPublicar = bloqueadas.filter((b) => b.t.meta_status === "local").length;
+
+    if (bloqueadas.length === 0) {
+      return {
+        titulo: "Todavía no hay plantillas",
+        detalle:
+          "Fuera de las 24 hs WhatsApp solo deja mandar un texto que Meta haya aprobado antes. Creá el primero y en unos minutos podés reabrir cualquier chat.",
+        cta: "Crear una plantilla",
+      };
+    }
+    if (sinPublicar > 0) {
+      return {
+        titulo:
+          sinPublicar === 1
+            ? "Tenés una plantilla sin publicar"
+            : `Tenés ${sinPublicar} plantillas sin publicar`,
+        detalle:
+          "Están guardadas en el sistema pero nunca se mandaron a aprobar, así que para Meta no existen y el mensaje no sale. Publicarlas es un toque y tarda unos minutos.",
+        cta: "Mandarlas a aprobar",
+      };
+    }
+    if (enRevision > 0) {
+      return {
+        titulo: enRevision === 1 ? "Meta está revisando tu plantilla" : "Meta está revisando tus plantillas",
+        detalle:
+          "Suele tardar unos minutos. Cuando la apruebe aparece acá sola y podés reabrir el chat.",
+        cta: "Ver el estado",
+      };
+    }
+    return {
+      titulo: "Ninguna plantilla está habilitada",
+      detalle:
+        "Meta rechazó o pausó las que hay, así que no se puede reabrir el chat hasta que haya una aprobada.",
+      cta: "Revisar las plantillas",
+    };
+  }, [readyTemplates.length, missingVars.length, bloqueadas]);
 
   const dayGroups = useMemo(() => groupMessagesIntoDayGroups(messages), [messages]);
 
@@ -763,10 +854,14 @@ export function EmbeddedChat({
           <>
             <div className="flex items-start gap-2.5 bg-wa-panel-alt px-4 py-2.5 text-[12.5px] leading-snug text-wa-ink-soft">
               <Clock className="mt-0.5 size-4 shrink-0 text-wa-ink-faint" />
+              {/* El encabezado no promete lo que abajo no hay: cuando no queda
+                  ninguna plantilla usable, decirle "respondé con una plantilla
+                  aprobada" al vendedor lo manda a buscar algo que no existe. */}
               <p className="flex-1">
-                <span className="font-semibold text-wa-ink">Ventana de 24 hs cerrada</span> —
-                respondé con una plantilla aprobada; el chat se reabre cuando el cliente
-                escribe.
+                <span className="font-semibold text-wa-ink">Ventana de 24 hs cerrada</span> —{" "}
+                {sinPlantillas
+                  ? "el chat se reabre cuando el cliente escribe, o antes con una plantilla aprobada por Meta."
+                  : "respondé con una plantilla aprobada; el chat se reabre cuando el cliente escribe."}
               </p>
               <Tooltip content="Nota interna (no la ve el cliente)">
                 <button
@@ -792,7 +887,31 @@ export function EmbeddedChat({
               )}
             </div>
             <div className="border-t border-wa-line bg-wa-panel-alt px-3 py-3 md:px-4">
-              {templates.length > 0 && readyTemplates.length === 0 ? (
+              {sinPlantillas ? (
+                /* No hay NINGUNA que Meta acepte. Antes acá se ofrecían las
+                   locales y el envío moría contra Meta en inglés: ahora se dice
+                   qué falta y quién lo destraba, sin culpar al vendedor. */
+                <div className="flex items-start gap-3 rounded-xl border border-wa-line bg-wa-panel px-3.5 py-3">
+                  <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-tone-amber-soft text-tone-amber-text">
+                    <NotebookText className="size-4" strokeWidth={1.9} aria-hidden />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13.5px] font-semibold text-wa-ink">
+                      {sinPlantillas.titulo}
+                    </p>
+                    <p className="mt-0.5 text-[12.5px] leading-relaxed text-wa-ink-soft">
+                      {sinPlantillas.detalle}
+                    </p>
+                    <Link
+                      href="/config/plantillas"
+                      className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-lg bg-wa-accent px-3 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90 active:scale-[0.98] tap-highlight-none"
+                    >
+                      {sinPlantillas.cta}
+                      <ChevronRight className="size-3.5" aria-hidden />
+                    </Link>
+                  </div>
+                </div>
+              ) : readyTemplates.length === 0 ? (
                 <p className="px-1 py-2 text-center text-[13px] leading-relaxed text-wa-ink-faint">
                   Las plantillas aprobadas necesitan datos que todavía no están
                   cargados ({missingVarsLabel}). Completalos en el lead para poder

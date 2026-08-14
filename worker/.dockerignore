@@ -1,0 +1,11 @@
+# node_modules de la máquina de desarrollo trae binarios de macOS (sharp): si se
+# copiaran a la imagen, el worker levanta y se cae al primer mensaje con media.
+node_modules
+dist
+
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store

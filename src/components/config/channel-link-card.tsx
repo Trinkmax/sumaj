@@ -17,6 +17,7 @@ import { getChannelState, linkChannel, syncChannel, unlinkChannel } from "@/lib/
 import { fmtPhone, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Enums } from "@/lib/types";
+import type { WorkerState } from "@/lib/wa/worker";
 
 /** Lo que la card necesita saber del número (ChannelState + el nombre visible). */
 export type ChannelCard = {
@@ -81,15 +82,17 @@ function Crumb({ parts }: { parts: string[] }) {
  */
 export function ChannelLinkCard({
   channel,
-  workerReady,
+  worker,
   isAdmin,
   className,
 }: {
   channel: ChannelCard;
-  workerReady: boolean;
+  /** estado REAL del worker, preguntado por la página (no solo "hay envs") */
+  worker: WorkerState;
   isAdmin: boolean;
   className?: string;
 }) {
+  const workerReady = worker === "ok";
   const router = useRouter();
   // lo que trajimos polleando pisa lo que vino del server (siempre es más nuevo)
   const [live, setLive] = React.useState<Partial<ChannelCard>>({});
@@ -269,7 +272,11 @@ export function ChannelLinkCard({
 
       {!workerReady ? (
         /* Sin worker no hay sesión posible: lo decimos claro y sin alarmar.
-           El detalle técnico (variables del servidor) es solo para el admin. */
+           Y se distinguen los dos casos, porque se arreglan distinto: falta
+           configurarlo (nunca se desplegó) vs. está configurado y no contesta
+           (se cayó el proceso). Antes los dos decían lo mismo, y el segundo ni
+           siquiera se detectaba: la pantalla ofrecía "Vincular número" y el
+           toque moría en un toast rojo. */
         isAdmin ? (
           <div className="mt-3 flex items-start gap-2.5 rounded-xl border border-tone-amber-line bg-tone-amber-soft px-3.5 py-3">
             <TriangleAlert
@@ -278,19 +285,37 @@ export function ChannelLinkCard({
               aria-hidden
             />
             <div className="min-w-0 text-[13px] leading-relaxed text-tone-amber-text">
-              <p className="font-medium">Falta levantar el worker de WhatsApp.</p>
-              <p className="mt-0.5">
-                Es el proceso que mantiene abierta la sesión del número. Cargá las variables{" "}
-                <code className="rounded bg-paper/60 px-1 py-0.5 font-mono text-[11px]">
-                  WA_WORKER_URL
-                </code>{" "}
-                y{" "}
-                <code className="rounded bg-paper/60 px-1 py-0.5 font-mono text-[11px]">
-                  WA_WORKER_TOKEN
-                </code>{" "}
-                y volvé a entrar. Mientras tanto los mensajes se registran igual en el sistema,
-                pero no salen.
-              </p>
+              {worker === "caido" ? (
+                <>
+                  <p className="font-medium">El worker de WhatsApp no está respondiendo.</p>
+                  <p className="mt-0.5">
+                    Está configurado, pero el proceso no contesta: puede estar caído o apagado.
+                    Es un servicio aparte de la app (Railway, Fly, un VPS) y hay que levantarlo
+                    de nuevo — el instructivo está en{" "}
+                    <code className="rounded bg-paper/60 px-1 py-0.5 font-mono text-[11px]">
+                      worker/README.md
+                    </code>
+                    . Los números vinculados vuelven solos cuando arranca: no hay que escanear
+                    ningún QR de nuevo.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="font-medium">Falta levantar el worker de WhatsApp.</p>
+                  <p className="mt-0.5">
+                    Es el proceso que mantiene abierta la sesión del número. Cargá las variables{" "}
+                    <code className="rounded bg-paper/60 px-1 py-0.5 font-mono text-[11px]">
+                      WA_WORKER_URL
+                    </code>{" "}
+                    y{" "}
+                    <code className="rounded bg-paper/60 px-1 py-0.5 font-mono text-[11px]">
+                      WA_WORKER_TOKEN
+                    </code>{" "}
+                    y volvé a entrar. Mientras tanto los mensajes se registran igual en el
+                    sistema, pero no salen.
+                  </p>
+                </>
+              )}
             </div>
           </div>
         ) : (

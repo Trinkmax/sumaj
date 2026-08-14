@@ -191,6 +191,10 @@ export const Bubble = memo(function Bubble({
   const caption = captionOf(m.body);
   const reactions = reactionsOf(m);
   const isSticker = file?.sticker === true;
+  /* No salió. La burbuja tiene que decirlo con el cuerpo, no con un ícono: el
+     verde de "saliente" es la señal más fuerte de la pantalla y leerlo como
+     enviado es exactamente lo que no puede pasar. */
+  const failed = out && m.status === "fallido";
   // colita solo en burbujas "normales": la nota es amarilla, la plantilla tiene
   // borde punteado y la figurita no tiene burbuja
   const withTail = tail && !isNote && !isTemplate && !isSticker;
@@ -239,6 +243,8 @@ export const Bubble = memo(function Bubble({
                 : "bg-wa-bubble-in",
           withTail && (out ? "rounded-tr-none bubble-tail-out" : "rounded-tl-none bubble-tail-in"),
           isTemplate && "border border-dashed border-wa-accent-deep/50",
+          // el borde rojo gana: si no salió, importa más que sea una plantilla
+          failed && "border border-tone-red-line opacity-90",
         )}
       >
         {isTemplate && (
@@ -280,6 +286,25 @@ export const Bubble = memo(function Bubble({
           <div className="text-[14.2px] leading-[19px] text-wa-bubble-ink">
             <span className="whitespace-pre-wrap break-words">{m.body}</span>
             {meta}
+          </div>
+        )}
+
+        {/* Por qué no salió, adentro de la burbuja.
+            Un mensaje fallido se veía EXACTAMENTE igual a uno enviado salvo por
+            un ícono de 14px, y el motivo —que estaba guardado en la fila— no se
+            mostraba en ningún lado. El operador quedaba mirando tres plantillas
+            verdes creyendo que el cliente las tenía, cuando no salió ninguna. */}
+        {failed && (
+          <div className="clear-both mt-1.5 flex items-start gap-1.5 rounded-md bg-tone-red-soft px-2 py-1.5">
+            <CircleAlert
+              className="mt-px size-3.5 shrink-0 text-tone-red-text"
+              strokeWidth={2}
+              aria-hidden
+            />
+            <p className="text-[11.5px] leading-snug text-tone-red-text">
+              <span className="font-semibold">No se envió.</span>{" "}
+              {m.error_detail ?? "WhatsApp lo rechazó."}
+            </p>
           </div>
         )}
       </div>
