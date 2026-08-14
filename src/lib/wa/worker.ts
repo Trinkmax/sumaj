@@ -100,8 +100,37 @@ async function call<T>(
  * `hasWorker()` solo mira que existan dos variables de entorno, así que una URL
  * apuntando a un proceso que nunca se desplegó daba "listo": la pantalla ofrecía
  * "Vincular número" y el toque moría en un toast rojo. Esto pregunta.
+ *
+ * Cuando está caído se devuelve TAMBIÉN a dónde se intentó y qué pasó. Sin eso,
+ * "el worker no responde" deja al admin adivinando entre tres cosas que se
+ * arreglan en lugares distintos: el proceso apagado, la dirección mal cargada, o
+ * la dirección apuntando a algo que no es el worker. Con el origen a la vista se
+ * resuelve mirando.
  */
-export type WorkerState = "ok" | "sin-configurar" | "caido";
+export type WorkerState =
+  | { kind: "ok" }
+  | { kind: "sin-configurar" }
+  | { kind: "caido"; origen: string | null; motivo: string };
+
+/** Solo esquema + host + puerto. El token NUNCA sale de acá. */
+function origenDe(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `localhost` en `WA_WORKER_URL` es el error más común y el más difícil de ver:
+ * es el valor de ejemplo del `.env.example`, y desde un deploy en Vercel apunta
+ * a la propia función serverless, donde no hay ningún worker escuchando.
+ */
+function esLocal(origen: string | null): boolean {
+  if (!origen) return false;
+  const host = new URL(origen).hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "0.0.0.0";
+}
 
 /**
  * Memoizado por render: la página de sucursales lo consulta una vez y todas las
@@ -113,15 +142,45 @@ export type WorkerState = "ok" | "sin-configurar" | "caido";
  * tres segundos en decir "estoy vivo", a los fines del operador está caído.
  */
 export const workerState = cache(async function workerState(): Promise<WorkerState> {
-  if (!hasWorker()) return "sin-configurar";
+  if (!hasWorker()) return { kind: "sin-configurar" };
+
+  const origen = origenDe(WORKER_URL);
+  if (!origen) {
+    return {
+      kind: "caido",
+      origen: null,
+      motivo: `La dirección cargada no es una URL válida: "${WORKER_URL.slice(0, 80)}". Tiene que ser completa y con https://.`,
+    };
+  }
+  if (esLocal(origen)) {
+    return {
+      kind: "caido",
+      origen,
+      motivo:
+        "Apunta a localhost, que desde el servidor de la app es el servidor mismo: ahí no hay ningún worker. Es el valor de ejemplo — hay que reemplazarlo por la dirección pública del worker.",
+    };
+  }
+
   try {
     const res = await fetch(`${WORKER_URL}/health`, {
       cache: "no-store",
       signal: AbortSignal.timeout(3_000),
     });
-    return res.ok ? "ok" : "caido";
-  } catch {
-    return "caido";
+    if (res.ok) return { kind: "ok" };
+    return {
+      kind: "caido",
+      origen,
+      motivo: `Esa dirección contestó HTTP ${res.status} en /health. Existe algo ahí, pero no es el worker: revisá que la URL sea la del servicio del worker y no la de otra cosa.`,
+    };
+  } catch (error) {
+    const tarde = error instanceof Error && error.name === "TimeoutError";
+    return {
+      kind: "caido",
+      origen,
+      motivo: tarde
+        ? "No contestó en 3 segundos. El proceso puede estar arrancando o trabado."
+        : "No se pudo conectar. O el proceso está apagado, o esa dirección no existe.",
+    };
   }
 });
 

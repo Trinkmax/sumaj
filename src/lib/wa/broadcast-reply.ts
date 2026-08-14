@@ -1,9 +1,15 @@
 /**
- * Atribución de las respuestas a una difusión.
+ * Atribución de las respuestas a algo que mandamos nosotros: una difusión o una
+ * plantilla que un vendedor mandó a mano desde el chat.
  *
  * Es la pieza que convierte un envío masivo en algo medible: sin esto, el que
  * toca "Quiero info" entra al CRM como una consulta más y la difusión se mide
  * en "mensajes enviados", que no es lo que le importa a nadie.
+ *
+ * Los dos casos comparten archivo porque comparten el problema —qué botón tocó
+ * la persona y qué significa— y porque separarlos haría que el de la plantilla
+ * del chat le robe la atribución al de la difusión sin que nadie lo note. El
+ * bloque de la plantilla del chat está más abajo, con su porqué.
  *
  * ─────────────────────────────────────────────
  * CÓMO SE SABE QUE UNA RESPUESTA VIENE DE UNA DIFUSIÓN
@@ -102,6 +108,14 @@ export async function attributeReply(
     contextMessageId: string | null;
     buttonPayload: string | null;
     text: string;
+    /**
+     * Permitir el camino 3 (la ventana de 72 hs). Se apaga cuando YA sabemos a
+     * qué contestó la persona —una plantilla mandada a mano desde el chat—,
+     * porque ahí el camino blando es directamente falso: le pegaría la respuesta
+     * a una difusión que esa persona recibió otro día. Default true: el que
+     * contesta escribiendo sigue entrando al embudo como siempre.
+     */
+    allowWindowFallback?: boolean;
   },
 ): Promise<BroadcastReply | null> {
   const parsed = parsePayload(input.buttonPayload);
@@ -135,7 +149,7 @@ export async function attributeReply(
      valen— fuera del embudo. Lo que sí se cuidó es la BAJA escrita a mano
      (`looksLikeOptOut`, abajo): es lo único de este camino que toma una
      decisión irreversible, y por eso es deliberadamente difícil de disparar. */
-  if (!row) {
+  if (!row && input.allowWindowFallback !== false) {
     const limite = new Date(Date.now() - VENTANA_HORAS * 3_600_000).toISOString();
     const { data } = await destinatarios()
       .eq("contact_id", input.contactId)
@@ -168,6 +182,143 @@ export async function attributeReply(
     intent: button?.intent ?? (looksLikeOptOut(input.text) ? "baja" : null),
     buttonLabel: button?.text ?? null,
   };
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LA PLANTILLA MANDADA A MANO DESDE EL CHAT
+
+   No es una difusión, pero llega igual: el vendedor reabre una conversación
+   cerrada con una plantilla aprobada y el cliente toca uno de sus botones.
+
+   Por qué necesita su propio camino: desde el chat NO se manda el componente de
+   botones con `vjos:<recipientId>:<index>` —ese payload identifica un
+   destinatario de difusión, que acá no existe— así que Meta devuelve el TEXTO
+   del botón como payload. Sin esto pasaban dos cosas, las dos malas:
+
+     · Se perdía el `intent` declarado del botón. Un "No me interesa" tocado
+       sobre una plantilla del chat no daba de baja a nadie: caía en
+       `looksLikeOptOut`, que es deliberadamente corto de manga.
+     · La respuesta se le atribuía a la ÚLTIMA difusión que esa persona hubiera
+       recibido en 72 hs (camino 3 de `attributeReply`), ensuciando el embudo de
+       una campaña con una charla que no tenía nada que ver.
+
+   Acá el botón se resuelve por TEXTO contra `wa_templates.buttons`, que es lo
+   único que devuelve Meta. A diferencia de la difusión —donde manda la foto
+   congelada— acá la plantilla viva es la fuente correcta: es la misma que se
+   mandó hace un rato, no una de hace seis meses.
+   ═══════════════════════════════════════════════════════════ */
+
+export type TemplateReply = {
+  /** Nombre humano de la plantilla, para el historial del contacto. */
+  templateName: string;
+  intent: BroadcastIntent | null;
+  buttonLabel: string | null;
+};
+
+/** Mismo criterio que `normalizar`, para que "¡Sí, contame!" matchee "Si contame". */
+function mismoTexto(a: string, b: string): boolean {
+  return normalizar(a) === normalizar(b);
+}
+
+/**
+ * ¿Esta respuesta contesta a una plantilla que un vendedor mandó desde el chat?
+ *
+ * Solo de lectura y solo con la prueba dura: sin `context.id` devuelve null. No
+ * hay camino blando a propósito — adivinar acá es exactamente el problema que
+ * esta función viene a arreglar.
+ */
+export async function attributeTemplateReply(
+  supabase: Admin,
+  input: {
+    agencyId: string;
+    contextMessageId: string | null;
+    /** El payload del botón, que sin componente de botones ES su texto. */
+    buttonPayload: string | null;
+    text: string;
+  },
+): Promise<TemplateReply | null> {
+  if (!input.contextMessageId) return null;
+
+  const { data: original } = await supabase
+    .from("messages")
+    .select("kind, direction, metadata")
+    .eq("agency_id", input.agencyId)
+    .eq("wa_message_id", input.contextMessageId)
+    .maybeSingle();
+  if (!original || original.direction !== "out" || original.kind !== "plantilla") return null;
+
+  const meta = (original.metadata ?? null) as {
+    template_id?: string;
+    broadcast_id?: string;
+  } | null;
+
+  /* Una difusión también deja una fila `kind = 'plantilla'`, y esa la atribuye
+     `attributeReply` con su recipient. Si no se cortara acá, esta función le
+     robaría la atribución a la difusión y el embudo quedaría vacío. */
+  if (meta?.broadcast_id) return null;
+  if (!meta?.template_id) return null;
+
+  const { data: tpl } = await supabase
+    .from("wa_templates")
+    .select("name, buttons")
+    .eq("id", meta.template_id)
+    .eq("agency_id", input.agencyId)
+    .maybeSingle();
+  if (!tpl) return null;
+
+  const buttons = Array.isArray(tpl.buttons) ? (tpl.buttons as TemplateButton[]) : [];
+  const tocado = (input.buttonPayload ?? "").trim() || input.text.trim();
+  const button = tocado
+    ? (buttons.find((b) => b?.text && mismoTexto(b.text, tocado)) ?? null)
+    : null;
+
+  return {
+    templateName: tpl.name,
+    /* Sin botón identificado queda el mismo criterio que en la difusión: de todo
+       lo que puede escribir una persona, lo único que hace falta detectar solo
+       es la baja. */
+    intent: button?.intent ?? (looksLikeOptOut(input.text) ? "baja" : null),
+    buttonLabel: button?.text ?? null,
+  };
+}
+
+/**
+ * Cierra el círculo del lado de la plantilla del chat: aplica la baja si eso fue
+ * lo que tocó y deja el rastro en la ficha del contacto.
+ *
+ * No hay `broadcast_recipients` que actualizar —no hubo difusión—, así que es
+ * bastante más corto que su hermano de abajo.
+ */
+export async function recordTemplateReply(
+  supabase: Admin,
+  input: {
+    reply: TemplateReply;
+    agencyId: string;
+    contactId: string;
+    conversationId: string;
+    leadId: string | null;
+  },
+): Promise<void> {
+  if (input.reply.intent === "baja") {
+    await applyOptOut(supabase, {
+      agencyId: input.agencyId,
+      contactId: input.contactId,
+      conversationId: input.conversationId,
+      motivo: `Tocó "${input.reply.buttonLabel ?? "No me interesa"}" en la plantilla "${input.reply.templateName}"`,
+    });
+  }
+
+  /* Solo si se pudo identificar el botón: sin eso, "respondió la plantilla" es
+     ruido — el mensaje ya está en el hilo y se lee solo. */
+  if (!input.reply.buttonLabel) return;
+
+  await supabase.from("activities").insert({
+    agency_id: input.agencyId,
+    contact_id: input.contactId,
+    lead_id: input.leadId,
+    type: "whatsapp",
+    body: `Tocó "${input.reply.buttonLabel}" en la plantilla "${input.reply.templateName}"`,
+  });
 }
 
 /**
@@ -227,7 +378,7 @@ export async function recordBroadcastReply(
       agencyId: row.agency_id,
       contactId: input.contactId,
       conversationId: input.conversationId,
-      broadcastName: input.reply.broadcastName,
+      motivo: `Pidió la baja en la difusión "${input.reply.broadcastName}"`,
     });
   }
 
@@ -254,13 +405,19 @@ export async function recordBroadcastReply(
  */
 async function applyOptOut(
   supabase: Admin,
-  input: { agencyId: string; contactId: string; conversationId: string; broadcastName: string },
+  input: {
+    agencyId: string;
+    contactId: string;
+    conversationId: string;
+    /** De dónde salió la baja, ya redactado: la difusión o la plantilla del chat. */
+    motivo: string;
+  },
 ): Promise<void> {
   const { error } = await supabase
     .from("contacts")
     .update({
       wa_opt_out_at: new Date().toISOString(),
-      wa_opt_out_reason: `Pidió la baja en la difusión "${input.broadcastName}"`,
+      wa_opt_out_reason: input.motivo,
     })
     .eq("id", input.contactId)
     .eq("agency_id", input.agencyId)

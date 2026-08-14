@@ -92,7 +92,7 @@ export function ChannelLinkCard({
   isAdmin: boolean;
   className?: string;
 }) {
-  const workerReady = worker === "ok";
+  const workerReady = worker.kind === "ok";
   const router = useRouter();
   // lo que trajimos polleando pisa lo que vino del server (siempre es más nuevo)
   const [live, setLive] = React.useState<Partial<ChannelCard>>({});
@@ -285,18 +285,31 @@ export function ChannelLinkCard({
               aria-hidden
             />
             <div className="min-w-0 text-[13px] leading-relaxed text-tone-amber-text">
-              {worker === "caido" ? (
+              {worker.kind === "caido" ? (
                 <>
                   <p className="font-medium">El worker de WhatsApp no está respondiendo.</p>
-                  <p className="mt-0.5">
-                    Está configurado, pero el proceso no contesta: puede estar caído o apagado.
-                    Es un servicio aparte de la app (Railway, Fly, un VPS) y hay que levantarlo
-                    de nuevo — el instructivo está en{" "}
+                  {/* El origen a la vista es lo que convierte "no anda" en un
+                      arreglo de un minuto: casi siempre la dirección quedó en el
+                      valor de ejemplo y basta con leerla para darse cuenta. */}
+                  <p className="mt-1">
+                    La app le pidió a{" "}
+                    <code className="rounded bg-paper/60 px-1 py-0.5 font-mono text-[11px]">
+                      {worker.origen ?? "(sin dirección válida)"}
+                    </code>
+                    . {worker.motivo}
+                  </p>
+                  <p className="mt-1">
+                    Se cambia en la variable{" "}
+                    <code className="rounded bg-paper/60 px-1 py-0.5 font-mono text-[11px]">
+                      WA_WORKER_URL
+                    </code>{" "}
+                    del entorno de la app, y hay que redeployar para que tome. Los números ya
+                    vinculados vuelven solos cuando el worker arranca: no hay que escanear ningún
+                    QR de nuevo. El instructivo completo está en{" "}
                     <code className="rounded bg-paper/60 px-1 py-0.5 font-mono text-[11px]">
                       worker/README.md
                     </code>
-                    . Los números vinculados vuelven solos cuando arranca: no hay que escanear
-                    ningún QR de nuevo.
+                    .
                   </p>
                 </>
               ) : (

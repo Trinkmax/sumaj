@@ -216,7 +216,14 @@ export async function POST(request: Request) {
           status: ok ? "enviado" : "fallido",
           wa_message_id: waMessageId,
           error_detail: errorDetail,
-          metadata: { followup_id: followup.id },
+          /* `template_id` solo cuando salió COMO plantilla (por el número
+             madre): es lo que después deja atribuir el botón que toque el
+             cliente a esta plantilla y no a la última difusión que le llegó.
+             Por la sucursal va como texto libre y no hay botones que volver. */
+          metadata: {
+            followup_id: followup.id,
+            ...(templateName ? { template_id: followup.template_id } : {}),
+          },
         })
         .select("id")
         .single();

@@ -28,8 +28,11 @@ import {
 } from "@/lib/ig/bridge";
 import {
   attributeReply,
+  attributeTemplateReply,
   recordBroadcastReply,
+  recordTemplateReply,
   type BroadcastReply,
+  type TemplateReply,
 } from "@/lib/wa/broadcast-reply";
 import { storeRemoteMedia, type MessageMedia } from "@/lib/media/store";
 import { fmtPhone } from "@/lib/format";
@@ -163,7 +166,14 @@ export async function alertBranchOperators(
     text: string;
     conversationId: string;
     leadId: string | null;
-    broadcast?: {
+    /**
+     * La persona tocó un botón de algo que le mandamos. Puede ser una difusión
+     * o una plantilla que el vendedor mandó a mano desde el chat: el aviso es el
+     * mismo —levantó la mano— pero el texto tiene que decir la verdad, porque
+     * "de una difusión" en una charla uno a uno confunde al operador.
+     */
+    respuesta?: {
+      kind: "difusion" | "plantilla";
       name: string;
       intent: BroadcastIntent | null;
       buttonLabel: string | null;
@@ -186,11 +196,16 @@ export async function alertBranchOperators(
     ? `/crm/${input.leadId}`
     : `/crm?vista=chats&c=${input.conversationId}`;
 
-  const interesado = input.broadcast?.intent === "interesado";
-  const boton = input.broadcast?.buttonLabel;
-  const titulo = interesado ? "Lead calificado de una difusión" : "Consulta nueva";
+  const interesado = input.respuesta?.intent === "interesado";
+  const boton = input.respuesta?.buttonLabel;
+  const deDifusion = input.respuesta?.kind === "difusion";
+  const titulo = interesado
+    ? deDifusion
+      ? "Lead calificado de una difusión"
+      : "Contestó tu plantilla"
+    : "Consulta nueva";
   const cuerpo = interesado
-    ? `${input.contactName} tocó "${boton ?? "Me interesa"}" en ${input.broadcast?.name}. Está esperando que lo contactes.`
+    ? `${input.contactName} tocó "${boton ?? "Me interesa"}" en ${input.respuesta?.name}. Está esperando que lo contactes.`
     : `${input.contactName}: ${snippet(input.text, 70)}`;
 
   await supabase.from("notifications").insert(
@@ -219,7 +234,9 @@ export async function alertBranchOperators(
   const base = appUrl();
   const body = [
     interesado
-      ? `Lead calificado: respondió la difusión "${input.broadcast?.name}"`
+      ? deDifusion
+        ? `Lead calificado: respondió la difusión "${input.respuesta?.name}"`
+        : `Contestó la plantilla "${input.respuesta?.name}"`
       : "Consulta nueva para atender",
     `${input.contactName}${input.contactPhone ? ` · ${fmtPhone(input.contactPhone)}` : ""}`,
     interesado && boton ? `Tocó "${boton}"` : `"${snippet(input.text, 140)}"`,
@@ -438,6 +455,21 @@ export async function handleInboundMessage(
      comprometerse a nada. Si falla, el mensaje entra igual: perder la atribución
      es un número peor en un tablero, perder la consulta sería perder al cliente. */
   let difusion: BroadcastReply | null = null;
+  /* ¿Y si contesta a una plantilla que un vendedor mandó desde el chat? Se
+     pregunta PRIMERO porque su respuesta cambia la de la difusión: cuando la
+     persona está contestando una plantilla puntual, atribuirla además a la
+     última difusión que recibió en 72 hs es directamente falso. */
+  let plantilla: TemplateReply | null = null;
+  try {
+    plantilla = await attributeTemplateReply(supabase, {
+      agencyId,
+      contextMessageId: msg.contextMessageId ?? null,
+      buttonPayload: msg.buttonPayload ?? null,
+      text: msg.text,
+    });
+  } catch (e) {
+    console.warn(`[wa] respuesta sin atribuir a su plantilla: ${String(e)}`);
+  }
   try {
     difusion = await attributeReply(supabase, {
       agencyId,
@@ -445,11 +477,14 @@ export async function handleInboundMessage(
       contextMessageId: msg.contextMessageId ?? null,
       buttonPayload: msg.buttonPayload ?? null,
       text: msg.text,
+      allowWindowFallback: !plantilla,
     });
   } catch (e) {
     console.warn(`[wa] respuesta sin atribuir a su difusión: ${String(e)}`);
   }
-  const esBaja = difusion?.intent === "baja";
+  /* La baja vale igual la haya pedido por una difusión o tocando el botón de una
+     plantilla del chat: en los dos casos la persona dijo que no la molesten. */
+  const esBaja = difusion?.intent === "baja" || plantilla?.intent === "baja";
 
   /* 6. lead: si no hay uno abierto, esta consulta lo crea */
   const { data: openLead } = await supabase
@@ -501,6 +536,20 @@ export async function handleInboundMessage(
   /* 7. la difusión se cierra: el destinatario queda respondido con su intención,
      enganchado al lead, y la baja se aplica. Va acá y no antes porque recién
      ahora existe el lead que hay que pegarle. */
+  if (plantilla) {
+    try {
+      await recordTemplateReply(supabase, {
+        reply: plantilla,
+        agencyId,
+        contactId,
+        conversationId,
+        leadId,
+      });
+    } catch (e) {
+      console.warn(`[wa] respuesta de plantilla sin registrar: ${String(e)}`);
+    }
+  }
+
   if (difusion) {
     try {
       await recordBroadcastReply(supabase, {
@@ -553,7 +602,10 @@ export async function handleInboundMessage(
      Un interesado de una difusión avisa aunque el lead ya existiera: acaba de
      levantar la mano y ese es el momento de llamarlo. Una baja no avisa nunca —
      no hay nada que atender y el operador solo vería ruido. */
-  if (!esBaja && (leadIsNew || difusion?.intent === "interesado")) {
+  if (
+    !esBaja &&
+    (leadIsNew || difusion?.intent === "interesado" || plantilla?.intent === "interesado")
+  ) {
     await alertBranchOperators(supabase, {
       agencyId,
       branchId,
@@ -562,9 +614,23 @@ export async function handleInboundMessage(
       text: msg.text,
       conversationId,
       leadId,
-      broadcast: difusion
-        ? { name: difusion.broadcastName, intent: difusion.intent, buttonLabel: difusion.buttonLabel }
-        : null,
+      /* La difusión gana si las dos aplican: es la que tiene tablero atrás y la
+         que alguien está midiendo. */
+      respuesta: difusion
+        ? {
+            kind: "difusion",
+            name: difusion.broadcastName,
+            intent: difusion.intent,
+            buttonLabel: difusion.buttonLabel,
+          }
+        : plantilla
+          ? {
+              kind: "plantilla",
+              name: plantilla.templateName,
+              intent: plantilla.intent,
+              buttonLabel: plantilla.buttonLabel,
+            }
+          : null,
     });
   }
 
