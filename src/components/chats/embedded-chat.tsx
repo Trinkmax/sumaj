@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  Check,
   ChevronRight,
   Clock,
   NotebookText,
@@ -19,7 +20,7 @@ import { WhatsAppIcon } from "@/components/quotes/wa-icon";
 import { markConversationRead, sendMessage, sendTemplate } from "@/lib/actions/messages";
 import { sendInternalNote } from "@/lib/actions/crm-panel";
 import { fillTemplate, motivoPlantillaNoEnviable } from "@/lib/domain";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, fmtRelative } from "@/lib/format";
 import type { Tables } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Bubble, DayChip, groupMessagesIntoDayGroups, startsStreak, WINDOW_MS } from "./bubble";
@@ -194,6 +195,8 @@ export function EmbeddedChat({
   const [lastInboundAt, setLastInboundAt] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [noteMode, setNoteMode] = useState(false);
+  /** El vendedor pidió expresamente mandar OTRA plantilla sin que le contesten. */
+  const [insistir, setInsistir] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   // ids presentes en la carga inicial: los que lleguen después animan con msg-in
@@ -208,6 +211,7 @@ export function EmbeddedChat({
     setPrevConversationId(conversationId);
     setNoteMode(false);
     setDraft("");
+    setInsistir(false);
   }
 
   const loading = loadedId !== conversationId;
@@ -490,7 +494,12 @@ export function EmbeddedChat({
       vars: templateVars,
     });
     const ok = reconcile(tempId, res);
-    if (ok) toast.success("Plantilla enviada");
+    if (ok) {
+      toast.success("Plantilla enviada. Se abre el chat cuando el cliente conteste.");
+      // vuelve al aviso de "ya mandaste": si insistió una vez, la próxima
+      // también tiene que ser una decisión y no un descuido
+      setInsistir(false);
+    }
     return ok;
   }
 
@@ -525,6 +534,48 @@ export function EmbeddedChat({
   const missingVarsLabel = missingVars
     .map((v) => VAR_LABELS[v] ?? `{{${v}}}`)
     .join(", ");
+
+  /**
+   * La plantilla que YA se mandó y todavía no contestaron.
+   *
+   * Mandar una plantilla NO reabre la ventana de 24 hs — eso lo hace ÚNICAMENTE
+   * un mensaje del cliente, es regla de Meta y no algo que podamos decidir. Pero
+   * la pantalla no lo decía: después de mandarla volvía sola a "Elegí una
+   * plantilla", igual que antes, y eso se lee como que no pasó nada. Invita a
+   * mandar otra, que se paga de nuevo y encima llega como insistencia.
+   *
+   * Se busca entre los salientes POSTERIORES al último entrante: si el cliente
+   * escribió después, esto no aplica (y además la ventana estaría abierta).
+   */
+  const plantillaEsperando = useMemo(() => {
+    let desde = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].direction === "in") {
+        desde = i;
+        break;
+      }
+    }
+    let ultima: MessageRow | null = null;
+    for (let i = messages.length - 1; i > desde; i--) {
+      const m = messages[i];
+      // la nota interna no la ve el cliente: no cuenta como "le escribimos"
+      if (m.direction !== "out" || m.kind === "nota_interna") continue;
+      ultima = m;
+      break;
+    }
+    if (!ultima || ultima.kind !== "plantilla" || ultima.status === "fallido") return null;
+    return ultima;
+  }, [messages]);
+
+  /** Qué le pasó a esa plantilla, en criollo. */
+  const estadoPlantilla =
+    plantillaEsperando?.status === "leido"
+      ? "La leyó"
+      : plantillaEsperando?.status === "entregado"
+        ? "Le llegó"
+        : plantillaEsperando?.status === "pendiente"
+          ? "Saliendo"
+          : "Se envió";
 
   /**
    * Qué contarle al vendedor cuando NO hay ninguna plantilla que Meta acepte.
@@ -857,11 +908,16 @@ export function EmbeddedChat({
               {/* El encabezado no promete lo que abajo no hay: cuando no queda
                   ninguna plantilla usable, decirle "respondé con una plantilla
                   aprobada" al vendedor lo manda a buscar algo que no existe. */}
+              {/* El encabezado no promete lo que abajo no hay, y tampoco pide
+                  mandar una plantilla cuando ya se mandó una y estamos
+                  esperando: ahí lo único que corresponde es esperar. */}
               <p className="flex-1">
                 <span className="font-semibold text-wa-ink">Ventana de 24 hs cerrada</span> —{" "}
-                {sinPlantillas
-                  ? "el chat se reabre cuando el cliente escribe, o antes con una plantilla aprobada por Meta."
-                  : "respondé con una plantilla aprobada; el chat se reabre cuando el cliente escribe."}
+                {plantillaEsperando
+                  ? "se reabre cuando el cliente conteste. Podés dejarle una nota interna mientras tanto."
+                  : sinPlantillas
+                    ? "el chat se reabre cuando el cliente escribe, o antes con una plantilla aprobada por Meta."
+                    : "respondé con una plantilla aprobada; el chat se reabre cuando el cliente escribe."}
               </p>
               <Tooltip content="Nota interna (no la ve el cliente)">
                 <button
@@ -887,7 +943,34 @@ export function EmbeddedChat({
               )}
             </div>
             <div className="border-t border-wa-line bg-wa-panel-alt px-3 py-3 md:px-4">
-              {sinPlantillas ? (
+              {plantillaEsperando && !insistir ? (
+                /* Ya se mandó una y estamos esperando. Lo importante acá es que
+                   el vendedor NO mande otra pensando que la primera no salió:
+                   cada plantilla se paga, y dos seguidas se leen como que
+                   insistimos. Se puede igual, pero con un toque más y sabiendo. */
+                <div className="flex items-start gap-3 rounded-xl border border-wa-line bg-wa-panel px-3.5 py-3">
+                  <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-wa-accent/12 text-wa-accent-deep">
+                    <Check className="size-4" strokeWidth={2.2} aria-hidden />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13.5px] font-semibold text-wa-ink">
+                      Plantilla enviada · {estadoPlantilla} {fmtRelative(plantillaEsperando.created_at)}
+                    </p>
+                    <p className="mt-0.5 text-[12.5px] leading-relaxed text-wa-ink-soft">
+                      Ahora le toca al cliente: el chat se abre solo cuando conteste, y ahí podés
+                      escribirle libre por 24 hs. Mandar una plantilla no abre la ventana — es
+                      regla de WhatsApp.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setInsistir(true)}
+                      className="mt-2 text-[12.5px] font-medium text-wa-accent-deep underline underline-offset-2 transition-opacity hover:opacity-80 tap-highlight-none"
+                    >
+                      Mandar otra plantilla igual
+                    </button>
+                  </div>
+                </div>
+              ) : sinPlantillas ? (
                 /* No hay NINGUNA que Meta acepte. Antes acá se ofrecían las
                    locales y el envío moría contra Meta en inglés: ahora se dice
                    qué falta y quién lo destraba, sin culpar al vendedor. */
