@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { parseTemplateButtons } from "@/lib/templates";
 import { toast } from "sonner";
 import {
   ArrowDown,
@@ -153,29 +154,6 @@ const INTENTS: { value: BroadcastIntent; label: string; icon: LucideIcon; hint: 
 /** Los quick reply van SIEMPRE antes que los de link o Meta rechaza la plantilla. */
 function orderButtons(quick: TemplateButton[], url: TemplateButton | null): TemplateButton[] {
   return url ? [...quick, url] : [...quick];
-}
-
-/** `wa_templates.buttons` es jsonb: nunca confiar en su forma al leerlo. */
-export function parseTemplateButtons(value: unknown): TemplateButton[] {
-  if (!Array.isArray(value)) return [];
-  const out: TemplateButton[] = [];
-  for (const raw of value) {
-    if (!raw || typeof raw !== "object") continue;
-    const b = raw as Record<string, unknown>;
-    const type = b.type === "url" ? "url" : "quick_reply";
-    const text = typeof b.text === "string" ? b.text : "";
-    if (!text) continue;
-    out.push({
-      type,
-      text,
-      url: type === "url" && typeof b.url === "string" ? b.url : null,
-      intent:
-        type === "quick_reply" && (b.intent === "interesado" || b.intent === "tal_vez" || b.intent === "baja")
-          ? b.intent
-          : null,
-    });
-  }
-  return out;
 }
 
 /* ───────────────────────────── el diálogo ───────────────────────────── */

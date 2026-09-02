@@ -21,7 +21,8 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
 import { AnimatedNumber, EmptyState, Segmented } from "@/components/ui/misc";
-import { TemplateDialog, parseTemplateButtons } from "@/components/config/template-dialog";
+import { TemplateDialog } from "@/components/config/template-dialog";
+import { parseTemplateButtons } from "@/lib/templates";
 import {
   AudiencePicker,
   type ContactStats,

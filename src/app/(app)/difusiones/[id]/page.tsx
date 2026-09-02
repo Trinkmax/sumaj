@@ -5,7 +5,7 @@ import { requireMember } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shell/page-header";
-import { parseTemplateButtons } from "@/components/config/template-dialog";
+import { parseTemplateButtons } from "@/lib/templates";
 import { BroadcastStatusChip } from "@/components/difusiones/broadcast-card";
 import { Results, type BroadcastSummary, type BroadcastTotals } from "@/components/difusiones/results";
 import {

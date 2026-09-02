@@ -261,6 +261,14 @@ export function ChannelLinkCard({
                 (isAdmin
                   ? "El número se desconectó. Probá vincularlo de nuevo."
                   : "El número se desconectó. Un admin lo tiene que vincular de nuevo."))
+            ) : state.lastError ? (
+              /* Un intento de vinculación que se venció deja el canal en
+                 'desconectado' con el motivo escrito, no en 'error': nadie
+                 escaneó, no hay nada roto. Si no se mostrara acá, el texto que
+                 explica QUÉ pasó se perdería y la card volvería al genérico
+                 "Vinculá el WhatsApp de la sucursal", como si nunca se hubiera
+                 intentado. */
+              state.lastError
             ) : isAdmin ? (
               "Vinculá el WhatsApp de la sucursal para que el operador le escriba al cliente desde su propio número."
             ) : (
