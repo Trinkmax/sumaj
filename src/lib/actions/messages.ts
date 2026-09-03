@@ -46,7 +46,6 @@ const WINDOW_MS = 24 * 60 * 60 * 1000;
  */
 const IG_HUMAN_AGENT_MS = 7 * 24 * 60 * 60 * 1000;
 
-export type { SentMessage };
 
 /** Todo lo que hace falta para saber por qué canal sale el mensaje. */
 const CONVERSATION_WITH_CHANNEL =
