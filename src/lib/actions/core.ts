@@ -2,10 +2,15 @@
  * Núcleo compartido de server actions. NO lleva "use server":
  * son helpers que los módulos importan desde sus propios archivos de actions.
  */
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { getMemberContext, type MemberContext } from "@/lib/auth";
 import { round2 } from "@/lib/domain";
+import type { Database } from "@/lib/database.types";
 import type { ActivityType, LeadStage, ServiceType, TablesInsert } from "@/lib/types";
+
+/** Sirve tanto el cliente de la sesión (actions) como el de service role (webhooks). */
+type AnyClient = SupabaseClient<Database>;
 
 export type ActionResult<T = null> =
   | { ok: true; data: T }
@@ -93,25 +98,179 @@ export async function resolveBranchId(
   return defaultBranch?.id ?? null;
 }
 
-/** Devuelve (o crea) la conversación de WhatsApp de un contacto. */
+/* ───────────────────────────────────────────
+   Asignación de leads
+   ─────────────────────────────────────────── */
+
+/**
+ * La línea del historial cuando el lead se repartió SOLO (sucursal sin staff,
+ * ver `pick_branch_operator`). Es una sola función porque la escriben dos
+ * caminos —el webhook que crea el lead ya asignado (`recordAutoAssignment`) y
+ * `reassignLeadCore` sin actor (deriveToBranch)— y el historial tiene que
+ * contar lo mismo con las mismas palabras, o parece que fueron dos cosas.
+ */
+export function autoAssignmentActivityText(assigneeName: string): string {
+  return `Lead asignado a ${assigneeName} (reparto automático de la sucursal)`;
+}
+
+/**
+ * Aviso in-app al vendedor que acaba de recibir un lead —o un chat suelto—.
+ * Es UNA sola forma de decirlo para los cuatro caminos que asignan
+ * (reassignLead, assignConversation, deriveToBranch y el reparto automático
+ * del webhook): si cada uno escribiera su propio texto, la campana diría
+ * cuatro cosas distintas para lo mismo. El `type` es SIEMPRE `lead_asignado`:
+ * la campana lo pinta distinto de una consulta nueva porque es lo que más
+ * rápido hay que atender.
+ *
+ * `leadId` null = un hilo sin lead (el que abre una difusión) que un admin le
+ * dio a alguien: el aviso lleva al chat en vez de al lead.
+ *
+ * Con service role no hay RLS: `agency_id` va explícito y es del lead.
+ * Best-effort: un aviso que no se pudo guardar no deshace la asignación.
+ */
+export async function notifyLeadAssigned(
+  supabase: AnyClient,
+  input: {
+    agencyId: string;
+    memberId: string;
+    leadId: string | null;
+    /** a dónde mandar cuando no hay lead */
+    conversationId?: string | null;
+    contactName: string;
+    destination?: string | null;
+  },
+): Promise<void> {
+  const cuerpo = [input.contactName, input.destination?.trim() || null]
+    .filter(Boolean)
+    .join(" · ");
+  const link = input.leadId
+    ? `/crm/${input.leadId}`
+    : input.conversationId
+      ? `/crm?vista=chats&c=${input.conversationId}`
+      : null;
+  const { error } = await supabase.from("notifications").insert({
+    agency_id: input.agencyId,
+    member_id: input.memberId,
+    type: "lead_asignado",
+    title: input.leadId ? "Te asignaron un lead" : "Te asignaron un chat",
+    body: cuerpo,
+    link,
+  });
+  if (error) console.warn(`[leads] aviso de asignación sin guardar: ${error.message}`);
+}
+
+/**
+ * Cambia el vendedor de un lead: update + historial + aviso al que lo recibe.
+ *
+ * Es el ÚNICO lugar donde se escribe `leads.assigned_to` desde la app, y es a
+ * propósito: desde la 0030 el dueño del lead es la fuente de verdad de quién
+ * ve el contacto y sus chats (un trigger sincroniza `conversations.assigned_to`
+ * al cambiarlo). "Asignar un chat" ya no existe como cosa aparte: es reasignar
+ * el lead, y por eso `assignConversation` y `deriveToBranch` pasan por acá.
+ *
+ * Quién puede llamarlo lo decide el caller (admin, o el sistema al repartir):
+ * acá no hay chequeo de rol porque el webhook no tiene sesión.
+ *
+ * `actorId` null = lo hizo el sistema (reparto automático). El aviso no se le
+ * manda a quien se asigna a sí mismo: ya sabe.
+ */
+export async function reassignLeadCore(
+  supabase: AnyClient,
+  ctx: { agencyId: string; actorId: string | null },
+  leadId: string,
+  memberId: string | null,
+): Promise<ActionResult<{ assigneeName: string }>> {
+  const { data: lead } = await supabase
+    .from("leads")
+    .select("id, contact_id, assigned_to, destination, contact:contacts(full_name)")
+    .eq("id", leadId)
+    .eq("agency_id", ctx.agencyId)
+    .maybeSingle();
+  if (!lead) return fail("Lead no encontrado.");
+
+  let assigneeName = "Sin asignar";
+  if (memberId) {
+    // No confiar en el memberId del cliente: tiene que ser de la misma agencia.
+    const { data: assignee } = await supabase
+      .from("members")
+      .select("display_name")
+      .eq("id", memberId)
+      .eq("agency_id", ctx.agencyId)
+      .maybeSingle();
+    if (!assignee) return fail("Vendedor no encontrado.");
+    assigneeName = assignee.display_name;
+  }
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ assigned_to: memberId })
+    .eq("id", lead.id)
+    .eq("agency_id", ctx.agencyId);
+  if (error) return fail("No se pudo reasignar el lead.");
+
+  /* El historial se escribe con el MISMO cliente que recibimos y no con
+     `logActivity` (que abre uno de sesión): desde el webhook no hay sesión. */
+  await supabase.from("activities").insert({
+    agency_id: ctx.agencyId,
+    member_id: ctx.actorId,
+    lead_id: lead.id,
+    contact_id: lead.contact_id,
+    type: "sistema",
+    body: memberId
+      ? ctx.actorId
+        ? `Lead asignado a ${assigneeName}`
+        : autoAssignmentActivityText(assigneeName)
+      : "Lead sin asignar",
+  });
+
+  if (memberId && memberId !== ctx.actorId && memberId !== lead.assigned_to) {
+    await notifyLeadAssigned(supabase, {
+      agencyId: ctx.agencyId,
+      memberId,
+      leadId: lead.id,
+      contactName: lead.contact?.full_name ?? "Consulta",
+      destination: lead.destination,
+    });
+  }
+
+  return succeed({ assigneeName });
+}
+
+/* ───────────────────────────────────────────
+   Conversación del contacto
+   ─────────────────────────────────────────── */
+
+/**
+ * Devuelve (o crea) la conversación de WhatsApp de un contacto.
+ *
+ * Un contacto puede tener VARIOS hilos de WhatsApp (número madre, una o más
+ * sucursales). Se prefiere el de una sucursal con el número conectado, que es
+ * por donde se sigue la charla sin ventana de 24 hs; entre varios, el más
+ * reciente. Antes se ordenaba por `branch_id` y el hilo del madre —que también
+ * queda etiquetado con la sucursal al derivar— le ganaba al de la sucursal.
+ */
 export async function ensureConversation(
   contactId: string,
 ): Promise<ActionResult<{ conversationId: string }>> {
-  const { supabase, agency, member } = await requireAction();
+  const { supabase, agency } = await requireAction();
 
-  // Un contacto puede tener DOS hilos de WhatsApp (número madre y sucursal):
-  // se prioriza el de la sucursal, que es por donde se sigue la charla.
   const { data: existing } = await supabase
     .from("conversations")
-    .select("id, branch_id, last_message_at")
+    .select("id, last_message_at, channel_ref:wa_channels(kind, status)")
     .eq("agency_id", agency.id)
     .eq("contact_id", contactId)
-    .eq("channel", "whatsapp")
-    .order("branch_id", { ascending: false, nullsFirst: false })
-    .order("last_message_at", { ascending: false, nullsFirst: false })
-    .limit(1);
+    .eq("channel", "whatsapp");
 
-  if (existing && existing.length > 0) return succeed({ conversationId: existing[0].id });
+  if (existing && existing.length > 0) {
+    const conectado = (c: (typeof existing)[number]) =>
+      c.channel_ref?.kind === "baileys" && c.channel_ref.status === "conectado" ? 1 : 0;
+    const reciente = (c: (typeof existing)[number]) =>
+      c.last_message_at ? new Date(c.last_message_at).getTime() : 0;
+    const [best] = [...existing].sort(
+      (a, b) => conectado(b) - conectado(a) || reciente(b) - reciente(a),
+    );
+    return succeed({ conversationId: best!.id });
+  }
 
   const { data: contact } = await supabase
     .from("contacts")
@@ -127,6 +286,8 @@ export async function ensureConversation(
     .eq("is_mother", true)
     .maybeSingle();
 
+  /* Sin `assigned_to`: lo pone el trigger `conversation_inherit_owner` (el
+     dueño del lead del contacto y, si no hay, quien la está abriendo). */
   const { data: created, error } = await supabase
     .from("conversations")
     .insert({
@@ -135,11 +296,16 @@ export async function ensureConversation(
       channel: "whatsapp",
       channel_id: mother?.id ?? null,
       wa_id: contact?.phone ?? null,
-      assigned_to: member.id,
     })
     .select("id")
     .single();
 
+  if (error?.code === "23505") {
+    /* Hay un hilo para este contacto y este número, pero el SELECT de arriba
+       no lo devolvió: la RLS lo esconde porque el contacto es de otro vendedor.
+       Decirlo así es más útil que "no se pudo abrir". */
+    return fail("Este chat ya lo atiende otro vendedor.");
+  }
   if (error || !created) return fail("No se pudo abrir la conversación.");
   return succeed({ conversationId: created.id });
 }

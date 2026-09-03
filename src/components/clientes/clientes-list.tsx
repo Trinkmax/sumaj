@@ -68,7 +68,7 @@ export function ClientesList({
         icon={Luggage}
         title="Todavía no hay contactos"
         description="Cargá el primero y empezá a armar tu cartera de clientes."
-        action={<NewContactButton contacts={[]} />}
+        action={<NewContactButton />}
       />
     );
   }

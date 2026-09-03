@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Megaphone, Plus } from "lucide-react";
 import { requireMember } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
@@ -11,7 +12,10 @@ import { fmtNumber } from "@/lib/format";
 export const metadata = { title: "Difusiones" };
 
 export default async function DifusionesPage() {
-  const { agency, isAdmin } = await requireMember();
+  const { agency, isAdmin, isStaff } = await requireMember();
+  /* Las difusiones son de la agencia (salen por el número madre y las arma un
+     admin); el freelance no las tiene en el menú y por URL tampoco entra. */
+  if (!isStaff) redirect("/inicio");
   const supabase = await createClient();
 
   const { data: broadcasts } = await supabase

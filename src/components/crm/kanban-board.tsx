@@ -81,10 +81,13 @@ export function KanbanBoard({
   onPatch,
   onOpenLead,
   onNewLead,
+  hasScopeFilter = true,
 }: {
   leads: BoardLead[];
   /** leads del board SIN filtrar: distingue el primer uso de "sin resultados" */
   totalLeads: number;
+  /** false cuando no hay Segmented Míos/Todos (freelance): el vacío no sugiere un filtro que no existe */
+  hasScopeFilter?: boolean;
   /** actualiza el estado del lead en el padre (optimista) */
   onPatch: (id: string, patch: Partial<BoardLead>) => void;
   /** click en la tarjeta → abre el drawer operativo del lead */
@@ -277,7 +280,11 @@ export function KanbanBoard({
           <EmptyState
             icon={SearchX}
             title="Ningún lead coincide"
-            description="Probá con otro nombre o destino, o pasá el filtro a Todos."
+            description={
+              hasScopeFilter
+                ? "Probá con otro nombre o destino, o pasá el filtro a Todos."
+                : "Probá con otro nombre o destino."
+            }
             className="py-14 md:py-20"
           />
         )}

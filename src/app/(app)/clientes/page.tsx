@@ -62,11 +62,7 @@ export default async function ClientesPage() {
       <PageHeader
         title="Clientes"
         subtitle={`${contacts.length} contactos · ${clientCount} clientes`}
-        actions={
-          <NewContactButton
-            contacts={contacts.map((c) => ({ id: c.id, full_name: c.full_name, phone: c.phone }))}
-          />
-        }
+        actions={<NewContactButton />}
       />
 
       <div className="space-y-4 px-4 md:px-6">

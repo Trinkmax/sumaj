@@ -32,15 +32,19 @@ export function Sidebar({
   memberName,
   roleLabel,
   memberId,
+  isStaff,
 }: {
   agencyName: string;
   agencyLogoUrl: string | null;
   memberName: string;
   roleLabel: string;
   memberId: string;
+  /** admin o vendedor. Difusiones es de la agencia (número madre): el freelance no la ve */
+  isStaff: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const navItems = isStaff ? NAV_MAIN : NAV_MAIN.filter((i) => i.href !== "/difusiones");
   // false en SSR y primer render del cliente (mismo markup → sin mismatch de hidratación);
   // el estado guardado se aplica apenas monta
   const [collapsed, setCollapsed] = useState(false);
@@ -163,7 +167,7 @@ export function Sidebar({
           collapsed ? "flex flex-col items-center px-2" : "px-3",
         )}
       >
-        {NAV_MAIN.map((item) => {
+        {navItems.map((item) => {
           const active = pathname === item.href || pathname.startsWith(item.href + "/");
           if (collapsed) {
             return (

@@ -90,6 +90,18 @@ export function conversationOrigin(c: {
   return null;
 }
 
+/**
+ * Un chat de sucursal que WhatsApp entregó por LID (Linked ID) y todavía sin
+ * número nace con `wa_id = "lid:<lid>"` (`handleInboundMessage`, lib/wa/inbound);
+ * el teléfono, cuando WhatsApp lo comparte, va a `contacts.phone` y el LID
+ * queda en `contacts.wa_lid`. Por la SUCURSAL se le escribe igual: el worker
+ * manda al JID `<lid>@lid` (`BaileysSendRequest.toLid`). Por el número madre
+ * no: la Cloud API solo conoce teléfonos. El header no lo pinta como número.
+ */
+export function isLidWaId(waId: string | null | undefined): boolean {
+  return typeof waId === "string" && waId.startsWith("lid:");
+}
+
 export type MessageRow = Tables<"messages">;
 
 export type TemplateRow = Tables<"wa_templates">;

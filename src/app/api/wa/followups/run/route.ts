@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
 import { sendCloudTemplateMessage } from "@/lib/wa/cloud";
 import { getCloudCreds, type ResolvedCloudCreds } from "@/lib/wa/cloud-credentials";
-import { hasWorker, sendViaBaileys } from "@/lib/wa/worker";
+import { hasWorker, sendBaileysText } from "@/lib/wa/worker";
+import { saveOutboundMessage } from "@/lib/wa/message-row";
 import { fillTemplate, motivoPlantillaNoEnviable } from "@/lib/domain";
 import { fmtDate } from "@/lib/format";
 
@@ -122,12 +123,12 @@ export async function POST(request: Request) {
     let templateName: string | null = null;
 
     if (channelId) {
-      const res = await sendViaBaileys(channelId, phone, body);
-      ok = res.ok;
-      if (res.ok) waMessageId = res.data.waMessageId;
-      else errorDetail = res.error;
-
-      // el hilo de la sucursal: se crea si es el primer contacto por ese número
+      /* El hilo de la sucursal se resuelve ANTES de mandar (se crea si es el
+         primer contacto por ese número). El worker emite el eco de lo que
+         acabamos de mandar en el mismo tick, y `handleInboundMessage` lo guarda
+         en el hilo de este contacto y este canal: si el hilo no existiera
+         todavía, el eco abriría uno y la fila del seguimiento chocaría contra
+         él por `wa_message_id`. */
       const { data: conv } = await supabase
         .from("conversations")
         .select("id")
@@ -152,6 +153,13 @@ export async function POST(request: Request) {
           .single();
         conversationId = created?.id ?? conversationId;
       }
+
+      const res = await sendBaileysText(channelId, phone, body, {
+        clientRef: `followup:${followup.id}`,
+      });
+      ok = res.ok;
+      if (res.ok) waMessageId = res.data.waMessageId;
+      else errorDetail = res.error;
     } else if (followup.template?.meta_name) {
       /* 2. fallback: plantilla paga por el número madre DE ESA AGENCIA.
          Si esta agencia no tiene Meta conectado falla solo este seguimiento:
@@ -203,30 +211,29 @@ export async function POST(request: Request) {
     }
 
     if (conversationId) {
-      const { data: message } = await supabase
-        .from("messages")
-        .insert({
-          agency_id: followup.agency_id,
-          conversation_id: conversationId,
-          direction: "out",
-          kind: templateName ? "plantilla" : "texto",
-          body,
-          template_name: templateName,
-          is_automated: true,
-          status: ok ? "enviado" : "fallido",
-          wa_message_id: waMessageId,
-          error_detail: errorDetail,
-          /* `template_id` solo cuando salió COMO plantilla (por el número
-             madre): es lo que después deja atribuir el botón que toque el
-             cliente a esta plantilla y no a la última difusión que le llegó.
-             Por la sucursal va como texto libre y no hay botones que volver. */
-          metadata: {
-            followup_id: followup.id,
-            ...(templateName ? { template_id: followup.template_id } : {}),
-          },
-        })
-        .select("id")
-        .single();
+      /* Tolerando el eco (ver `saveOutboundMessage`): si el worker avisó antes
+         de que lleguemos acá, la fila ya existe sin `is_automated` ni el
+         `followup_id`, y se le completan en vez de perder el seguimiento. */
+      const message = await saveOutboundMessage(supabase, {
+        agency_id: followup.agency_id,
+        conversation_id: conversationId,
+        direction: "out",
+        kind: templateName ? "plantilla" : "texto",
+        body,
+        template_name: templateName,
+        is_automated: true,
+        status: ok ? "enviado" : "fallido",
+        wa_message_id: waMessageId,
+        error_detail: errorDetail,
+        /* `template_id` solo cuando salió COMO plantilla (por el número
+           madre): es lo que después deja atribuir el botón que toque el
+           cliente a esta plantilla y no a la última difusión que le llegó.
+           Por la sucursal va como texto libre y no hay botones que volver. */
+        metadata: {
+          followup_id: followup.id,
+          ...(templateName ? { template_id: followup.template_id } : {}),
+        },
+      });
 
       await supabase
         .from("followups")

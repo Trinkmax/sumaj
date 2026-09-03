@@ -1,15 +1,20 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useState, type ReactNode } from "react";
 import {
+  Ban,
   Bot,
   Check,
   CheckCheck,
   CircleAlert,
   Clock,
+  Eye,
   FileText,
+  Forward,
   Image as ImageIcon,
+  MapPin,
   Mic,
+  Smartphone,
   StickyNote,
   Video,
   type LucideIcon,
@@ -140,6 +145,10 @@ function cleanMediaBody(body: string | null): string | null {
 const PLACEHOLDERS = new Set([
   "foto",
   "video",
+  // el worker de las sucursales etiqueta así un gif / un audio sin caption
+  // (`LABELS` de worker/src/inbound.ts); son relleno igual que "Foto"
+  "gif",
+  "audio",
   "mensaje de voz",
   "documento",
   "figurita",
@@ -167,17 +176,126 @@ function reactionsOf(m: MessageRow): string[] {
   return (raw as MessageReaction[]).map((r) => r?.emoji).filter((e): e is string => !!e);
 }
 
+/* ───────────────────────── metadata ─────────────────────────
+   `messages.metadata` es jsonb libre: lo que no entra en las columnas y la
+   burbuja igual quiere saber (borrado, editado, cita, reenvío, ubicación, ver
+   una vez — ver `WorkerEvent.metadata` en lib/wa/worker-contract.ts). Se lee con
+   guards y no con un cast al tipo oficial: las filas viejas traen `{}`, cada
+   canal escribe solo lo suyo, y un dato mal formado tiene que degradar a
+   "no hay etiqueta", nunca a una burbuja rota. */
+
+type BubbleMeta = {
+  /** la persona lo borró para todos: el cuerpo ya no es el original */
+  revoked: boolean;
+  /** ISO; `body` ya es la versión editada */
+  editedAt: string | null;
+  /** el mensaje al que responde, con lo que alcanza para pintar la cita */
+  quoted: { preview: string | null } | null;
+  forwarded: boolean;
+  /** el sistema lo mandó y volvió como eco por el worker (no lo escribió nadie desde el celular) */
+  echo: boolean;
+  /** alguien lo marcó explícito como escrito desde el celular físico (hoy nadie lo hace) */
+  fromPhone: boolean;
+  location: { lat: number; lng: number } | null;
+  /** foto/video para ver una sola vez: el adjunto no se guarda */
+  viewOnce: boolean;
+};
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function stringOf(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v : null;
+}
+
+function numberOf(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function metaOf(m: MessageRow): BubbleMeta {
+  const raw = m.metadata as unknown;
+  const md = isRecord(raw) ? raw : {};
+
+  /* la cita puede venir como {preview} (resumen ya armado) o {text} (lo que
+     dice el citado): se acepta cualquiera de los dos para no depender de
+     quién la escribió */
+  const quotedRaw = isRecord(md.quoted) ? md.quoted : null;
+  const quoted = quotedRaw
+    ? { preview: stringOf(quotedRaw.preview) ?? stringOf(quotedRaw.text) }
+    : null;
+
+  // ídem la ubicación: {lat,lng} o {latitude,longitude}
+  const locRaw = isRecord(md.location) ? md.location : null;
+  const lat = locRaw ? (numberOf(locRaw.lat) ?? numberOf(locRaw.latitude)) : null;
+  const lng = locRaw ? (numberOf(locRaw.lng) ?? numberOf(locRaw.longitude)) : null;
+
+  return {
+    revoked: md.revoked === true,
+    editedAt: stringOf(md.edited_at),
+    quoted,
+    forwarded: md.forwarded === true,
+    echo: md.echo === true,
+    fromPhone: md.from_phone === true,
+    location: lat != null && lng != null ? { lat, lng } : null,
+    viewOnce: md.view_once === true,
+  };
+}
+
+/* ───────────────────────── links ───────────────────────── */
+
+const URL_RE = /((?:https?:\/\/|www\.)[^\s<]+)/gi;
+const URL_TRAIL_RE = /[.,;:!?)]+$/;
+
+/**
+ * El texto con los links clickeables, como en WhatsApp. Las ubicaciones y los
+ * presupuestos viajan como URL en el cuerpo: un link que no se puede tocar es
+ * un mensaje al que el vendedor tiene que copiar y pegar.
+ */
+function Linkified({ text }: { text: string }): ReactNode {
+  const parts = text.split(URL_RE);
+  if (parts.length === 1) return text;
+  return parts.map((part, i) => {
+    if (i % 2 === 0) return part;
+    // el punto final de la oración no es parte del link
+    const trail = part.match(URL_TRAIL_RE)?.[0] ?? "";
+    const url = trail ? part.slice(0, -trail.length) : part;
+    return (
+      <span key={i}>
+        <a
+          href={url.startsWith("http") ? url : `https://${url}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="break-all underline underline-offset-2 hover:opacity-80"
+        >
+          {url}
+        </a>
+        {trail}
+      </span>
+    );
+  });
+}
+
+function hasUrl(text: string | null): boolean {
+  if (!text) return false;
+  URL_RE.lastIndex = 0;
+  return URL_RE.test(text);
+}
+
 /* memo: el tick del reloj (60 s) re-renderiza el hilo pero no las 500 burbujas */
 export const Bubble = memo(function Bubble({
   m,
   tail = false,
   fresh = false,
+  channel,
 }: {
   m: MessageRow;
   /** primera burbuja de una racha del mismo lado → colita estilo WA */
   tail?: boolean;
   /** llegó después de la carga inicial → anima la entrada */
   fresh?: boolean;
+  /** canal del hilo: "desde el celular" solo tiene sentido en WhatsApp */
+  channel?: "whatsapp" | "instagram";
 }) {
   const out = m.direction === "out";
   const isTemplate = m.kind === "plantilla";
@@ -199,11 +317,30 @@ export const Bubble = memo(function Bubble({
   // borde punteado y la figurita no tiene burbuja
   const withTail = tail && !isNote && !isTemplate && !isSticker;
 
+  const md = metaOf(m);
+  /* "desde el celular": salió por el número de la sucursal pero no lo escribió
+     nadie desde la app (sin `sent_by`) ni fue un automático — o sea, alguien
+     contestó desde el teléfono físico. No hay clave en metadata que lo diga:
+     se deduce de las columnas (el guard de `from_phone` queda por si algún día
+     alguien lo marca explícito). Dos excepciones, porque la misma deducción
+     matchea cosas que NO son el celular: los ecos de Instagram (todo lo que
+     manda la cuenta vuelve por webhook sin `sent_by`), así que solo se muestra
+     en WhatsApp; y `metadata.echo`, que es lo que mandó el sistema y el worker
+     devolvió como eco. */
+  const fromPhone =
+    out &&
+    !isNote &&
+    channel !== "instagram" &&
+    !md.echo &&
+    (md.fromPhone || (m.sent_by == null && !m.is_automated));
+  // borrado para todos: el cuerpo y el adjunto ya no cuentan
+  const revoked = md.revoked;
+
   const meta = (
     <span
       className={cn(
         "inline-flex items-center gap-1 align-bottom text-[11px] leading-none text-wa-bubble-meta",
-        media ? "justify-end" : "float-right ml-2 mt-[7px]",
+        media && !revoked ? "justify-end" : "float-right ml-2 mt-[7px]",
       )}
     >
       {m.is_automated && (
@@ -212,9 +349,63 @@ export const Bubble = memo(function Bubble({
           Automático
         </span>
       )}
+      {fromPhone && (
+        <span className="inline-flex items-center gap-0.5 text-[10px]">
+          <Smartphone className="size-3" />
+          desde el celular
+        </span>
+      )}
+      {md.editedAt && !revoked && <span className="text-[10px]">editado</span>}
       <span className="tabular-nums">{fmtTime(m.created_at)}</span>
       {out && !isNote && <StatusTicks status={m.status} />}
     </span>
+  );
+
+  /* Etiquetas de contexto arriba del cuerpo, en el mismo registro que
+     "Plantilla": reenviado y ver una vez son cosas que WhatsApp muestra antes
+     del mensaje, y el vendedor las lee igual. */
+  const contextLabels = !revoked && (md.forwarded || md.viewOnce) && (
+    <span className="flex flex-wrap items-center gap-x-2.5 pt-0.5 text-[11px] italic text-wa-bubble-meta">
+      {md.forwarded && (
+        <span className="inline-flex items-center gap-1">
+          <Forward className="size-3" strokeWidth={2} />
+          Reenviado
+        </span>
+      )}
+      {md.viewOnce && (
+        <span className="inline-flex items-center gap-1">
+          <Eye className="size-3" strokeWidth={2} />
+          Ver una vez
+        </span>
+      )}
+    </span>
+  );
+
+  /* La cita: bloque atenuado con borde a la izquierda, arriba del cuerpo, como
+     en WhatsApp. Sin ir a buscar el mensaje original: el preview alcanza. */
+  const quoteBlock = !revoked && md.quoted && (
+    <div className="my-1 rounded-md border-l-[3px] border-wa-accent-deep bg-wa-ink/5 px-2 py-1">
+      {/* tinta de la burbuja atenuada, no el gris del panel: sobre el verde
+          de la saliente el gris del panel queda en ~2.6:1 en oscuro */}
+      <p className="line-clamp-2 text-[12.5px] leading-[17px] text-wa-bubble-ink/80">
+        {md.quoted.preview ?? "Mensaje"}
+      </p>
+    </div>
+  );
+
+  /* La ubicación normalmente ya viene con el link de maps en el texto. Si el
+     canal solo dejó las coordenadas en metadata, se arma el link igual: una
+     ubicación sin dónde tocar no sirve para nada. */
+  const mapLink = md.location && !hasUrl(m.body) && (
+    <a
+      href={`https://maps.google.com/?q=${md.location.lat},${md.location.lng}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-1 flex w-fit items-center gap-1 text-[13px] underline underline-offset-2 hover:opacity-80"
+    >
+      <MapPin className="size-3.5" strokeWidth={2} />
+      Ver en el mapa
+    </a>
   );
 
   return (
@@ -259,12 +450,25 @@ export const Bubble = memo(function Bubble({
           </span>
         )}
 
-        {file ? (
+        {contextLabels}
+        {quoteBlock}
+
+        {revoked ? (
+          /* Borrado para todos: WhatsApp no deja rastro del contenido y acá
+             tampoco. Queda la burbuja (hubo un mensaje) con el aviso. */
+          <div className="text-[14.2px] leading-[19px] text-wa-bubble-ink">
+            <span className="inline-flex items-center gap-1.5 italic text-wa-bubble-meta">
+              <Ban className="size-3.5 shrink-0" strokeWidth={2} aria-hidden />
+              Se eliminó este mensaje
+            </span>
+            {meta}
+          </div>
+        ) : file ? (
           <>
             <MediaContent media={file} out={out} caption={caption} />
             {caption && !isSticker && (
               <p className="whitespace-pre-wrap break-words pt-1 text-[14.2px] leading-[19px] text-wa-bubble-ink">
-                {caption}
+                <Linkified text={caption} />
               </p>
             )}
             <div className={cn("flex justify-end", isSticker ? "pt-0.5" : "pt-0.5")}>{meta}</div>
@@ -277,14 +481,17 @@ export const Bubble = memo(function Bubble({
             <div className="my-0.5 flex items-center gap-2.5 rounded-md bg-wa-ink/5 px-2.5 py-2">
               <media.icon className="size-4.5 shrink-0 text-wa-ink-soft" strokeWidth={1.9} />
               <span className="whitespace-pre-wrap break-words text-[13.5px] leading-snug text-wa-bubble-ink">
-                {mediaBody ?? media.label}
+                {mediaBody ? <Linkified text={mediaBody} /> : media.label}
               </span>
             </div>
             <div className="flex justify-end pt-0.5">{meta}</div>
           </>
         ) : (
           <div className="text-[14.2px] leading-[19px] text-wa-bubble-ink">
-            <span className="whitespace-pre-wrap break-words">{m.body}</span>
+            <span className="whitespace-pre-wrap break-words">
+              {m.body ? <Linkified text={m.body} /> : null}
+            </span>
+            {mapLink}
             {meta}
           </div>
         )}

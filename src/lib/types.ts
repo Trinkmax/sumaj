@@ -148,6 +148,89 @@ export type MessageMedia = {
 };
 
 /**
+ * Lo que no entra en las columnas de `messages` y la burbuja igual quiere saber
+ * (`messages.metadata`, jsonb). TODO es opcional: la mayoría de los mensajes
+ * llevan `{}` y cada canal escribe solo lo que le corresponde.
+ *
+ * Las claves de WhatsApp las escribe el worker de Baileys (ver
+ * `WorkerEvent.metadata` en `wa/worker-contract.ts`) y también el webhook de la
+ * Cloud API cuando le llega lo mismo. Ubicación, contactos y encuestas no son
+ * un `message_kind` a propósito: entran como texto legible (lo que va al
+ * preview y al aviso del operador) y acá queda el dato crudo por si la burbuja
+ * quiere pintarlos mejor.
+ *
+ * Las claves del final son las que la app ya venía guardando y sirven para
+ * saber POR QUÉ existe un mensaje (respuesta automática, seguimiento,
+ * difusión, plantilla).
+ */
+export type MessageMetadata = {
+  /** tipo crudo con el que vino de WhatsApp (conversation, imageMessage, …) */
+  wa_type?: string;
+  /** vista previa del link que WhatsApp armó para un texto con URL */
+  link_preview?: {
+    url: string;
+    title?: string | null;
+    description?: string | null;
+    /** data: URI de la miniatura (jpeg chico), si vino */
+    thumbnail?: string | null;
+  };
+  location?: {
+    latitude: number;
+    longitude: number;
+    name?: string | null;
+    address?: string | null;
+    /** link que mandó WhatsApp (maps), si vino */
+    url?: string | null;
+    /** ubicación en tiempo real, no un punto fijo */
+    live?: boolean;
+  };
+  /** tarjetas de contacto compartidas (una o varias) */
+  contacts?: {
+    name: string;
+    phones: string[];
+    vcard?: string | null;
+  }[];
+  poll?: {
+    name: string;
+    options: string[];
+    /** cuántas opciones se pueden elegir (null = las que quiera) */
+    selectable?: number | null;
+  };
+  /** el mensaje al que responde: alcanza para pintar la cita sin ir a buscarlo */
+  quoted?: {
+    /** wa_message_id del citado */
+    id: string;
+    fromMe: boolean;
+    text?: string | null;
+  };
+  forwarded?: boolean;
+  /** foto/video para ver una sola vez: el adjunto no se guarda */
+  view_once?: boolean;
+  /** video que se reproduce en loop sin sonido */
+  gif?: boolean;
+  /** video redondo (nota de video) */
+  video_note?: boolean;
+  /** la persona lo borró para todos: el cuerpo ya no es el original */
+  revoked?: boolean;
+  /** ISO; la persona lo editó y `body` es la versión nueva */
+  edited_at?: string;
+
+  /* ── lo que ya escribía la app ── */
+  /** respuesta automática del número madre / de Instagram */
+  auto_reply?: boolean;
+  /** el hilo de WhatsApp nació del DM de Instagram (puente) */
+  from_instagram?: boolean;
+  /** salió como plantilla desde el chat o desde un seguimiento por el madre */
+  template_id?: string;
+  followup_id?: string;
+  broadcast_id?: string;
+  /** botón o ice breaker de Instagram que tocó */
+  instagram_boton?: string;
+  /** lo que dijo Meta palabra por palabra cuando rechazó la plantilla */
+  meta_error?: { code: number | null; raw: string };
+};
+
+/**
  * Reacción a un mensaje (`messages.reactions`). No son mensajes: se pegan a la
  * burbuja del mensaje reaccionado, como en WhatsApp. Hay como mucho una por
  * lado, así que la dirección alcanza como identidad.

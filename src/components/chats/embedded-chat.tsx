@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 import { Bubble, DayChip, groupMessagesIntoDayGroups, startsStreak, WINDOW_MS } from "./bubble";
 import { TemplatePicker } from "./template-picker";
 import { AttachButton, VoiceRecorder } from "./composer-media";
-import type { ActiveLead, MessageRow, TemplateRow } from "./types";
+import { isLidWaId, type ActiveLead, type MessageRow, type TemplateRow } from "./types";
 
 const MAX_COMPOSER_HEIGHT = 132; // ~5 líneas
 
@@ -117,16 +117,34 @@ function sendBlock(
     return null;
   }
 
-  const to = conversation.contact?.phone ?? conversation.wa_id;
+  /* Un hilo que llegó por LID guarda `lid:<lid>` en `wa_id` hasta que WhatsApp
+     comparte el número. Espejo de `resolveRoute` (lib/actions/messages): por la
+     SUCURSAL se le contesta igual —el worker manda al JID `<lid>@lid`
+     (`BaileysSendRequest.toLid`)—; por el número madre no, la Cloud API solo
+     conoce teléfonos. Solo ahí se avisa, ANTES de que escriba, y con el mismo
+     remedio que le da el servidor. */
+  const lidOnly = !conversation.contact?.phone && isLidWaId(conversation.wa_id);
+  const to = conversation.contact?.phone ?? (lidOnly ? null : conversation.wa_id);
 
-  if (!to)
-    return {
-      title: "Sin teléfono",
-      detail: "Este contacto no tiene número cargado, así que el mensaje no puede salir.",
-      link: conversation.contact
-        ? { href: `/clientes/${conversation.contact.id}`, label: "Cargalo en su ficha" }
-        : null,
-    };
+  if (lidOnly && channel?.kind === "baileys") {
+    // se sigue abajo con los chequeos del canal de sucursal
+  } else if (!to)
+    return lidOnly
+      ? {
+          title: "Sin número todavía",
+          detail:
+            "WhatsApp todavía no compartió el teléfono de esta persona: el mensaje no puede salir. Se completa solo cuando vuelva a escribir, o cargalo vos si lo tenés.",
+          link: conversation.contact
+            ? { href: `/clientes/${conversation.contact.id}`, label: "Cargarlo en su ficha" }
+            : null,
+        }
+      : {
+          title: "Sin teléfono",
+          detail: "Este contacto no tiene número cargado, así que el mensaje no puede salir.",
+          link: conversation.contact
+            ? { href: `/clientes/${conversation.contact.id}`, label: "Cargalo en su ficha" }
+            : null,
+        };
 
   if (!channel)
     return {
@@ -835,6 +853,7 @@ export function EmbeddedChat({
                       m={m}
                       tail={startsStreak(g.msgs[i - 1], m)}
                       fresh={!initialIds.has(m.id)}
+                      channel={isInstagram ? "instagram" : "whatsapp"}
                     />
                   ))}
                 </div>

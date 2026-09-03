@@ -12,12 +12,25 @@ import { ChoiceGrid } from "@/components/ui/misc";
 import { normalizePhone, fmtPhone } from "@/lib/format";
 import { CHANNELS } from "@/lib/domain";
 import { createContact } from "@/lib/actions/contacts";
+import { findContactByPhone } from "@/lib/actions/leads";
 import { cn } from "@/lib/utils";
 import type { LeadChannel } from "@/lib/types";
 
-type DedupeContact = { id: string; full_name: string; phone: string | null };
+/** Lo que devuelve `findContactByPhone`: el contacto de la agencia con ese teléfono. */
+type ExistingContact = { id: string; fullName: string };
 
-export function NewContactButton({ contacts }: { contacts: DedupeContact[] }) {
+/* Espera después de la última tecla antes de preguntarle al servidor: el
+   teléfono se escribe de a un dígito y no tiene sentido consultar diez veces. */
+const LOOKUP_DEBOUNCE_MS = 350;
+
+/**
+ * Alta rápida de contacto. El dedupe por teléfono se pregunta al servidor
+ * (`findContactByPhone` → RPC `find_contact_by_phone`, que mira TODA la
+ * agencia) y no contra la lista de la página: el freelance ya no tiene la base
+ * entera, así que compararlo contra lo que ve dejaría pasar duplicados de los
+ * contactos de los demás.
+ */
+export function NewContactButton() {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -28,12 +41,39 @@ export function NewContactButton({ contacts }: { contacts: DedupeContact[] }) {
   const [city, setCity] = React.useState("");
   const [source, setSource] = React.useState<LeadChannel>("manual");
 
-  const duplicate = React.useMemo(() => {
-    const digits = phone.replace(/\D/g, "");
-    if (digits.length < 6) return null;
+  /* Teléfono listo para consultar ("" = todavía muy corto para preguntar).
+     El umbral es el mismo que exige el servidor (`findContactByPhone` y la RPC
+     `find_contact_by_phone` cortan en 8 dígitos ya normalizados): preguntar
+     antes es un viaje al servidor que vuelve vacío sí o sí, y el mismo número
+     que usa new-lead-dialog. */
+  const lookupPhone = React.useMemo(() => {
     const normalized = normalizePhone(phone);
-    return contacts.find((c) => c.phone && c.phone === normalized) ?? null;
-  }, [phone, contacts]);
+    return normalized.length < 8 ? "" : normalized;
+  }, [phone]);
+
+  /* La respuesta se guarda junto con el teléfono que la produjo: si el número
+     cambió mientras viajaba la consulta, el resultado viejo no se muestra
+     (y así el efecto no necesita un setState sincrónico para "limpiar"). */
+  const [lookup, setLookup] = React.useState<{
+    phone: string;
+    match: ExistingContact | null;
+  } | null>(null);
+
+  React.useEffect(() => {
+    if (!lookupPhone) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const res = await findContactByPhone({ phone: lookupPhone });
+      if (cancelled) return;
+      setLookup({ phone: lookupPhone, match: res.ok ? res.data : null });
+    }, LOOKUP_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [lookupPhone]);
+
+  const duplicate = lookup && lookup.phone === lookupPhone ? lookup.match : null;
 
   const reset = () => {
     setName("");
@@ -42,6 +82,7 @@ export function NewContactButton({ contacts }: { contacts: DedupeContact[] }) {
     setCity("");
     setSource("manual");
     setMore(false);
+    setLookup(null);
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -108,15 +149,15 @@ export function NewContactButton({ contacts }: { contacts: DedupeContact[] }) {
               <div className="mt-2 flex animate-fade-in items-start gap-2 rounded-xl border border-tone-amber-line bg-tone-amber-soft px-3 py-2.5 text-[13px] text-tone-amber-text">
                 <TriangleAlert className="mt-0.5 size-4 shrink-0" />
                 <p>
-                  Ya existe{" "}
+                  Ya existe:{" "}
                   <Link
                     href={`/clientes/${duplicate.id}`}
                     className="font-semibold underline underline-offset-2"
                     onClick={() => setOpen(false)}
                   >
-                    {duplicate.full_name}
+                    {duplicate.fullName}
                   </Link>{" "}
-                  con el teléfono {fmtPhone(duplicate.phone)}. Fijate que no sea la misma persona.
+                  con el teléfono {fmtPhone(lookupPhone)}. Fijate que no sea la misma persona.
                 </p>
               </div>
             )}

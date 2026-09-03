@@ -40,9 +40,15 @@ function parseYmd(s: string): Date {
 }
 
 export default async function InicioPage() {
-  const { member, agency, isAdmin } = await requireMember();
+  const { member, agency, isAdmin, isStaff } = await requireMember();
   const supabase = await createClient();
   const mineOnly = !isAdmin;
+  /* El vendedor cuenta lo suyo + el pool de sin asignar, porque lo puede
+     tomar: en el CRM eso NO es "Míos" (que es solo lo asignado a él) sino lo
+     que ve en "Todos". El freelance no tiene pool —la RLS ya le muestra solo
+     lo asignado a él— y el filtro explícito por `assigned_to` va igual para
+     que el KPI no dependa de la policy: dice lo que ve en su CRM. */
+  const mineFilter = isStaff ? `assigned_to.is.null,assigned_to.eq.${member.id}` : null;
 
   const now = new Date();
   const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -61,7 +67,9 @@ export default async function InicioPage() {
     .from("leads")
     .select("id", { count: "exact", head: true })
     .eq("stage", "nuevo");
-  if (mineOnly) newLeadsQ = newLeadsQ.or(`assigned_to.is.null,assigned_to.eq.${member.id}`);
+  if (mineOnly) {
+    newLeadsQ = mineFilter ? newLeadsQ.or(mineFilter) : newLeadsQ.eq("assigned_to", member.id);
+  }
 
   let agendaQ = supabase
     .from("leads")
@@ -85,7 +93,9 @@ export default async function InicioPage() {
   if (mineOnly) overdueQ = overdueQ.eq("assigned_to", member.id);
 
   let funnelQ = supabase.from("leads").select("stage").in("stage", ACTIVE_STAGES);
-  if (mineOnly) funnelQ = funnelQ.or(`assigned_to.is.null,assigned_to.eq.${member.id}`);
+  if (mineOnly) {
+    funnelQ = mineFilter ? funnelQ.or(mineFilter) : funnelQ.eq("assigned_to", member.id);
+  }
 
   const [
     newLeadsRes,

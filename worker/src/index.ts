@@ -5,26 +5,39 @@ import { listBaileysChannels } from "./supabase.js";
 import {
   bootSessions,
   logoutSession,
-  sendText,
   sessionState,
   shutdownAll,
   startSession,
   stopSession,
 } from "./session.js";
+import { failOrphanedSends, parseSendRequest, sendContent } from "./outbound.js";
+import { scheduleOutboxDrain } from "./notify.js";
+import { warnIfContractDiverged } from "./contract-check.js";
+import type { BaileysSendErrorCode } from "./contract.js";
 
 /**
  * Worker multitenant de WhatsApp para viajerOS.
  *
  * Una sesión de Baileys por canal (= por sucursal), todas en el mismo proceso.
- * La app se autentica con el bearer WA_WORKER_TOKEN; el worker le avisa de los
- * mensajes entrantes firmando con WA_WEBHOOK_SECRET.
+ * La app se autentica con el bearer WA_WORKER_TOKEN; el worker le avisa de lo
+ * que pasa en cada número (WorkerEvent, ver contract.ts) firmando con
+ * WA_WEBHOOK_SECRET.
  *
  *   POST /sessions/:id/start    → vincular / reconectar (devuelve estado)
  *   POST /sessions/:id/logout   → desvincular (borra credenciales)
  *   POST /sessions/:id/stop     → cerrar sin desvincular
  *   GET  /sessions/:id/status   → { running, connected, phone }
- *   POST /sessions/:id/send     → { to, text } → { waMessageId }
+ *   POST /sessions/:id/send     → BaileysSendRequest → BaileysSendResponse
+ *                                 (200 resuelto · 202 media aceptada, termina
+ *                                 con un evento send_result)
  *   GET  /health
+ *
+ * Errores de envío: { ok: false, error, code } con el código del contrato. Los
+ * de infraestructura (401, 404, un 500 fuera de /send) van SIN `code`: la app
+ * traduce cada código a un texto para el vendedor ("No se pudo armar el
+ * mensaje"…) y con eso escondía el motivo real —un bearer mal cargado se veía
+ * como un problema del mensaje. Sin `code` la app muestra `error` tal cual,
+ * clasificado como "rechazado", que es lo que es.
  */
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -50,7 +63,8 @@ async function readJson<T>(req: IncomingMessage): Promise<T | null> {
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > 256 * 1024) return null; // un mensaje de WhatsApp nunca pesa esto
+    // El body es JSON chico: los adjuntos viajan como URL firmada, nunca como bytes
+    if (size > 256 * 1024) return null;
     chunks.push(chunk as Buffer);
   }
   if (chunks.length === 0) return null;
@@ -60,6 +74,23 @@ async function readJson<T>(req: IncomingMessage): Promise<T | null> {
     return null;
   }
 }
+
+/**
+ * Código HTTP por código del contrato. Ojo con 502/503/504: la app los lee como
+ * "el worker no está" (src/lib/wa/worker.ts) y culpa al servicio en vez de al
+ * número, así que ningún error de envío puede usar esos.
+ */
+const HTTP_BY_CODE: Record<BaileysSendErrorCode, number> = {
+  bad_request: 400,
+  invalid_media: 400,
+  too_large: 413,
+  no_whatsapp: 422,
+  not_connected: 409,
+  rate_limited: 429,
+  timeout: 500,
+  upload_failed: 500,
+  send_failed: 500,
+};
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -71,17 +102,17 @@ const server = createServer(async (req, res) => {
   }
 
   if (!authorized(req)) {
-    json(res, 401, { ok: false, error: "No autorizado" });
+    json(res, 401, { ok: false, error: "El worker rechazó el bearer: WA_WORKER_TOKEN no coincide entre la app y el worker." });
     return;
   }
 
   // /sessions/:channelId/:action
   if (parts[0] !== "sessions" || parts.length < 3) {
-    json(res, 404, { ok: false, error: "Ruta inexistente" });
+    json(res, 404, { ok: false, error: `El worker no tiene la ruta ${url.pathname}.` });
     return;
   }
 
-  const channelId = parts[1];
+  const channelId = parts[1]!;
   const action = parts[2];
 
   try {
@@ -113,26 +144,34 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && action === "send") {
-      const body = await readJson<{ to?: string; text?: string }>(req);
-      if (!body?.to || !body?.text) {
-        json(res, 400, { ok: false, error: "Faltan `to` o `text`" });
+      const body = await readJson<unknown>(req);
+      const parsed = parseSendRequest(body);
+      if (!parsed.ok) {
+        json(res, 400, { ok: false, error: parsed.error, code: "bad_request" });
         return;
       }
-      const result = await sendText(channelId, body.to, body.text);
-      json(res, 200, { ok: true, ...result });
+      const result = await sendContent(channelId, parsed.req);
+      if (!result.ok) {
+        json(res, HTTP_BY_CODE[result.code], result);
+        return;
+      }
+      json(res, result.pending ? 202 : 200, result);
       return;
     }
 
-    json(res, 404, { ok: false, error: "Ruta inexistente" });
+    json(res, 404, { ok: false, error: `El worker no tiene la ruta ${req.method} ${url.pathname}.` });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error desconocido";
     console.error(`[http] ${req.method} ${url.pathname}:`, message);
-    json(res, 500, { ok: false, error: message });
+    // solo /send lleva código: ahí la app espera uno del contrato para la burbuja
+    json(res, 500, action === "send" ? { ok: false, error: message, code: "send_failed" } : { ok: false, error: message });
   }
 });
 
 server.listen(config.port, async () => {
   console.log(`[worker] escuchando en :${config.port} — app: ${config.appUrl}`);
+  await warnIfContractDiverged();
+  scheduleOutboxDrain();
   const channels = await listBaileysChannels();
   // 'error' es lo que deja un corte transitorio (session.ts: patchChannel con
   // "Se cortó la conexión… Reintentando"). Si el worker reinicia dentro de esa
@@ -149,16 +188,21 @@ server.listen(config.port, async () => {
     console.log(`[worker] levantando ${toBoot.length} sesión(es) ya vinculadas`);
     await bootSessions(toBoot);
   }
+  // Media aceptada con 202 que el proceso anterior no llegó a cerrar: la app
+  // tiene esas filas en "pendiente" y nadie más se lo va a decir.
+  await failOrphanedSends().catch((e) => console.error("[worker] envíos huérfanos:", e instanceof Error ? e.message : e));
 });
 
 /**
  * Apagado ordenado. El orden importa: primero se deja de aceptar pedidos (si no,
  * la app puede pedir un envío mientras las sesiones se están cerrando y recibe
- * un error que no significa nada), después se cierran las sesiones de Baileys.
+ * un error que no significa nada), después shutdownAll espera hasta 8 s a que
+ * terminen las colas (descargas, uploads, avisos) y recién ahí cierra los
+ * sockets de Baileys.
  *
- * El `exit` forzado queda como red: un socket colgado de Baileys puede impedir
- * que el proceso termine solo, y un contenedor que no muere en el plazo del
- * hosting se lleva un SIGKILL en el medio del cierre.
+ * El `exit` forzado a los 10 s queda como red: un socket colgado de Baileys
+ * puede impedir que el proceso termine solo, y un contenedor que no muere en el
+ * plazo del hosting (Railway: 10 s) se lleva un SIGKILL en el medio del cierre.
  */
 let cerrando = false;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

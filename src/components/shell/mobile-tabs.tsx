@@ -20,11 +20,17 @@ const MORE_ITEMS = [
   { href: "/config", label: "Configuración", icon: IconConfig },
 ];
 
-export function MobileTabs() {
+export function MobileTabs({
+  isStaff,
+}: {
+  /** admin o vendedor. Difusiones sale por el número madre de la agencia: el freelance no la ve */
+  isStaff: boolean;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
-  const moreActive = MORE_ITEMS.some((i) => pathname.startsWith(i.href));
+  const moreItems = isStaff ? MORE_ITEMS : MORE_ITEMS.filter((i) => i.href !== "/difusiones");
+  const moreActive = moreItems.some((i) => pathname.startsWith(i.href));
 
   async function logout() {
     const supabase = createClient();
@@ -44,7 +50,7 @@ export function MobileTabs() {
             className="absolute inset-x-3 bottom-[calc(64px+env(safe-area-inset-bottom)+8px)] rounded-3xl border border-line bg-paper p-2 shadow-2xl animate-slide-up"
             onClick={(e) => e.stopPropagation()}
           >
-            {MORE_ITEMS.map((item) => (
+            {moreItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}

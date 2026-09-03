@@ -38,6 +38,7 @@ export function CrmBoard({
   branches,
   meId,
   isAdmin,
+  isStaff,
   agencyId,
   waSend,
   initialView,
@@ -50,6 +51,8 @@ export function CrmBoard({
   branches: BranchOption[];
   meId: string;
   isAdmin: boolean;
+  /** admin o vendedor: ven toda la agencia. El freelance ve solo lo suyo (RLS). */
+  isStaff: boolean;
   agencyId: string;
   /** capacidad real de enviar por WhatsApp (worker / Cloud API) */
   waSend: WaSendCapability;
@@ -65,6 +68,8 @@ export function CrmBoard({
   const [chatConvId, setChatConvId] = React.useState<string | null>(
     initialView === "chats" ? initialConversationId : null,
   );
+  /* El freelance no elige: todo lo que la RLS le deja ver es suyo, así que el
+     Segmented Míos/Todos no le diría nada y el scope queda clavado en "mios". */
   const [scope, setScope] = React.useState<Scope>(isAdmin ? "todos" : "mios");
   const [query, setQuery] = React.useState("");
   const [newOpen, setNewOpen] = React.useState(false);
@@ -157,6 +162,102 @@ export function CrmBoard({
   React.useEffect(() => {
     const supabase = createClient();
 
+    /* Un lead que llega por realtime viene pelado (sin joins): se completa con
+       el contacto, el vendedor y el hilo de WhatsApp de la tarjeta. Lo comparten
+       el INSERT (lead nuevo) y el UPDATE que me lo asigna (lead que ya existía
+       pero recién ahora es mío). */
+    const fetchBoardLead = async (row: Tables<"leads">): Promise<BoardLead | null> => {
+      const [{ data: contact }, assigneeRes, convRes] = await Promise.all([
+        supabase
+          .from("contacts")
+          .select("id, full_name, phone")
+          .eq("id", row.contact_id)
+          .maybeSingle(),
+        row.assigned_to
+          ? supabase
+              .from("members")
+              .select("id, display_name")
+              .eq("id", row.assigned_to)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
+        // un contacto puede tener DOS hilos (número madre y sucursal): la
+        // tarjeta abre el mismo que ensureConversation — la sucursal manda
+        // y, entre iguales, el del último mensaje
+        supabase
+          .from("conversations")
+          .select("id, last_message_preview, last_message_at, last_inbound_at, unread_count")
+          .eq("contact_id", row.contact_id)
+          .eq("channel", "whatsapp")
+          .order("branch_id", { ascending: false, nullsFirst: false })
+          .order("last_message_at", { ascending: false, nullsFirst: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+      if (!contact) return null;
+      return {
+        id: row.id,
+        stage: row.stage,
+        position: Number(row.position),
+        destination: row.destination,
+        origin_channel: row.origin_channel,
+        origin_campaign: row.origin_campaign,
+        next_action_at: row.next_action_at,
+        created_at: row.created_at,
+        pax_adults: row.pax_adults,
+        pax_children: row.pax_children,
+        assigned_to: row.assigned_to,
+        won_file_id: row.won_file_id,
+        contact,
+        assignee: assigneeRes.data,
+        conversation: convRes.data ?? null,
+        _new: true,
+      };
+    };
+
+    /* `toastText` null = entra en silencio: la tarjeta igual avisa con
+       animate-pop (`_new`). */
+    const addLeadFromRow = async (
+      row: Tables<"leads">,
+      toastText: ((name: string) => string) | null,
+    ) => {
+      if (knownIds.current.has(row.id)) return;
+      knownIds.current.add(row.id);
+      const newLead = await fetchBoardLead(row);
+      if (!newLead) {
+        // sin contacto visible no hay tarjeta: se libera el id por si vuelve a entrar
+        knownIds.current.delete(row.id);
+        return;
+      }
+      setLeads((prev) => (prev.some((l) => l.id === row.id) ? prev : [newLead, ...prev]));
+      if (toastText) toast.success(toastText(newLead.contact.full_name));
+    };
+
+    /* Un lead que ya está en pantalla cambió. Solo se sincroniza lo que no se
+       mueve a mano acá (el vendedor): etapa y posición son optimistas y un eco
+       tardío del propio drag las pisaría. Y si el refetch no lo devuelve, dejó
+       de ser visible (lo reasignaron a otro): se saca del tablero en vez de
+       dejar una tarjeta fantasma que ya no abre. */
+    const syncKnownLead = async (row: Tables<"leads">) => {
+      const { data } = await supabase
+        .from("leads")
+        .select("id, assigned_to, assignee:members!leads_assigned_to_fkey(id, display_name)")
+        .eq("id", row.id)
+        .maybeSingle();
+      if (!data) {
+        knownIds.current.delete(row.id);
+        setLeads((prev) => prev.filter((l) => l.id !== row.id));
+        return;
+      }
+      setLeads((prev) => {
+        const current = prev.find((l) => l.id === data.id);
+        // sin cambio de vendedor no hay nada que pintar (evita re-renders por cada drag ajeno)
+        if (!current || current.assigned_to === data.assigned_to) return prev;
+        return prev.map((l) =>
+          l.id === data.id ? { ...l, assigned_to: data.assigned_to, assignee: data.assignee } : l,
+        );
+      });
+    };
+
     // conversación tocada (mensaje nuevo, leída, asignada, etc.)
     const onConversationChange = async (payload: { new: unknown }) => {
       const row = payload.new as Tables<"conversations">;
@@ -196,7 +297,12 @@ export function CrmBoard({
         .select(CONVERSATION_SELECT)
         .eq("id", row.id)
         .maybeSingle();
-      if (!data) return;
+      if (!data) {
+        // el evento llegó pero la fila ya no es mía (la reasignaron): fuera de la bandeja
+        knownConvIds.current.delete(row.id);
+        setConversations((prev) => prev.filter((c) => c.id !== row.id));
+        return;
+      }
       const full = data as unknown as ConversationRow;
       setConversations((prev) => [full, ...prev.filter((c) => c.id !== full.id)]);
     };
@@ -212,64 +318,32 @@ export function CrmBoard({
           table: "leads",
           filter: `agency_id=eq.${agencyId}`,
         },
-        async (payload) => {
+        (payload) => {
+          void addLeadFromRow(payload.new as Tables<"leads">, (name) => `Nuevo lead: ${name}`);
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "leads",
+          filter: `agency_id=eq.${agencyId}`,
+        },
+        (payload) => {
           const row = payload.new as Tables<"leads">;
-          if (knownIds.current.has(row.id)) return;
-          knownIds.current.add(row.id);
-
-          const [{ data: contact }, assigneeRes, convRes] = await Promise.all([
-            supabase
-              .from("contacts")
-              .select("id, full_name, phone")
-              .eq("id", row.contact_id)
-              .maybeSingle(),
-            row.assigned_to
-              ? supabase
-                  .from("members")
-                  .select("id, display_name")
-                  .eq("id", row.assigned_to)
-                  .maybeSingle()
-              : Promise.resolve({ data: null }),
-            // un contacto puede tener DOS hilos (número madre y sucursal): la
-            // tarjeta abre el mismo que ensureConversation — la sucursal manda
-            // y, entre iguales, el del último mensaje
-            supabase
-              .from("conversations")
-              .select(
-                "id, last_message_preview, last_message_at, last_inbound_at, unread_count",
-              )
-              .eq("contact_id", row.contact_id)
-              .eq("channel", "whatsapp")
-              .order("branch_id", { ascending: false, nullsFirst: false })
-              .order("last_message_at", { ascending: false, nullsFirst: false })
-              .limit(1)
-              .maybeSingle(),
-          ]);
-          if (!contact) return;
-
-          const newLead: BoardLead = {
-            id: row.id,
-            stage: row.stage,
-            position: Number(row.position),
-            destination: row.destination,
-            origin_channel: row.origin_channel,
-            origin_campaign: row.origin_campaign,
-            next_action_at: row.next_action_at,
-            created_at: row.created_at,
-            pax_adults: row.pax_adults,
-            pax_children: row.pax_children,
-            assigned_to: row.assigned_to,
-            won_file_id: row.won_file_id,
-            contact,
-            assignee: assigneeRes.data,
-            conversation: convRes.data ?? null,
-            _new: true,
-          };
-
-          setLeads((prev) =>
-            prev.some((l) => l.id === row.id) ? prev : [newLead, ...prev],
-          );
-          toast.success(`Nuevo lead: ${contact.full_name}`);
+          if (knownIds.current.has(row.id)) {
+            void syncKnownLead(row);
+            return;
+          }
+          /* No estaba en pantalla y ahora es mío: para el freelance es la
+             primera vez que la RLS se lo muestra (un admin lo repartió), y para
+             el resto es un lead que todavía no había cargado. Entra como nuevo
+             y la tarjeta hace pop, pero SIN toast: del "te asignaron un lead"
+             ya avisa la campana (notifications-bell) y dos voces por el mismo
+             evento es ruido. */
+          if (row.assigned_to !== meId) return;
+          void addLeadFromRow(row, null);
         },
       )
       .on(
@@ -297,7 +371,7 @@ export function CrmBoard({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [agencyId]);
+  }, [agencyId, meId]);
 
   const patchLead = React.useCallback((id: string, patch: Partial<BoardLead>) => {
     setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch, _new: false } : l)));
@@ -321,7 +395,9 @@ export function CrmBoard({
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     return leads.filter((l) => {
-      if (scope === "mios" && l.assigned_to !== null && l.assigned_to !== meId) return false;
+      // "Míos" es lo asignado a mí, sin el pool de sin asignar: el que quiere
+      // ver lo que nadie tomó todavía pasa a "Todos" (freelance no tiene pool)
+      if (scope === "mios" && l.assigned_to !== meId) return false;
       if (!q) return true;
       return (
         l.contact.full_name.toLowerCase().includes(q) ||
@@ -382,14 +458,17 @@ export function CrmBoard({
         <Segmented<CrmView> value={view} onChange={changeView} options={viewOptions} />
         {view !== "chats" && (
           <>
-            <Segmented<Scope>
-              value={scope}
-              onChange={setScope}
-              options={[
-                { value: "mios", label: "Míos" },
-                { value: "todos", label: "Todos" },
-              ]}
-            />
+            {/* el freelance ve solo lo suyo: un Míos/Todos ahí es un switch sin efecto */}
+            {isStaff && (
+              <Segmented<Scope>
+                value={scope}
+                onChange={setScope}
+                options={[
+                  { value: "mios", label: "Míos" },
+                  { value: "todos", label: "Todos" },
+                ]}
+              />
+            )}
             <div className="relative hidden min-w-[160px] flex-1 sm:block sm:max-w-xs">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-faint" />
               <Input
@@ -417,6 +496,7 @@ export function CrmBoard({
           <KanbanBoard
             leads={filtered}
             totalLeads={leads.length}
+            hasScopeFilter={isStaff}
             onPatch={patchLead}
             onOpenLead={(lead) => setOpenLeadId(lead.id)}
             onNewLead={() => setNewOpen(true)}
@@ -429,6 +509,7 @@ export function CrmBoard({
           agencyId={agencyId}
           meId={meId}
           isAdmin={isAdmin}
+          isStaff={isStaff}
           waSend={waSend}
           members={members}
           branches={branches}

@@ -26,6 +26,7 @@ import { ChatContextPanel } from "@/components/chats/chat-context-panel";
 import {
   CONVERSATION_SELECT,
   conversationOrigin,
+  isLidWaId,
   type BranchOption,
   type ConversationOrigin,
   type ConversationRow,
@@ -51,6 +52,11 @@ type HeaderLead = { id: string; destination: string | null; stage: LeadStage };
 const PANEL_KEY = "crm:chat-panel";
 
 const ASSIGN_ADMIN_HINT = "La asignación la maneja un admin";
+/* Asignar un chat es reasignar el LEAD: el dueño del chat lo deriva un trigger
+   del dueño del lead, así que el select mueve las dos cosas a la vez. */
+const ASSIGN_LEAD_HINT = "Asignar el chat también reasigna el lead del contacto";
+/* Sin lead abierto (hilo de una difusión) no hay nada que reasignar: se asigna el chat y listo. */
+const ASSIGN_CHAT_ONLY_HINT = "Este chat no tiene lead abierto: se asigna solo el chat";
 
 /** Qué implica el canal por el que está abierta la conversación. */
 function originHint(
@@ -100,6 +106,7 @@ export function ChatView({
   agencyId,
   meId,
   isAdmin,
+  isStaff,
   waSend,
   members,
   branches,
@@ -113,6 +120,8 @@ export function ChatView({
   meId: string;
   /** la asignación de vendedores y la derivación son solo de admins */
   isAdmin: boolean;
+  /** admin o vendedor: ven toda la agencia (el freelance solo lo suyo) */
+  isStaff: boolean;
   /** capacidad real de enviar por WhatsApp (worker / Cloud API) */
   waSend: WaSendCapability;
   members: MemberOption[];
@@ -199,6 +208,13 @@ export function ChatView({
     setLead(null);
   }
 
+  /* Espejo del hilo abierto para los handlers async: un await que vuelve
+     después de cambiar de chat no tiene que pisar el estado del nuevo. */
+  const selectedIdRef = React.useRef(selectedId);
+  React.useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
   /* Al seleccionar: refresca la conversación (asignado puede haber cambiado) y
      carga el lead más reciente en etapas activas del contacto. */
   React.useEffect(() => {
@@ -243,7 +259,12 @@ export function ChatView({
     : null;
   const active = conv ?? listRow;
   const contactName = active?.contact?.full_name ?? "Sin nombre";
-  const phone = fmtPhone(active?.contact?.phone ?? active?.wa_id);
+  /* Un hilo que llegó por LID no tiene número todavía: `wa_id` es "lid:…" y
+     formatearlo como teléfono inventaría un +123… que no existe. */
+  const phone =
+    !active?.contact?.phone && isLidWaId(active?.wa_id)
+      ? "sin número todavía"
+      : fmtPhone(active?.contact?.phone ?? active?.wa_id);
   const headerMeta = active?.last_message_at
     ? `últ. mensaje ${fmtRelative(active.last_message_at)}`
     : phone;
@@ -252,6 +273,10 @@ export function ChatView({
     if (!selectedId || !active) return;
     const prev = conv;
     const next = memberId ? (members.find((m) => m.id === memberId) ?? null) : null;
+    /* Congelo el lead ANTES del await: el efecto de selección puede pisarlo
+       mientras el servidor responde, y el toast tiene que hablar de lo que el
+       admin veía cuando eligió. */
+    const hadLead = lead != null;
     // optimista: el select cambia YA
     setConv({
       ...active,
@@ -260,16 +285,42 @@ export function ChatView({
         ? { id: next.id, display_name: next.display_name, avatar_url: null }
         : null,
     });
+    /* Con lead abierto el servidor reasigna el LEAD y el chat lo sigue por
+       trigger; sin lead (hilo de difusión) asigna el chat directo. */
     const res = await assignConversation({
       conversationId: selectedId,
       memberId: memberId || null,
     });
     if (!res.ok) {
-      setConv(prev);
+      // si el admin ya cambió de chat, no pisar el header del hilo nuevo
+      if (selectedIdRef.current === selectedId) setConv(prev);
       toast.error(res.error);
       return;
     }
-    toast.success(next ? `Asignada a ${next.display_name}` : "Quedó sin asignar");
+    /* El toast dice lo que pasó de verdad: "lead y chat" solo cuando había un
+       lead que reasignar; un hilo de difusión no tiene lead y prometerlo era
+       mentir. */
+    toast.success(
+      hadLead
+        ? next
+          ? `Lead y chat asignados a ${next.display_name}`
+          : "Lead y chat quedaron sin asignar"
+        : next
+          ? `Chat asignado a ${next.display_name}`
+          : "Chat sin asignar",
+    );
+    /* Y el header se queda con lo que decidió la base, no con lo optimista:
+       el trigger que copia el dueño del lead puede haber resuelto otro
+       assigned_to que el que elegimos acá. */
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("conversations")
+      .select(CONVERSATION_SELECT)
+      .eq("id", selectedId)
+      .maybeSingle();
+    const fresh = (data ?? null) as unknown as ConversationRow | null;
+    // si mientras tanto cambió de chat, no pisar el estado del otro hilo
+    if (fresh && selectedIdRef.current === selectedId) setConv(fresh);
   }
 
   /* el stepper del panel mueve la etapa → el chip del header acompaña */
@@ -354,7 +405,9 @@ export function ChatView({
 
   /* se ve siempre a quién está asignada; solo el admin la cambia */
   const assignControl = isAdmin ? (
-    assignSelect
+    <Tooltip content={lead ? ASSIGN_LEAD_HINT : ASSIGN_CHAT_ONLY_HINT}>
+      <span className="inline-flex shrink-0">{assignSelect}</span>
+    </Tooltip>
   ) : (
     <Tooltip content={ASSIGN_ADMIN_HINT}>
       <span className="inline-flex shrink-0 cursor-not-allowed">{assignSelect}</span>
@@ -414,6 +467,7 @@ export function ChatView({
               agencyId={agencyId}
               meId={meId}
               isAdmin={isAdmin}
+              isStaff={isStaff}
               branches={branches}
               activeId={selectedId}
               onSelect={select}

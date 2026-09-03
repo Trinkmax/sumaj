@@ -12,6 +12,7 @@ import {
   IdCard,
   PlaneTakeoff,
   Sparkles,
+  UserCheck,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -25,6 +26,8 @@ type Notification = Tables<"notifications">;
 
 const TYPE_META: Record<string, { icon: LucideIcon; tone: string }> = {
   lead_nuevo: { icon: Sparkles, tone: "bg-tone-sky-soft text-tone-sky-text" },
+  // un admin te repartió un lead (con el chat atrás): es lo que más rápido hay que atender
+  lead_asignado: { icon: UserCheck, tone: "bg-brand-tint text-brand-text" },
   seguimiento: { icon: AlarmClock, tone: "bg-tone-amber-soft text-tone-amber-text" },
   documento: { icon: IdCard, tone: "bg-tone-violet-soft text-tone-violet-text" },
   salida: { icon: PlaneTakeoff, tone: "bg-brand-tint text-brand-text" },

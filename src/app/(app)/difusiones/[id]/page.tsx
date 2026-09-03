@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, PencilLine } from "lucide-react";
 import { requireMember } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
@@ -39,7 +39,9 @@ export default async function DifusionPage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   if (!UUID_RE.test(id)) notFound();
 
-  const { isAdmin } = await requireMember();
+  const { isAdmin, isStaff } = await requireMember();
+  // misma regla que la lista: las difusiones son del staff, el freelance no entra ni por URL
+  if (!isStaff) redirect("/inicio");
   const supabase = await createClient();
 
   const [broadcastRes, totalsRes, recipientsRes, muestraRes] = await Promise.all([

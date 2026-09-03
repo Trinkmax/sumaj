@@ -106,7 +106,12 @@ export function useSearchShortcutLabel(): string {
  * Buscador global ⌘K / Ctrl+K. Se monta UNA vez en el layout y escucha
  * cmd+K / ctrl+K y el CustomEvent "viajeros:open-search".
  */
-export function CommandPalette(): React.JSX.Element {
+export function CommandPalette({
+  isStaff = false,
+}: {
+  /** admin o vendedor. Difusiones sale por el número madre de la agencia: el freelance no la ve (mismo filtro que sidebar y mobile-tabs) */
+  isStaff?: boolean;
+} = {}): React.JSX.Element {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
@@ -194,13 +199,21 @@ export function CommandPalette(): React.JSX.Element {
     [close, router],
   );
 
+  /* Lo que el menú no le ofrece tampoco se lo ofrece el buscador: la ruta
+     igual lo rebota, pero un acceso rápido a una pantalla prohibida se lee
+     como un bug. */
+  const quickLinks = React.useMemo(
+    () => (isStaff ? QUICK_LINKS : QUICK_LINKS.filter((l) => l.href !== "/difusiones")),
+    [isStaff],
+  );
+
   /* secciones + lista plana para navegación por teclado */
   const sections = React.useMemo<Section[]>(() => {
     if (!query.trim()) {
       return [
         {
           title: null,
-          items: QUICK_LINKS.map((l) => ({
+          items: quickLinks.map((l) => ({
             key: `quick-${l.href}`,
             href: l.href,
             node: (
@@ -336,7 +349,7 @@ export function CommandPalette(): React.JSX.Element {
       });
 
     return out;
-  }, [query, results]);
+  }, [query, results, quickLinks]);
 
   const flat = React.useMemo(() => sections.flatMap((s) => s.items), [sections]);
 

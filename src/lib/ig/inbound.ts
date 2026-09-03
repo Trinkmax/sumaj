@@ -48,11 +48,14 @@ import { bridgeUrl, createBridgeLink } from "@/lib/ig/bridge";
 import { extractPhone, toE164 } from "@/lib/ig/phone";
 import {
   alertBranchOperators,
+  pickBranchOperator,
+  recordAutoAssignment,
   routeToBranch,
   type InboundMediaSource,
 } from "@/lib/wa/inbound";
 import { storeRemoteMedia, type MessageMedia } from "@/lib/media/store";
-import { hasWorker, sendViaBaileys } from "@/lib/wa/worker";
+import { hasWorker, sendBaileysText } from "@/lib/wa/worker";
+import { saveOutboundMessage } from "@/lib/wa/message-row";
 import { fillTemplate } from "@/lib/domain";
 import { fmtPhone } from "@/lib/format";
 import type { Database } from "@/lib/database.types";
@@ -350,9 +353,13 @@ async function handoffToWhatsapp(
     agencia: input.agencyName,
   });
 
-  const res = await sendViaBaileys(channel.id, input.phone, body);
+  const res = await sendBaileysText(channel.id, input.phone, body, {
+    clientRef: conversationId,
+  });
 
-  await supabase.from("messages").insert({
+  // Tolerando el eco del worker (ver `saveOutboundMessage`): el hilo ya
+  // existe, así que el eco puede ganarle a este insert.
+  await saveOutboundMessage(supabase, {
     agency_id: creds.agencyId,
     conversation_id: conversationId,
     direction: "out",
@@ -491,7 +498,7 @@ export async function handleIgInbound(
   /* 4. el lead */
   const { data: openLead } = await supabase
     .from("leads")
-    .select("id, branch_id")
+    .select("id, branch_id, assigned_to")
     .eq("agency_id", agencyId)
     .eq("contact_id", contact.id)
     .in("stage", ACTIVE_STAGES)
@@ -501,10 +508,14 @@ export async function handleIgInbound(
 
   let leadId = openLead?.id ?? null;
   let branchId = openLead?.branch_id ?? null;
+  let assignedTo = openLead?.assigned_to ?? null;
   let leadIsNew = false;
 
   if (!openLead) {
     branchId = await routeToBranch(supabase, agencyId, msg.text, msg.campaign);
+    // Sucursal sin staff → nace con vendedor, igual que por WhatsApp (la regla
+    // es del negocio, no del canal).
+    const operator = await pickBranchOperator(supabase, agencyId, branchId);
     const { data: createdLead } = await supabase
       .from("leads")
       .insert({
@@ -516,11 +527,21 @@ export async function handleIgInbound(
         origin_campaign: msg.campaign,
         initial_message: msg.text || null,
         position: Date.now(),
+        assigned_to: operator,
       })
       .select("id")
       .single();
     leadId = createdLead?.id ?? null;
     leadIsNew = true;
+    if (createdLead && operator) {
+      assignedTo = operator;
+      await recordAutoAssignment(supabase, {
+        agencyId,
+        leadId: createdLead.id,
+        memberId: operator,
+        contactName: contact.name,
+      });
+    }
   }
 
   if (branchId && !existingConv?.branch_id) {
@@ -546,10 +567,10 @@ export async function handleIgInbound(
 
   if (phone) {
     // Si ese número ya identifica a OTRA ficha de la agencia, no se escribe.
-    // `handleInboundMessage` busca el contacto de un WhatsApp entrante con
-    // `.eq("phone", …).maybeSingle()`: dos fichas con el mismo teléfono hacen
-    // que esa consulta no devuelva ninguna y que cada WhatsApp de esa persona
-    // cree un contacto nuevo. Un dato de más rompe más de lo que arregla.
+    // `handleInboundMessage` busca el contacto de un WhatsApp entrante por
+    // teléfono y con dos fichas iguales se queda con la más antigua: la de
+    // Instagram perdería siempre, y el WhatsApp de esta persona caería en la
+    // otra ficha. Un dato de más rompe más de lo que arregla.
     const { data: enUso } = await supabase
       .from("contacts")
       .select("id")
@@ -628,6 +649,7 @@ export async function handleIgInbound(
         : `Consulta por Instagram: ${snippet(msg.text, 60)}`,
       conversationId,
       leadId,
+      assignedTo,
     });
   }
 

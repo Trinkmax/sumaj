@@ -25,6 +25,10 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: "sin_asignar", label: "Sin asignar" },
 ];
 
+/* El freelance no tiene pool: la RLS le muestra solo lo suyo, así que "Sin
+   asignar" sería una píldora que siempre filtra a cero. */
+const FILTERS_SIN_POOL = FILTERS.filter((f) => f.value !== "sin_asignar");
+
 const ALL_ORIGINS = "todos";
 
 /** "hace 5 min" → "5 min" — hora corta para la fila */
@@ -72,6 +76,7 @@ export function ConversationList({
   agencyId,
   meId,
   isAdmin = false,
+  isStaff = false,
   branches = [],
   activeId,
   hiddenOnMobile = false,
@@ -84,6 +89,8 @@ export function ConversationList({
   meId: string;
   /** el admin quiere ver todo; el vendedor arranca en "Míos" */
   isAdmin?: boolean;
+  /** admin o vendedor (ven toda la agencia). El freelance ve solo lo suyo: sin "Sin asignar" */
+  isStaff?: boolean;
   /** sucursales activas: alimentan el filtro por número (madre / sucursal) */
   branches?: BranchOption[];
   activeId?: string | null;
@@ -96,7 +103,11 @@ export function ConversationList({
 }) {
   const [conversations, setConversations] = useState<ConversationRow[]>(initial);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<Filter>(isAdmin ? "todos" : "mios");
+  /* Default: el admin ve todo, el vendedor arranca en lo suyo, y el freelance
+     también en "Todos" — todo lo que la RLS le deja ver ya es suyo, y arrancar en
+     "Míos" le escondería los chats que todavía no tienen lead. */
+  const [filter, setFilter] = useState<Filter>(isAdmin || !isStaff ? "todos" : "mios");
+  const filters = isStaff ? FILTERS : FILTERS_SIN_POOL;
   const [origin, setOrigin] = useState<string>(ALL_ORIGINS);
 
   /* md+ como store externo (SSR: false = mobile-first) */
@@ -135,7 +146,14 @@ export function ConversationList({
             .select(CONVERSATION_SELECT)
             .eq("id", changed.id)
             .maybeSingle();
-          if (!data) return;
+          if (!data) {
+            /* El evento llegó pero la fila ya no es visible: la reasignaron a
+               otro (el trigger del lead mueve el dueño del chat). Dejarla sería
+               una fila fantasma que al tocarla no abre nada. */
+            const goneId = changed.id;
+            setConversations((prev) => prev.filter((c) => c.id !== goneId));
+            return;
+          }
           const full = data as unknown as ConversationRow;
           setConversations((prev) => [full, ...prev.filter((c) => c.id !== full.id)]);
         },
@@ -151,10 +169,9 @@ export function ConversationList({
     const qDigits = q.replace(/\D/g, "");
     return conversations
       .filter((c) => {
-        // "Míos" = lo mío + lo que no tiene dueño (mismo criterio que el pipeline:
-        // si no incluyera lo sin asignar, el vendedor abriría la bandeja vacía)
-        if (filter === "mios" && c.assigned_to !== null && c.assigned_to !== meId)
-          return false;
+        // "Míos" = lo asignado a mí, sin el pool (mismo criterio que el pipeline:
+        // lo que nadie tomó todavía vive en "Sin asignar", no acá)
+        if (filter === "mios" && c.assigned_to !== meId) return false;
         if (filter === "no_leidas" && (c.unread_count === 0 || c.id === activeId)) return false;
         if (filter === "sin_asignar" && c.assigned_to != null) return false;
         if (origin !== ALL_ORIGINS && conversationOrigin(c)?.key !== origin) return false;
@@ -211,7 +228,7 @@ export function ConversationList({
             role="tablist"
             aria-label="Filtrar chats"
           >
-            {FILTERS.map((f) => {
+            {filters.map((f) => {
               const active = filter === f.value;
               return (
                 <button

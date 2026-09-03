@@ -7,6 +7,8 @@ import {
   succeed,
   fail,
   logActivity,
+  notifyLeadAssigned,
+  reassignLeadCore,
   type ActionResult,
 } from "@/lib/actions/core";
 import {
@@ -18,20 +20,22 @@ import {
   type CloudMediaKind,
 } from "@/lib/wa/cloud";
 import { readMedia } from "@/lib/media/store";
+import { createAdminClient, hasAdminClient } from "@/lib/supabase/admin";
 import { getCloudCreds } from "@/lib/wa/cloud-credentials";
-import { hasWorker, sendViaBaileys } from "@/lib/wa/worker";
+import { hasWorker, sendBaileysText, sendViaBaileys } from "@/lib/wa/worker";
+import {
+  BAILEYS_MAX_BYTES,
+  type BaileysQuoted,
+  type BaileysSendContent,
+} from "@/lib/wa/worker-contract";
+import { saveOutboundMessage, type SentMessage } from "@/lib/wa/message-row";
 import { alertBranchOperators } from "@/lib/wa/inbound";
 import { sendIgText } from "@/lib/ig/graph";
 import { getIgCreds, type ResolvedIgCreds } from "@/lib/ig/credentials";
 import { toE164 } from "@/lib/ig/phone";
 import { fillTemplate, motivoPlantillaNoEnviable } from "@/lib/domain";
 import { fmtPhone } from "@/lib/format";
-import type {
-  MessageKind,
-  MessageMedia,
-  MessageStatus,
-  TablesInsert,
-} from "@/lib/types";
+import type { MessageKind, MessageMedia, MessageMetadata, MessageStatus } from "@/lib/types";
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -42,11 +46,11 @@ const WINDOW_MS = 24 * 60 * 60 * 1000;
  */
 const IG_HUMAN_AGENT_MS = 7 * 24 * 60 * 60 * 1000;
 
-export type SentMessage = { id: string; status: MessageStatus; createdAt: string };
+export type { SentMessage };
 
 /** Todo lo que hace falta para saber por qué canal sale el mensaje. */
 const CONVERSATION_WITH_CHANNEL =
-  "id, channel, last_inbound_at, wa_id, branch_id, contact:contacts(id, full_name, phone), channel_ref:wa_channels(id, kind, status, label)";
+  "id, channel, last_inbound_at, wa_id, branch_id, contact:contacts(id, full_name, phone, wa_lid), channel_ref:wa_channels(id, kind, status, label)";
 
 /* Motivos por los que un mensaje no puede salir. Son textos distintos a
    propósito: el vendedor tiene que saber si le falta el teléfono del cliente,
@@ -54,6 +58,10 @@ const CONVERSATION_WITH_CHANNEL =
    madre — cada caso lo arregla otra persona en otra pantalla. */
 const NO_PHONE =
   "Este contacto no tiene teléfono cargado. Agregalo en su ficha y volvé a escribirle.";
+/* El hilo vino por LID: sabemos quién es pero WhatsApp todavía no compartió el
+   número, y por el número madre (Cloud API) no se puede escribir a un LID. */
+const NO_PHONE_YET =
+  "Todavía no tenemos el número de esta persona: WhatsApp lo comparte cuando vuelve a escribir. Cargalo en su ficha si lo tenés.";
 const NO_CHANNEL =
   "Esta conversación no tiene número de WhatsApp asignado. Vinculá el de la sucursal en Configuración · Sucursales.";
 const BRANCH_UNLINKED =
@@ -69,9 +77,57 @@ const IG_NO_ID =
 
 /** Por dónde sale el mensaje una vez resuelto el canal. */
 type SendRoute =
-  | { via: "baileys"; channelId: string; to: string }
+  | {
+      via: "baileys";
+      channelId: string;
+      /** teléfono (dígitos), o "" cuando el hilo vino por LID sin número */
+      to: string;
+      /** Linked ID, solo cuando no hay teléfono (ver `BaileysSendRequest.toLid`) */
+      toLid: string | null;
+    }
   | { via: "cloud"; creds: CloudCreds; to: string }
   | { via: "instagram"; creds: ResolvedIgCreds; to: string };
+
+/** A quién se le escribe por WhatsApp: teléfono y/o LID, nunca uno disfrazado del otro. */
+type WaTarget = { phone: string | null; lid: string | null };
+
+const PHONE_DIGITS = /^\d{8,15}$/;
+
+/**
+ * El destinatario de WhatsApp de un hilo.
+ *
+ * `conversations.wa_id` es "el id del interlocutor en este canal" y desde que
+ * los chats de sucursal pueden llegar por LID ya no es siempre un teléfono:
+ * puede ser `lid:<dígitos>`, y el contacto puede no tener número todavía.
+ * Antes se hacía `contact.phone ?? wa_id` y el "lid:2462…" viajaba al worker
+ * como si fuera un teléfono. Acá el teléfono es teléfono solo si tiene pinta
+ * de tal, y el LID sale de la ficha (`contacts.wa_lid`, 0032) o del hilo.
+ */
+function waTarget(conversation: {
+  wa_id: string | null;
+  contact: { phone: string | null; wa_lid: string | null } | null;
+}): WaTarget {
+  const asPhone = (v: string | null | undefined) => {
+    const s = v?.trim() ?? "";
+    // el "lid:" se descarta ANTES de sacar lo que no es dígito: si no, el LID
+    // pelado pasa por un teléfono largo
+    if (!s || s.startsWith("lid:")) return null;
+    const digits = s.replace(/\D/g, "");
+    return PHONE_DIGITS.test(digits) ? digits : null;
+  };
+  const waId = conversation.wa_id?.trim() ?? "";
+  const phone = asPhone(conversation.contact?.phone) ?? asPhone(waId);
+  const lid =
+    conversation.contact?.wa_lid?.trim() ||
+    (waId.startsWith("lid:") ? waId.slice(4).replace(/\D/g, "") : "") ||
+    null;
+  return { phone, lid };
+}
+
+/** Lo que va en `wa_id` al abrir un hilo de WhatsApp para esta persona. */
+function waIdFor(target: WaTarget): string | null {
+  return target.phone ?? (target.lid ? `lid:${target.lid}` : null);
+}
 
 /**
  * Resuelve la salida del mensaje o el motivo por el que NO sale.
@@ -92,8 +148,8 @@ async function resolveRoute(
     kind: string;
     status: string;
   } | null,
-  /** teléfono del contacto (WhatsApp) — en Instagram no sirve */
-  to: string | null,
+  /** teléfono y/o LID del contacto (WhatsApp) — en Instagram no sirve */
+  target: WaTarget,
   /** IGSID del interlocutor: `conversations.wa_id` del hilo de Instagram */
   igsid: string | null,
 ): Promise<{ ok: true; route: SendRoute } | { ok: false; error: string }> {
@@ -109,19 +165,32 @@ async function resolveRoute(
     return { ok: true, route: { via: "instagram", creds, to: igsid } };
   }
 
-  if (!to) return { ok: false, error: NO_PHONE };
-
   if (channel.kind === "baileys") {
+    /* Por el número de la sucursal alcanza con el LID: el worker le escribe al
+       JID `<lid>@lid` igual que WhatsApp nos escribió a nosotros. */
+    if (!target.phone && !target.lid) return { ok: false, error: NO_PHONE };
     // El orden importa: primero el estado del número (lo resuelve la agencia
     // escaneando el QR), después la infraestructura (la resuelve el sistema).
     if (channel.status !== "conectado") return { ok: false, error: BRANCH_UNLINKED };
     if (!hasWorker()) return { ok: false, error: WORKER_DOWN };
-    return { ok: true, route: { via: "baileys", channelId: channel.id, to } };
+    return {
+      ok: true,
+      route: {
+        via: "baileys",
+        channelId: channel.id,
+        to: target.phone ?? "",
+        toLid: target.phone ? null : target.lid,
+      },
+    };
   }
+
+  /* La Cloud API solo conoce teléfonos. Un hilo por LID sin número no puede
+     salir por el madre: se dice por qué, que no es lo mismo que "sin teléfono". */
+  if (!target.phone) return { ok: false, error: target.lid ? NO_PHONE_YET : NO_PHONE };
 
   const creds = await getCloudCreds(agencyId);
   if (!creds || !creds.phoneNumberId) return { ok: false, error: MOTHER_MISSING };
-  return { ok: true, route: { via: "cloud", creds, to } };
+  return { ok: true, route: { via: "cloud", creds, to: target.phone } };
 }
 
 /**
@@ -146,45 +215,6 @@ function windowState(
 const IG_WINDOW_CLOSED =
   "Se cerró la ventana de 24 hs de Instagram. Pasá la charla a WhatsApp o esperá a que la persona vuelva a escribir.";
 
-/**
- * Guarda el mensaje que ACABA de salir, tolerando que el webhook nos haya
- * ganado de mano.
- *
- * En Instagram, todo lo que manda la cuenta vuelve como un eco por webhook —
- * incluso lo que mandamos nosotros. Ese eco trae el mismo id de mensaje y
- * `messages.wa_message_id` es único, así que si el eco entra en el instante
- * entre el envío y este insert, el insert choca. Sin esto, el vendedor vería un
- * "no se pudo enviar" en rojo por un mensaje que salió perfecto.
- *
- * Ante el choque se lee la fila que ganó y se sigue como si nada: el mensaje
- * está, que es lo único que importa.
- */
-async function saveOutbound(
-  supabase: Awaited<ReturnType<typeof requireAction>>["supabase"],
-  values: TablesInsert<"messages">,
-): Promise<SentMessage | null> {
-  const { data, error } = await supabase
-    .from("messages")
-    .insert(values)
-    .select("id, status, created_at")
-    .single();
-
-  if (data) return { id: data.id, status: data.status, createdAt: data.created_at };
-
-  // 23505 = unique_violation de wa_message_id: el eco llegó primero.
-  if (error?.code === "23505" && values.wa_message_id) {
-    const { data: winner } = await supabase
-      .from("messages")
-      .select("id, status, created_at")
-      .eq("wa_message_id", values.wa_message_id)
-      .maybeSingle();
-    if (winner) {
-      return { id: winner.id, status: winner.status, createdAt: winner.created_at };
-    }
-  }
-  return null;
-}
-
 /* ───────────────────────────────────────────
    sendMessage — texto libre.
    · Sucursal (Baileys): sale por el número de la sucursal, SIN ventana de
@@ -197,11 +227,39 @@ async function saveOutbound(
 const sendSchema = z.object({
   conversationId: z.string().uuid(),
   body: z.string().trim().min(1).max(4096),
+  /** id (nuestro) del mensaje al que responde, si el composer lo mandó citando */
+  quotedMessageId: z.string().uuid().optional().nullable(),
 });
+
+/**
+ * El mensaje citado, en la forma que entiende el worker: Baileys solo necesita
+ * la key (id externo + si lo mandamos nosotros) y un texto para pintar la cita
+ * del lado del cliente. Se resuelve de la fila y no del cliente, que solo
+ * manda el id: lo que se cita tiene que ser lo que hay en el hilo.
+ *
+ * Null si no se puede citar (no es de este hilo, o nunca tuvo id externo —un
+ * mensaje que falló, una nota interna): se manda sin cita antes que fallar.
+ */
+async function resolveQuoted(
+  supabase: Awaited<ReturnType<typeof requireAction>>["supabase"],
+  conversationId: string,
+  quotedMessageId: string | null | undefined,
+): Promise<BaileysQuoted | null> {
+  if (!quotedMessageId) return null;
+  const { data } = await supabase
+    .from("messages")
+    .select("wa_message_id, direction, body")
+    .eq("id", quotedMessageId)
+    .eq("conversation_id", conversationId)
+    .maybeSingle();
+  if (!data?.wa_message_id) return null;
+  return { id: data.wa_message_id, fromMe: data.direction === "out", text: data.body };
+}
 
 export async function sendMessage(input: {
   conversationId: string;
   body: string;
+  quotedMessageId?: string | null;
 }): Promise<ActionResult<SentMessage>> {
   const parsed = sendSchema.safeParse(input);
   if (!parsed.success) return fail("El mensaje está vacío o es demasiado largo.");
@@ -217,7 +275,7 @@ export async function sendMessage(input: {
   const routed = await resolveRoute(
     agency.id,
     conversation.channel_ref,
-    conversation.contact?.phone ?? conversation.wa_id,
+    waTarget(conversation),
     conversation.wa_id,
   );
   if (!routed.ok) return fail(routed.error);
@@ -247,11 +305,20 @@ export async function sendMessage(input: {
   let status: MessageStatus = "enviado";
   let waMessageId: string | null = null;
   let errorDetail: string | null = null;
+  const metadata: MessageMetadata = {};
 
   if (route.via === "baileys") {
-    const res = await sendViaBaileys(route.channelId, route.to, parsed.data.body);
+    // La cita solo viaja por el número de la sucursal: es lo único que Baileys
+    // sabe hacer con ella. Por los canales de Meta el mensaje sale suelto.
+    const quoted = await resolveQuoted(supabase, conversation.id, parsed.data.quotedMessageId);
+    const res = await sendBaileysText(route.channelId, route.to, parsed.data.body, {
+      toLid: route.toLid,
+      quoted: quoted ?? undefined,
+      clientRef: conversation.id,
+    });
     if (res.ok) {
       waMessageId = res.data.waMessageId;
+      if (quoted) metadata.quoted = quoted;
     } else {
       status = "fallido";
       errorDetail = res.error;
@@ -277,7 +344,7 @@ export async function sendMessage(input: {
   // Acá sí hubo intento real: el rechazo de Meta queda en el hilo con
   // error_detail para poder reclamarlo. El trigger de DB actualiza
   // last_message_at / preview de la conversación.
-  const message = await saveOutbound(supabase, {
+  const message = await saveOutboundMessage(supabase, {
     agency_id: agency.id,
     conversation_id: conversation.id,
     direction: "out",
@@ -287,7 +354,7 @@ export async function sendMessage(input: {
     status,
     wa_message_id: waMessageId,
     error_detail: errorDetail,
-    metadata: {},
+    metadata,
   });
   if (!message) return fail("No se pudo enviar. Revisá tu conexión y probá de nuevo.");
 
@@ -327,10 +394,14 @@ export async function deriveToBranch(input: {
 
   const { data: conversation } = await supabase
     .from("conversations")
-    .select("id, contact_id, wa_id, contact:contacts(id, full_name, phone)")
+    .select("id, contact_id, wa_id, contact:contacts(id, full_name, phone, wa_lid)")
     .eq("id", parsed.data.conversationId)
     .maybeSingle();
   if (!conversation) return fail("No encontramos la conversación.");
+  /* El mismo guard que el envío: el hilo nuevo hereda el teléfono si lo hay y,
+     si no, el LID con prefijo. Copiar `wa_id` crudo dejaba "lid:…" como si
+     fuera un número. */
+  const target = waTarget(conversation);
 
   const { data: branch } = await supabase
     .from("branches")
@@ -374,7 +445,7 @@ export async function deriveToBranch(input: {
         channel: "whatsapp",
         channel_id: channel.id,
         branch_id: branch.id,
-        wa_id: conversation.contact?.phone ?? conversation.wa_id,
+        wa_id: waIdFor(target),
         origin_conversation_id: conversation.id,
       })
       .select("id")
@@ -391,7 +462,7 @@ export async function deriveToBranch(input: {
   /* el lead abierto del contacto se muda con la consulta */
   const { data: lead } = await supabase
     .from("leads")
-    .select("id")
+    .select("id, assigned_to")
     .eq("agency_id", agency.id)
     .eq("contact_id", conversation.contact_id)
     .in("stage", ["nuevo", "contactado", "presupuestado", "negociacion"])
@@ -399,18 +470,44 @@ export async function deriveToBranch(input: {
     .limit(1)
     .maybeSingle();
 
+  let assignedTo = lead?.assigned_to ?? null;
   if (lead) {
     await supabase.from("leads").update({ branch_id: branch.id }).eq("id", lead.id);
+
+    /* Si la sucursal no tiene staff (solo freelances), el lead que cae ahí sin
+       vendedor no lo vería nadie hasta que un admin lo reparta a mano. La base
+       elige al freelance con menos leads abiertos; con staff devuelve null y el
+       staff reparte como siempre. Lo mismo que hace el webhook al crear el lead.
+       `actorId` null a propósito: el admin derivó, pero al vendedor lo eligió
+       la base —el historial tiene que decir "reparto automático", no que el
+       admin lo asignó a dedo. */
+    if (!assignedTo) {
+      const { data: operator } = await supabase.rpc("pick_branch_operator", {
+        p_agency: agency.id,
+        p_branch: branch.id,
+      });
+      if (operator) {
+        const res = await reassignLeadCore(
+          supabase,
+          { agencyId: agency.id, actorId: null },
+          lead.id,
+          operator,
+        );
+        if (res.ok) assignedTo = operator;
+      }
+    }
   }
 
   await alertBranchOperators(supabase, {
     agencyId: agency.id,
     branchId: branch.id,
     contactName: conversation.contact?.full_name ?? "Consulta",
-    contactPhone: conversation.contact?.phone ?? conversation.wa_id,
+    // null si todavía no hay número: el aviso no muestra un "lid:…" como teléfono
+    contactPhone: target.phone,
     text: "Consulta derivada desde el número madre.",
     conversationId: targetId,
     leadId: lead?.id ?? null,
+    assignedTo,
   });
 
   await logActivity({
@@ -462,10 +559,58 @@ const mediaSchema = z.object({
   size: z.number().int().nonnegative().optional(),
   /** nota de voz grabada (Ogg/Opus) en vez de un archivo de audio adjunto */
   voice: z.boolean().optional(),
+  /** figurita (webp): sale sin burbuja; solo por el número de la sucursal */
+  sticker: z.boolean().optional(),
   /** segundos, si los sabemos */
   duration: z.number().nonnegative().optional(),
   caption: z.string().trim().max(1024).optional(),
 });
+
+/**
+ * Cuánto tiempo vive la URL firmada con la que el worker baja el archivo del
+ * bucket. Cinco minutos: el worker la usa apenas la recibe, y una URL que
+ * sobrevive más de lo necesario es una URL que alguien puede reusar.
+ */
+const SIGNED_URL_TTL_S = 300;
+
+/**
+ * El contenido para el worker, según lo que se está mandando. El binario NO
+ * viaja: va el link firmado del bucket y el worker lo streamea a WhatsApp.
+ *
+ * `media.name` decide el nombre con el que el cliente ve un documento; si no
+ * lo hay, se inventa uno con la extensión del MIME para que el celular sepa
+ * con qué abrirlo.
+ */
+function baileysContentFor(
+  url: string,
+  media: MessageMedia,
+  caption: string | null,
+  kind: MessageKind,
+): BaileysSendContent {
+  const size = media.size ?? null;
+  if (media.sticker) return { type: "sticker", url, animated: media.animated === true };
+  if (kind === "imagen") return { type: "image", url, mime: media.mime, caption, size };
+  if (kind === "video") return { type: "video", url, mime: media.mime, caption, size };
+  if (kind === "audio") {
+    return {
+      type: "audio",
+      url,
+      mime: media.mime,
+      voice: media.voice === true,
+      seconds: media.duration ?? null,
+      size,
+    };
+  }
+  const ext = media.mime.split("/")[1]?.split(";")[0] ?? "bin";
+  return {
+    type: "document",
+    url,
+    mime: media.mime,
+    fileName: media.name?.trim() || `archivo.${ext}`,
+    caption,
+    size,
+  };
+}
 
 export async function sendMediaMessage(
   input: z.infer<typeof mediaSchema>,
@@ -491,7 +636,7 @@ export async function sendMediaMessage(
   const routed = await resolveRoute(
     agency.id,
     conversation.channel_ref,
-    conversation.contact?.phone ?? conversation.wa_id,
+    waTarget(conversation),
     conversation.wa_id,
   );
   if (!routed.ok) return fail(routed.error);
@@ -505,13 +650,55 @@ export async function sendMediaMessage(
     size: parsed.data.size ?? null,
     duration: parsed.data.duration ?? null,
     voice: parsed.data.voice === true,
+    ...(parsed.data.sticker ? { sticker: true } : {}),
   };
 
   let status: MessageStatus = "enviado";
   let waMessageId: string | null = null;
   let errorDetail: string | null = null;
 
-  if (route.via === "cloud") {
+  if (route.via === "baileys") {
+    /* Por el número de la sucursal el archivo NO pasa por acá: se firma el path
+       del bucket por unos minutos y el worker lo baja de ahí y lo sube a
+       WhatsApp. Hace falta el cliente con service role porque el bucket es
+       privado y la URL tiene que valer para un proceso que no tiene sesión. */
+    if (!hasAdminClient()) {
+      return fail(
+        "El sistema no puede firmar el archivo para el número de la sucursal (falta la service role). Avisale a quien administra el sistema.",
+      );
+    }
+
+    const { data: signed, error: signError } = await createAdminClient()
+      .storage.from("attachments")
+      .createSignedUrl(parsed.data.path, SIGNED_URL_TTL_S);
+    if (signError || !signed?.signedUrl) {
+      return fail("No pudimos leer el archivo que se subió. Probá de nuevo.");
+    }
+
+    const content = baileysContentFor(signed.signedUrl, media, parsed.data.caption ?? null, kind);
+    // El tamaño lo sabemos antes de molestar al worker: si no entra, no entra.
+    const tope = BAILEYS_MAX_BYTES[content.type as keyof typeof BAILEYS_MAX_BYTES];
+    if (tope && media.size && media.size > tope) {
+      return fail("El archivo es demasiado pesado para WhatsApp.");
+    }
+
+    const res = await sendViaBaileys(route.channelId, {
+      to: route.to,
+      ...(route.toLid ? { toLid: route.toLid } : {}),
+      clientRef: conversation.id,
+      content,
+    });
+    /* Sin fila si el worker dijo que no: la fila existe recién cuando ACEPTÓ.
+       Un archivo rechazado por pesado o por tipo no es un mensaje que salió
+       mal, es uno que no salió, y el vendedor lo ve en el toast. */
+    if (!res.ok) return fail(res.error);
+
+    waMessageId = res.data.waMessageId;
+    // `pending`: el worker lo termina en background y avisa con `send_result`,
+    // que lo lleva a enviado o fallido. Hasta entonces la burbuja muestra el
+    // relojito.
+    if (res.data.pending) status = "pendiente";
+  } else if (route.via === "cloud") {
     const { open } = windowState(conversation.last_inbound_at, false);
     if (!open) {
       return fail(
@@ -544,16 +731,12 @@ export async function sendMediaMessage(
       errorDetail = res.error;
     }
   } else {
-    // Instagram y los números de sucursal todavía no mandan archivos: el envío
-    // falla explícito en vez de guardar una burbuja que el cliente nunca recibió.
-    return fail(
-      route.via === "instagram"
-        ? "Por Instagram todavía se pueden mandar solo mensajes de texto."
-        : "Por el número de la sucursal todavía se pueden mandar solo mensajes de texto.",
-    );
+    // Instagram todavía no manda archivos: el envío falla explícito en vez de
+    // guardar una burbuja que el cliente nunca recibió.
+    return fail("Por Instagram todavía se pueden mandar solo mensajes de texto.");
   }
 
-  const message = await saveOutbound(supabase, {
+  const message = await saveOutboundMessage(supabase, {
     agency_id: agency.id,
     conversation_id: conversation.id,
     direction: "out",
@@ -743,7 +926,7 @@ export async function bridgeToWhatsapp(input: {
         channel_id: target.channelId,
         branch_id: conversation.branch_id,
         wa_id: phone,
-        assigned_to: member.id,
+        // sin assigned_to: lo hereda del lead por trigger (0030)
         // de dónde salió esta charla
         origin_conversation_id: conversation.id,
       })
@@ -757,9 +940,11 @@ export async function bridgeToWhatsapp(input: {
   let sent = false;
   const body = parsed.data.text?.trim();
   if (body) {
-    const res = await sendViaBaileys(target.channelId, phone, body);
+    const res = await sendBaileysText(target.channelId, phone, body, { clientRef: targetId });
     sent = res.ok;
-    await supabase.from("messages").insert({
+    // Tolerando el eco del worker (ver `saveOutboundMessage`): el hilo ya
+    // existe, así que el eco puede ganarle a este insert.
+    await saveOutboundMessage(supabase, {
       agency_id: agency.id,
       conversation_id: targetId,
       direction: "out",
@@ -836,7 +1021,7 @@ export async function sendTemplate(input: {
   const routed = await resolveRoute(
     agency.id,
     conversation.channel_ref,
-    conversation.contact?.phone ?? conversation.wa_id,
+    waTarget(conversation),
     conversation.wa_id,
   );
   if (!routed.ok) return fail(routed.error);
@@ -869,7 +1054,10 @@ export async function sendTemplate(input: {
 
   if (route.via === "baileys") {
     // por el número de la sucursal no hace falta plantilla: va como texto
-    const res = await sendViaBaileys(route.channelId, route.to, body);
+    const res = await sendBaileysText(route.channelId, route.to, body, {
+      toLid: route.toLid,
+      clientRef: conversation.id,
+    });
     if (res.ok) waMessageId = res.data.waMessageId;
     else {
       status = "fallido";
@@ -922,7 +1110,7 @@ export async function sendTemplate(input: {
     }
   }
 
-  const message = await saveOutbound(supabase, {
+  const message = await saveOutboundMessage(supabase, {
     agency_id: agency.id,
     conversation_id: conversation.id,
     direction: "out",
@@ -971,6 +1159,12 @@ export async function markConversationRead(input: {
 
 /* ───────────────────────────────────────────
    assignConversation — asignar / desasignar vendedor
+
+   Desde la 0030 el dueño de un chat es el dueño del LEAD del contacto: un
+   trigger copia `leads.assigned_to` a todas las conversaciones del contacto y
+   pisa cualquier valor que se escriba a mano. Así que "asignar el chat" es
+   reasignar el lead abierto; solo los hilos sin lead (los que abre una
+   difusión, que todavía no son una oportunidad) se asignan directo.
    ─────────────────────────────────────────── */
 
 const assignSchema = z.object({
@@ -984,26 +1178,128 @@ export async function assignConversation(input: {
 }): Promise<ActionResult<null>> {
   const parsed = assignSchema.safeParse(input);
   if (!parsed.success) return fail("Datos inválidos.");
-  const { supabase, agency, isAdmin } = await requireAction();
+  const { supabase, agency, member, isAdmin } = await requireAction();
   // misma regla que reassignLead: repartir el trabajo lo hace un admin
   if (!isAdmin) return fail("La asignación de vendedores la maneja un admin.");
 
+  const { data: conversation } = await supabase
+    .from("conversations")
+    .select("id, contact_id, assigned_to, contact:contacts(full_name)")
+    .eq("id", parsed.data.conversationId)
+    .eq("agency_id", agency.id)
+    .maybeSingle();
+  if (!conversation) return fail("No encontramos la conversación.");
+
+  const { data: lead } = await supabase
+    .from("leads")
+    .select("id")
+    .eq("agency_id", agency.id)
+    .eq("contact_id", conversation.contact_id)
+    .in("stage", ["nuevo", "contactado", "presupuestado", "negociacion"])
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (lead) {
+    // memberId null = desasignar: el lead queda sin vendedor y el trigger
+    // deja el chat en el pool (o con el dueño de un lead cerrado, si lo hay).
+    const res = await reassignLeadCore(
+      supabase,
+      { agencyId: agency.id, actorId: member.id },
+      lead.id,
+      parsed.data.memberId,
+    );
+    if (!res.ok) return fail(res.error);
+    revalidatePath("/crm");
+
+    /* Desasignar con lead abierto: el lead sí quedó sin vendedor, pero el chat
+       lo decide el trigger, y si el contacto tiene un lead CERRADO con
+       vendedor, el chat se queda con ese dueño. Se lee lo que quedó y se avisa
+       con el mismo texto que el camino sin lead, en vez de mostrar "quedó sin
+       asignar" sobre un chat que sigue asignado. */
+    if (parsed.data.memberId === null) {
+      const { data: after } = await supabase
+        .from("conversations")
+        .select("assigned_to")
+        .eq("id", conversation.id)
+        .maybeSingle();
+      const quedo = after?.assigned_to ?? null;
+      if (quedo) {
+        const { data: owner } = await supabase
+          .from("members")
+          .select("display_name")
+          .eq("id", quedo)
+          .maybeSingle();
+        return fail(
+          `El lead quedó sin vendedor, pero este chat sigue a ${owner?.display_name ?? "su vendedor"}: es el dueño del último lead cerrado de este contacto.`,
+        );
+      }
+    }
+    return succeed(null);
+  }
+
   // No confiar en el memberId del cliente: tiene que ser de la misma agencia.
+  let assigneeName: string | null = null;
   if (parsed.data.memberId) {
     const { data: target } = await supabase
       .from("members")
-      .select("id")
+      .select("id, display_name")
       .eq("id", parsed.data.memberId)
       .eq("agency_id", agency.id)
       .maybeSingle();
     if (!target) return fail("Vendedor inválido.");
+    assigneeName = target.display_name;
   }
 
-  const { error } = await supabase
+  /* Sin lead abierto se escribe el chat directo… pero el trigger
+     `conversation_inherit_owner` tiene la última palabra: si el contacto tiene
+     un lead CERRADO con vendedor (el que le vendió sigue siendo su dueño), lo
+     que se escriba acá se pisa con ese dueño. Se lee lo que quedó y, si no es
+     lo que pidió el admin, se le dice por qué en vez de festejar una asignación
+     que no pasó. */
+  const { data: updated, error } = await supabase
     .from("conversations")
     .update({ assigned_to: parsed.data.memberId })
-    .eq("id", parsed.data.conversationId);
+    .eq("id", conversation.id)
+    .select("assigned_to")
+    .maybeSingle();
   if (error) return fail("No se pudo asignar la conversación.");
+
+  const quedo = updated?.assigned_to ?? null;
+  if (quedo !== parsed.data.memberId) {
+    if (quedo) {
+      const { data: owner } = await supabase
+        .from("members")
+        .select("display_name")
+        .eq("id", quedo)
+        .maybeSingle();
+      return fail(
+        `Este chat sigue a ${owner?.display_name ?? "su vendedor"}: es el dueño del último lead de este contacto. Para cambiarlo, reasigná ese lead desde el CRM.`,
+      );
+    }
+    return fail("No se pudo asignar la conversación.");
+  }
+
+  // El mismo aviso que recibe quien se lleva un lead: en la campana no importa
+  // si lo que llegó fue un lead o un hilo de difusión, importa que hay alguien
+  // esperando.
+  if (parsed.data.memberId && parsed.data.memberId !== member.id && quedo !== conversation.assigned_to) {
+    await notifyLeadAssigned(supabase, {
+      agencyId: agency.id,
+      memberId: parsed.data.memberId,
+      leadId: null,
+      conversationId: conversation.id,
+      contactName: conversation.contact?.full_name ?? "Chat",
+    });
+  }
+
+  await logActivity({
+    agencyId: agency.id,
+    memberId: member.id,
+    contactId: conversation.contact_id,
+    type: "sistema",
+    body: assigneeName ? `Chat asignado a ${assigneeName}` : "Chat sin asignar",
+  });
 
   revalidatePath("/crm");
   return succeed(null);

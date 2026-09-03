@@ -10,6 +10,7 @@ import {
   logActivity,
   ensureConversation,
   convertLeadToSale,
+  reassignLeadCore,
   resolveBranchId,
   topPosition,
   type ActionResult,
@@ -46,13 +47,26 @@ function revalidateLead(leadId?: string) {
 }
 
 /* ───────────────────────────────────────────
-   Dedupe de contacto por teléfono (para el dialog Nuevo lead)
+   Dedupe de contacto por teléfono (diálogos de
+   Nuevo lead y Nuevo contacto, con debounce)
    ─────────────────────────────────────────── */
 const findContactSchema = z.object({ phone: z.string().min(6) });
 
+export type ContactMatch = { id: string; fullName: string };
+
+/**
+ * ¿Ya existe alguien con este teléfono en la agencia?
+ *
+ * Va por la RPC `find_contact_by_phone` y no por un SELECT a `contacts`: desde
+ * la 0030 el freelance ve solo sus contactos, así que buscando a mano no
+ * encontraría al cliente de otro vendedor y le crearía un duplicado. La función
+ * mira la agencia entera y devuelve lo mínimo (id + nombre) del teléfono que el
+ * usuario ya escribió: no es una fuga, es la confirmación de que esa persona
+ * existe.
+ */
 export async function findContactByPhone(input: {
   phone: string;
-}): Promise<ActionResult<{ id: string; full_name: string } | null>> {
+}): Promise<ActionResult<ContactMatch | null>> {
   const parsed = findContactSchema.safeParse(input);
   if (!parsed.success) return succeed(null);
   const { supabase } = await requireAction();
@@ -60,13 +74,22 @@ export async function findContactByPhone(input: {
   const phone = normalizePhone(parsed.data.phone);
   if (phone.length < 8) return succeed(null);
 
-  const { data } = await supabase
-    .from("contacts")
-    .select("id, full_name")
-    .eq("phone", phone)
-    .limit(1);
+  const found = await lookupContactByPhone(supabase, phone);
+  return succeed(found);
+}
 
-  return succeed(data && data.length > 0 ? data[0] : null);
+/** El mismo dedupe, para usar adentro de otra action. `phone` ya normalizado. */
+async function lookupContactByPhone(
+  supabase: Awaited<ReturnType<typeof requireAction>>["supabase"],
+  phone: string,
+): Promise<ContactMatch | null> {
+  const { data, error } = await supabase.rpc("find_contact_by_phone", { p_phone: phone });
+  if (error) {
+    console.warn(`[leads] dedupe por teléfono sin respuesta: ${error.message}`);
+    return null;
+  }
+  const row = data?.[0];
+  return row ? { id: row.id, fullName: row.full_name } : null;
 }
 
 /* ───────────────────────────────────────────
@@ -103,19 +126,17 @@ export async function createLead(
 
   const branchId = await resolveBranchId(supabase, agency.id, member.branch_id);
 
-  // contacto: dedupe por teléfono dentro de la agencia (RLS filtra)
+  // contacto: dedupe por teléfono sobre TODA la agencia (la RPC saltea la RLS
+  // a propósito: el freelance no ve el contacto de otro, pero tampoco tiene
+  // que duplicarlo — el lead nuevo cuelga del contacto que ya existe)
   let contactId: string | null = null;
   let existingContact = false;
   const phone = data.phone ? normalizePhone(data.phone) : null;
 
   if (phone && phone.length >= 8) {
-    const { data: found } = await supabase
-      .from("contacts")
-      .select("id")
-      .eq("phone", phone)
-      .limit(1);
-    if (found && found.length > 0) {
-      contactId = found[0].id;
+    const found = await lookupContactByPhone(supabase, phone);
+    if (found) {
+      contactId = found.id;
       existingContact = true;
     }
   }
@@ -383,30 +404,15 @@ export async function reassignLead(
 
   const { leadId, memberId } = parsed.data;
 
-  let assigneeName = "Sin asignar";
-  if (memberId) {
-    const { data: assignee } = await supabase
-      .from("members")
-      .select("display_name")
-      .eq("id", memberId)
-      .maybeSingle();
-    if (!assignee) return fail("Vendedor no encontrado.");
-    assigneeName = assignee.display_name;
-  }
-
-  const { error } = await supabase
-    .from("leads")
-    .update({ assigned_to: memberId })
-    .eq("id", leadId);
-  if (error) return fail("No se pudo reasignar el lead.");
-
-  await logActivity({
-    agencyId: agency.id,
-    memberId: member.id,
+  // update + historial + aviso al asignado; las conversaciones del contacto
+  // pasan al dueño nuevo por trigger (0030), no hay que tocarlas acá
+  const res = await reassignLeadCore(
+    supabase,
+    { agencyId: agency.id, actorId: member.id },
     leadId,
-    type: "sistema",
-    body: memberId ? `Lead asignado a ${assigneeName}` : "Lead sin asignar",
-  });
+    memberId,
+  );
+  if (!res.ok) return res;
 
   revalidateLead(leadId);
   return succeed(null);

@@ -8,7 +8,7 @@ import { CommandPalette } from "@/components/shell/command-palette";
 const ROLE_LABELS = { admin: "Socio/Admin", vendedor: "Vendedor", freelance: "Freelance" };
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const { member, agency } = await requireMember();
+  const { member, agency, isStaff } = await requireMember();
 
   return (
     <div className="flex min-h-dvh">
@@ -18,6 +18,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         memberName={member.display_name}
         roleLabel={ROLE_LABELS[member.role]}
         memberId={member.id}
+        isStaff={isStaff}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -47,8 +48,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </main>
       </div>
 
-      <MobileTabs />
-      <CommandPalette />
+      <MobileTabs isStaff={isStaff} />
+      <CommandPalette isStaff={isStaff} />
     </div>
   );
 }

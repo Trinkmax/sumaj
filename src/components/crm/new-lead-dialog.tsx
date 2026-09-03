@@ -48,7 +48,8 @@ export function NewLeadDialog({
   const [channel, setChannel] = React.useState<LeadChannel>("whatsapp");
   const [assignedTo, setAssignedTo] = React.useState(meId);
   const [notes, setNotes] = React.useState("");
-  const [existing, setExisting] = React.useState<{ id: string; full_name: string } | null>(null);
+  // contacto de la agencia con ese teléfono (findContactByPhone mira toda la base, no solo la mía)
+  const [existing, setExisting] = React.useState<{ id: string; fullName: string } | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [showDetails, setShowDetails] = React.useState(false);
 
@@ -77,7 +78,7 @@ export function NewLeadDialog({
     const res = await findContactByPhone({ phone: normalized });
     if (res.ok) {
       setExisting(res.data);
-      if (res.data && !name.trim()) setName(res.data.full_name);
+      if (res.data && !name.trim()) setName(res.data.fullName);
     }
   }
 
@@ -123,7 +124,7 @@ export function NewLeadDialog({
       budget_currency: null,
       contact: {
         id: res.data.contactId,
-        full_name: existing?.full_name ?? name.trim(),
+        full_name: existing?.fullName ?? name.trim(),
         phone: phone.trim() ? normalizePhone(phone) : null,
       },
       assignee: assignee ? { id: assignee.id, display_name: assignee.display_name } : null,
@@ -133,7 +134,7 @@ export function NewLeadDialog({
 
     toast.success(
       res.data.existingContact
-        ? `Nueva consulta creada para ${existing?.full_name ?? name.trim()}`
+        ? `Nueva consulta creada para ${existing?.fullName ?? name.trim()}`
         : "Lead creado",
     );
     onOpenChange(false);
@@ -198,7 +199,7 @@ export function NewLeadDialog({
           {existing && (
             <p className="-mt-2 flex items-center gap-1.5 text-[12px] text-brand-text animate-fade-in">
               <UserRound className="size-3.5 shrink-0" strokeWidth={2} />
-              Ya existe {existing.full_name} — se le va a crear una nueva consulta.
+              Ya existe {existing.fullName} — se le va a crear una nueva consulta.
             </p>
           )}
 

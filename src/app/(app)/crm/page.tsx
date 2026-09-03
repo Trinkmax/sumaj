@@ -20,7 +20,7 @@ export default async function CrmPage({
   searchParams: Promise<{ vista?: string; c?: string }>;
 }) {
   const { vista, c } = await searchParams;
-  const { member, agency, isAdmin } = await requireMember();
+  const { member, agency, isAdmin, isStaff } = await requireMember();
   const supabase = await createClient();
 
   const [leadsRes, membersRes, convsRes, branchesRes, cloudReady, igReady] = await Promise.all([
@@ -146,6 +146,7 @@ export default async function CrmPage({
       branches={branches}
       meId={member.id}
       isAdmin={isAdmin}
+      isStaff={isStaff}
       agencyId={agency.id}
       waSend={waSend}
       initialView={initialView}

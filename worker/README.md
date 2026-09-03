@@ -21,6 +21,17 @@ El estado de cada sesión (las credenciales del número vinculado) se guarda en
 Postgres, en la tabla `wa_session_state`. Si el worker se reinicia, levanta las
 sesiones solo: **no hay que volver a escanear el QR**.
 
+La misma tabla es la memoria de trabajo del worker, para que un reinicio no
+pierda nada (ver el comentario largo en `src/supabase.ts`):
+
+| Clave | Qué es |
+|---|---|
+| `lid-<lid>` | LID → teléfono. Se escribe por canal y se lee en cualquiera: el LID de una persona es el mismo para todos los números |
+| `outbox-<uuid>` | avisos a la app que no salieron. FIFO por `stashed_at`; se drenan al reconectar y cada 60 s |
+| `inbox-<id>` | entrantes a medio procesar (write-ahead). Se anotan antes de bajar el adjunto y se borran al confirmar; al reconectar se reponen |
+| `pending-<id>` | media aceptada con 202 y sin resultado todavía. Al arrancar, lo que quedó se avisa como fallido |
+| `dead-<uuid>` | lo que se rindió (30 intentos o 24 h): no se reintenta, queda para mirarlo |
+
 ## Configuración
 
 ```bash
@@ -81,6 +92,14 @@ vinculado** con estado en memoria. Dos réplicas levantando la misma sesión se
 pelean por el socket y WhatsApp termina cerrando las dos. Si algún día hace falta
 escalar, se escala por sharding de canales, no por réplicas.
 
+### Apagado
+
+Ante `SIGTERM` el worker deja de aceptar pedidos, espera hasta 8 s a que
+terminen las colas (descargas, uploads, avisos) y recién ahí cierra los
+sockets; a los 10 s sale igual. Lo que no llegó a terminar no se pierde: los
+entrantes a medias (`inbox-`) y la media pendiente (`pending-`) se resuelven en
+el próximo arranque.
+
 ### Cómo saber si está vivo
 
 ```bash
@@ -110,11 +129,44 @@ Todas las rutas piden `Authorization: Bearer $WA_WORKER_TOKEN`.
 | `POST /sessions/:channelId/logout` | desvincula y borra credenciales |
 | `POST /sessions/:channelId/stop` | cierra la sesión sin desvincular |
 | `GET /sessions/:channelId/status` | `{ running, connected, phone }` |
-| `POST /sessions/:channelId/send` | `{ to, text }` → `{ waMessageId }` |
+| `POST /sessions/:channelId/send` | `BaileysSendRequest` → `BaileysSendResponse` (ver abajo) |
 | `GET /health` | sin auth, para el health check del hosting |
 
-Los mensajes entrantes se mandan a `POST {APP_URL}/api/wa/baileys/events`
+Los eventos (mensaje entrante, reacción, borrado, edición, recibo, resultado de
+un envío pendiente: `WorkerEvent`) se mandan a `POST {APP_URL}/api/wa/baileys/events`
 firmados con HMAC-SHA256 en el header `x-wa-signature`.
+
+### `/send`
+
+El body es un `BaileysSendRequest` del contrato (`src/contract.ts`, copia byte
+a byte de `src/lib/wa/worker-contract.ts` de la app):
+
+```jsonc
+{
+  "to": "5493511234567",        // dígitos; puede ir vacío si hay toLid
+  "toLid": "24623097851954",    // el chat llegó por LID sin número: se manda a <lid>@lid
+  "clientRef": "…",             // opcional, solo para logs
+  "quoted": { "id": "…", "fromMe": false, "text": "…" },   // opcional
+  "content": { "type": "text", "text": "Hola" }
+}
+```
+
+`content` es discriminado por `type`: `text`, `image`, `video`, `audio`,
+`document`, `sticker` (con `url` firmada del bucket `attachments`), `location`,
+`contact` y `reaction`. Dos velocidades:
+
+- **texto, reacción, ubicación, contacto** se resuelven en la misma request:
+  `200 { ok, waMessageId, pending: false }`. El worker espera hasta 15 s
+  (la app corta a los 20); un `timeout` **no cancela** el envío en Baileys, el
+  mensaje puede salir igual.
+- **media** se acepta y se termina en background: `202 { ok, waMessageId,
+  pending: true }`, y el resultado llega después como evento `send_result`.
+  Un upload por vez por sesión, 5 minutos de presupuesto desde el 202.
+
+Errores de envío: `{ ok: false, error, code }` con `code` del contrato
+(`not_connected`, `no_whatsapp`, `invalid_media`, `too_large`, `upload_failed`,
+`send_failed`, `timeout`, `rate_limited`, `bad_request`). Un 401 (bearer mal
+cargado) o un 404 van sin `code`, con el motivo en `error`.
 
 ## Aviso honesto
 

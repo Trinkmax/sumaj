@@ -272,7 +272,7 @@ ya aplicada: no se toca, la reemplaza la 0015.
 
 ## Arquitectura
 
-- Multi-tenant por `agency_id` con RLS en todas las tablas (admin/vendedor ven su agencia; freelance solo lo suyo). Columnas de privilegio de `members` protegidas por trigger.
+- Multi-tenant por `agency_id` con RLS en todas las tablas (admin/vendedor ven su agencia; freelance **solo lo suyo, sin pool de "sin asignar"** — migraciones `0030_freelance_solo_lo_suyo` y `0031_pick_branch_operator_public`). El dueño de un contacto es el vendedor de su lead (`leads.assigned_to`, `app.contact_owner`) y chats/mensajes lo heredan: `conversations.assigned_to` lo deriva un trigger, así que asignar un chat es reasignar el lead abierto del contacto (solo los hilos sin lead, los de una difusión, se asignan directo). Dedupe de teléfonos sin ver la base con `find_contact_by_phone`; en una sucursal sin admin ni vendedor el lead nuevo se asigna solo al freelance con menos leads abiertos (`pick_branch_operator`). Columnas de privilegio de `members` protegidas por trigger.
 - Páginas públicas token-gated vía RPC `quote_public`/`receipt_public` (security definer, solo datos de cara al cliente).
 - Convenciones de código en `CONVENTIONS.md` y lenguaje visual en `DESIGN.md`.
 - Migraciones en `supabase/migrations/` (aplicadas al proyecto `zgfquryagiuncndjbmhf`). **No hay seed**: la base es la de producción y arranca vacía — no volver a inyectar datos de ejemplo.
